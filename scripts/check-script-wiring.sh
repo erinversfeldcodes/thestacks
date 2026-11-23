@@ -27,6 +27,25 @@ MODE = sys.argv[1].lstrip("-")
 # Manual tools with no automated caller. Every entry carries its reason; a
 # stale entry (the script gained a caller, or vanished) fails the gate.
 ALLOWLIST = {
+    "scripts/characterise/drive-cost-burst.py": (
+        "The direct-Modal cost-burst driver — the missing half of the cost loop's tooling "
+        "(packed + spaced GPU bursts that price the scaledown window). Deliberately manual: it "
+        "spends real Modal GPU time and its output is a cost measurement a human reads when "
+        "choosing the window, not a pass/fail; it is the entry point that drives "
+        "preview-cost-harness, billing-decompose and scaledown-frontier."
+    ),
+    "scripts/characterise/digit-beam-false-accept.py": (
+        "Measures the false-accept rate of the proposed digit-beam barcode rescue "
+        "(checksum-valid-but-wrong ISBNs from paired OCR confusions). Deliberately manual: a risk "
+        "measurement over the eval corpus whose output is a rate a human weighs against the "
+        "cascade, not a gated threshold, and it reads a corpus CI does not carry."
+    ),
+    "scripts/characterise/visual-recall.py": (
+        "Measures recall@k of the cover/spine embedding index as a candidate generator over a "
+        "reader's own small library. Deliberately manual: an eval needing the characterisation "
+        "corpus and GPU embeddings, whose recall number a human weighs when tuning the cascade "
+        "rather than a pass/fail gate."
+    ),
     "scripts/rotate-db-role-passwords.sh": (
         "An operator-run repair, not a gate. The role migration treats an absent password "
         "as 'create this role NOLOGIN', and a migration runs ONCE — so a migrate that ran "
@@ -61,17 +80,6 @@ ALLOWLIST = {
         "the transform rides in the filename so a synthetic failure is never read as a "
         "real-world one. Deliberately manual: it writes corpus images, and a corpus is forever."
     ),
-    "scripts/characterise/scaledown-frontier.py": (
-        "An analysis, not a gate. It prices the GPU scaledown window against latency across a "
-        "range of arrival rates, because measurement put 98.1% of a lone identification's cost "
-        "in idle GPU rather than inference — so the window is the largest cost lever in the "
-        "system and it is one literal. Deliberately manual: its one decisive input, how often "
-        "readers actually upload, is the one thing neither the eval corpus nor any test can "
-        "measure, so the output is a band and choosing a point on it is a human decision. "
-        "⚠️ Validated against both measured extremes before use (0.378c simulated vs 0.429c "
-        "measured back-to-back; 9.97c vs 9.34c lone) — an earlier version never billed the "
-        "window at all and was 11x optimistic."
-    ),
     "scripts/characterise/ocr-yield.py": (
         "An analysis, not a gate. It reads vision-eval run artefacts and computes what the CPU "
         "cover-text pass READ against what the corpus EXPECTED — the figure the architecture "
@@ -82,17 +90,6 @@ ALLOWLIST = {
         "means 'tesseract did not install' and a 0% that means 'these covers are hard' lead to "
         "opposite decisions, and the first shadow run showed the pass reading social-media "
         "chrome at 0.95 confidence, so a confident zero is exactly the shape to distrust."
-    ),
-    "scripts/characterise/vision-cost-decomposition.py": (
-        "An analysis, not a gate. It reads a directory of vision-eval run artefacts and computes "
-        "the idle-vs-inference split, per-tier latency percentiles, cost per identification and the "
-        "barcode-tier hit rate — the decomposition the vision-architecture decision is argued from. "
-        "⚖️ Deliberately not wired into CI: it answers a question once per measurement campaign, "
-        "not once per PR, and its output is a judgement for a document rather than a pass/fail. "
-        "⚠️ It also needs REPEATED runs to mean anything — measured vlm-cls variance on this corpus "
-        "is 60% median and 6.8x max, so a single-run invocation would report percentiles that are "
-        "noise. It refuses an empty directory and prints n<5 instead of a percentile rather than "
-        "dressing a maximum as a p95."
     ),
     "scripts/characterise/rowless-upload-objects.py": (
         "A one-off, READ-ONLY characterisation of the production bucket, kept as the "

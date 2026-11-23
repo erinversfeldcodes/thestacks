@@ -428,7 +428,7 @@ assert_not_contains "$OUT" "cited issues are live" \
 
 test_case "caller_ci_sh" "scripts/ci.sh wires the residue shape-check into the integration gate"
 # The suite above proves the SCRIPT refuses a malformed ledger; this proves the
-# WIRING that reaches it. Deleting ci.sh's `[ -f plans/residue-ledger.md ]` block
+# WIRING that reaches it. Deleting ci.sh's residue-ledger `[ -f ]` existence guard
 # would make `just ci` skip the shape-check silently and red nothing otherwise.
 CI_SH="$REPO_ROOT/scripts/ci.sh"
 if [[ -f "$CI_SH" ]]; then

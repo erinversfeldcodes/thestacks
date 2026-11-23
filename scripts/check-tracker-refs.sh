@@ -188,7 +188,7 @@ PATTERNS = [
 # a whole-file exemption stops checking everything else in that file, and this
 # one demonstrably leaks — a prose citation rode into `scripts/wave-status.sh`
 # on its path-operation exemption and no gate has seen it since.
-LINE_ALLOWLIST: list[tuple[str, str]] = [
+LINE_ALLOWLIST: list[tuple[str, str, str]] = [
     # The campaign-status tool hardcodes the directory it reads state from, so
     # its test has to write a state file there — a file operation, same as the
     # tool's own, and the one thing the test cannot express another way. Scoped
@@ -196,12 +196,14 @@ LINE_ALLOWLIST: list[tuple[str, str]] = [
     # this cannot admit a citation of a real one, and every other pattern stays
     # live in that file.
     (
+        "",
         "plans/probe-campaign",
         "a throwaway sandbox state file, not a campaign that exists",
     ),
     # ci.sh runs the residue-ledger shape check and comments why; both name the
     # ledger it OPERATES on, a file path, not a citation of a tracked artefact.
     (
+        "scripts/ci.sh",
         "plans/residue-ledger",
         "the ledger ci.sh's shape check reads, a file operation not a citation",
     ),
@@ -310,7 +312,10 @@ for path in tracked:
         continue  # binary or unreadable: nothing to cite a tracker in
 
     for lineno, line in enumerate(lines, start=1):
-        if any(frag in line for frag, _reason in LINE_ALLOWLIST):
+        if any(
+            frag in line and (not scope or path.startswith(scope))
+            for scope, frag, _reason in LINE_ALLOWLIST
+        ):
             continue
         reported = False
         for pattern, label in PATTERNS:
