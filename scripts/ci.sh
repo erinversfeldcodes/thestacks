@@ -218,7 +218,14 @@ fi
 # reds a malformed row on local `just ci`, where the ledger lives; the sweep's own
 # `[ -f ]` guard makes it a no-op when the file is absent.
 if [ -f plans/residue-ledger.md ]; then
-    if ! run_group "campaign: residue-ledger shape" bash scripts/campaign-residue.sh >/dev/null; then
+    echo -e "\n${CYAN}${BOLD}=== campaign: residue-ledger shape ===${RESET}"
+    # Captured, not `run_group ... >/dev/null`: the "!! REFUSING ..." diagnostics
+    # are on stderr; run_group's internal 2>&1|tee merged them to stdout and the
+    # caller's redirect then discarded it, leaving only the summary token so a dev
+    # had to re-run the script by hand to learn which row was malformed. On success
+    # the ledger dump stays suppressed; on failure the exact bad row is shown.
+    if ! _residue_out="$(bash scripts/campaign-residue.sh 2>&1)"; then
+        printf '%s\n' "$_residue_out" | grep -E '^!! |^   ' >&2 || printf '%s\n' "$_residue_out" >&2
         FAILED+=(campaign-residue-shape)
     fi
 fi
