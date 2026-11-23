@@ -11,7 +11,7 @@ import Api
 import Components.VisibilityBadge as VisibilityBadge
 import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h1, h2, li, p, span, text, ul)
-import Html.Attributes exposing (class, disabled, href)
+import Html.Attributes exposing (attribute, class, disabled, href)
 import Html.Events exposing (onClick)
 import Http
 import Navigation.Route as Route exposing (Route(..))
@@ -31,6 +31,11 @@ type alias Model =
     -- page would leave that tail unreachable, which is what it used to be.
     , nextCursor : Maybe String
     , loadingMore : Bool
+
+    -- A later page failed to load. The read pages are kept (a transient failure
+    -- must not erase them), but the reader is told rather than seeing the button
+    -- silently revert as though the feed had simply ended.
+    , loadMoreError : Bool
     }
 
 
@@ -57,6 +62,7 @@ initWithEffect maybeToken =
       , token = maybeToken
       , nextCursor = Nothing
       , loadingMore = False
+      , loadMoreError = False
       }
     , postsEffect maybeToken Nothing
     )
@@ -110,6 +116,7 @@ updateWithEffect msg model =
                         | posts = Success combined
                         , nextCursor = page.nextCursor
                         , loadingMore = False
+                        , loadMoreError = False
                       }
                     , Effect.none
                     )
@@ -118,7 +125,7 @@ updateWithEffect msg model =
                     -- A failed later page must not erase the pages already read.
                     case model.posts of
                         Success existing ->
-                            ( { model | posts = Success existing, loadingMore = False }
+                            ( { model | posts = Success existing, loadingMore = False, loadMoreError = True }
                             , Effect.none
                             )
 
@@ -128,7 +135,7 @@ updateWithEffect msg model =
         LoadMore ->
             case model.nextCursor of
                 Just cursor ->
-                    ( { model | loadingMore = True }
+                    ( { model | loadingMore = True, loadMoreError = False }
                     , postsEffect model.token (Just cursor)
                     )
 
@@ -207,6 +214,12 @@ viewLoadMore model =
                             "Load more"
                         )
                     ]
+                , if model.loadMoreError then
+                    p [ class "error", attribute "role" "alert" ]
+                        [ text "Couldn't load more posts. Please try again." ]
+
+                  else
+                    text ""
                 ]
 
         Nothing ->
