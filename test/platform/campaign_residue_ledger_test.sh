@@ -426,4 +426,18 @@ assert_contains "$OUT" "trigger reconciliation did not run" "the check says it d
 assert_not_contains "$OUT" "cited issues are live" \
     "and does not claim the triggers were checked"
 
+test_case "caller_ci_sh" "scripts/ci.sh wires the residue shape-check into the integration gate"
+# The suite above proves the SCRIPT refuses a malformed ledger; this proves the
+# WIRING that reaches it. Deleting ci.sh's `[ -f plans/residue-ledger.md ]` block
+# would make `just ci` skip the shape-check silently and red nothing otherwise.
+CI_SH="$REPO_ROOT/scripts/ci.sh"
+if [[ -f "$CI_SH" ]]; then
+    assert_contains "$(cat "$CI_SH")" "bash scripts/campaign-residue.sh" \
+        "ci.sh invokes scripts/campaign-residue.sh"
+    assert_contains "$(cat "$CI_SH")" "campaign-residue-shape" \
+        "and records its failure under a named check so just ci surfaces it"
+else
+    _record_fail "scripts/ci.sh not found at $CI_SH"
+fi
+
 summarise

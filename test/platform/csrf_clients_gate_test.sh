@@ -215,4 +215,36 @@ RC=$?
 assert_exit_zero "$RC" "the gate passes over scripts/ and .github/"
 assert_contains "$OUT" "all carry the CSRF proof" "and says what it permitted"
 
+test_case "ci_yml_fails_closed_on_empty_csrf_proof" "every ci.yml write lane refuses an empty CSRF proof"
+# Three CI lanes mint a CSRF proof before logging in (warm, scan, IDOR setup).
+# An empty proof yields a 403 that reads as "cold" or "denied", so each lane
+# must FAIL CLOSED rather than proceed over an unproven request — the IDOR lane
+# would otherwise report an unprotected stack as "blocked". These guards were
+# untested: deleting one lets its lane run with no proof and name the wrong cause.
+if [[ -f "$CI_YML" ]]; then
+    GUARDS="$(grep -cE '\-z "\$\{(CSRF_PROOF|csrf_proof)\}"' "$CI_YML")"
+    if [[ "${GUARDS:-0}" -ge 3 ]]; then
+        _record_pass "ci.yml carries $GUARDS empty-CSRF-proof fail-closed guards (>=3)"
+    else
+        _record_fail "ci.yml carries only ${GUARDS:-0} empty-CSRF-proof guards; expected >=3"
+    fi
+    assert_contains "$(cat "$CI_YML")" "no stacks_csrf cookie" \
+        "each guard names the empty-cookie cause, not a misleading downstream 403"
+else
+    _record_fail "ci.yml not found at $CI_YML"
+fi
+
+test_case "no_ci_file_weakens_the_in_scope_floor" "nothing in tracked CI/lint config sets CSRF_MIN_IN_SCOPE"
+# check-csrf-clients.sh reads CSRF_MIN_IN_SCOPE (default 18) so a test can LOWER
+# it to exercise the gate. That same override, exported from a CI lane, would
+# silently DISABLE the floor (=0). Clamping conflicts with the test's own use,
+# so the real-world close is: no tracked CI/lint file may set it. This reds the
+# moment a future lane assigns CSRF_MIN_IN_SCOPE.
+SETTERS="$(cd "$REPO_ROOT" && git grep -nE '(^|[^A-Za-z_])CSRF_MIN_IN_SCOPE=' -- '.github' 'scripts/ci.sh' 'scripts/lint-*.sh' 2>/dev/null || true)"
+if [[ -z "$SETTERS" ]]; then
+    _record_pass "no tracked CI/lint file assigns CSRF_MIN_IN_SCOPE"
+else
+    _record_fail "a CI/lint file assigns CSRF_MIN_IN_SCOPE (would weaken the floor): $SETTERS"
+fi
+
 summarise
