@@ -16,7 +16,7 @@
 # anywhere fails. That is this repository's dominant defect class — built but
 # not wired — on the one path where the contract itself promises otherwise.
 #
-# WHY A BASELINE AND NOT A REASON PER FIELD. There are 101 (field, serializer)
+# WHY A BASELINE AND NOT A REASON PER FIELD. There are 102 (field, serializer)
 # omissions today and almost all are legitimate narrowing. Demanding a written
 # reason for each would produce 101 shallow reasons, which is worse than none
 # because it reads as considered when it was not — and it is the same cry-wolf
