@@ -100,7 +100,9 @@ def ol_resolves(isbn: str) -> bool | None:
     url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
     req = urllib.request.Request(url, headers={"User-Agent": "stacks-eval-harness"})
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        # Fixed https://openlibrary.org endpoint; only a numeric ISBN candidate is
+        # interpolated, so the dynamic-scheme (file://) risk the rule flags cannot arise.
+        with urllib.request.urlopen(req, timeout=15) as resp:  # nosemgrep
             body = json.load(resp)
         return bool(body)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
