@@ -1819,4 +1819,86 @@ defmodule Stacks.ShelvingTest do
                |> Repo.update()
     end
   end
+
+  describe "active_listing_count is recomputed from truth by the placement trigger" do
+    defp active_count(bookshelf_id), do: Repo.get!(Bookshelf, bookshelf_id).active_listing_count
+
+    test "an active listing raises the count; a non-active placement does not" do
+      shelf = insert(:bookshelf, name: "looking_for_home")
+      assert active_count(shelf.id) == 0
+
+      insert(:placement, bookshelf: shelf, book: insert(:book), listing_status: "active")
+      assert active_count(shelf.id) == 1
+
+      # A second, non-listing placement leaves the active count where it was.
+      insert(:placement, bookshelf: shelf, book: insert(:book))
+      assert active_count(shelf.id) == 1
+    end
+
+    test "deactivating a listing (listing_status → nil) lowers the count" do
+      shelf = insert(:bookshelf, name: "looking_for_home")
+
+      placement =
+        insert(:placement, bookshelf: shelf, book: insert(:book), listing_status: "active")
+
+      assert active_count(shelf.id) == 1
+
+      placement |> Ecto.Changeset.change(listing_status: nil) |> Repo.update!()
+      assert active_count(shelf.id) == 0
+    end
+
+    test "setting removed_at lowers the count, clearing it restores it" do
+      shelf = insert(:bookshelf, name: "looking_for_home")
+
+      placement =
+        insert(:placement, bookshelf: shelf, book: insert(:book), listing_status: "active")
+
+      assert active_count(shelf.id) == 1
+
+      placement =
+        placement |> Ecto.Changeset.change(removed_at: DateTime.utc_now()) |> Repo.update!()
+
+      assert active_count(shelf.id) == 0
+
+      placement |> Ecto.Changeset.change(removed_at: nil) |> Repo.update!()
+      assert active_count(shelf.id) == 1
+    end
+
+    test "moving an active placement to another bookshelf moves the count to the destination" do
+      owner = insert(:user)
+      source = insert(:bookshelf, user: owner, name: "looking_for_home")
+      dest = insert(:bookshelf, user: owner, name: "library")
+
+      placement =
+        insert(:placement,
+          bookshelf: source,
+          book: insert(:book),
+          listing_status: "active"
+        )
+
+      assert active_count(source.id) == 1
+      assert active_count(dest.id) == 0
+
+      dest_shelf = insert(:shelf, bookshelf: dest)
+
+      placement
+      |> Ecto.Changeset.change(bookshelf_id: dest.id, shelf_id: dest_shelf.id)
+      |> Repo.update!()
+
+      assert active_count(source.id) == 0, "the source shelf must lose the moved listing"
+      assert active_count(dest.id) == 1, "the destination shelf must gain it"
+    end
+
+    test "deleting an active placement lowers the count" do
+      shelf = insert(:bookshelf, name: "looking_for_home")
+
+      placement =
+        insert(:placement, bookshelf: shelf, book: insert(:book), listing_status: "active")
+
+      assert active_count(shelf.id) == 1
+
+      Repo.delete!(placement)
+      assert active_count(shelf.id) == 0
+    end
+  end
 end

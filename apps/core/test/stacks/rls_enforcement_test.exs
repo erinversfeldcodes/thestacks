@@ -570,4 +570,70 @@ defmodule Stacks.RlsEnforcementTest do
              "security_invoker must stay false — true makes the view read as stacks_app and return nothing"
     end
   end
+
+  describe "looking_for_home is narrowed to shelves that hold a live listing" do
+    defp lfh_visible_to?(viewer_id, shelf_id) do
+      AppRole.as_app_role(fn ->
+        Scope.with_user(viewer_id, fn ->
+          %{rows: [[n]]} =
+            SQL.query!(
+              Repo,
+              "SELECT count(*) FROM op.bookshelves WHERE id = $1",
+              [Ecto.UUID.dump!(shelf_id)]
+            )
+
+          n
+        end)
+      end)
+    end
+
+    # ⛔ PLANTED-RED. Before the narrowing the arm was `name = 'looking_for_home'`,
+    # which exposed EVERY looking_for_home shelf — empty ones included — to any
+    # reader. Reverting the policy to that width makes this case fail.
+    test "⛔ an empty looking_for_home shelf is NOT visible to a non-owner" do
+      owner = insert(:user)
+      viewer = insert(:user)
+      shelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+
+      assert lfh_visible_to?(viewer.id, shelf.id) == 0,
+             "an empty looking_for_home shelf must not leak to a non-owner once the arm is narrowed to active_listing_count > 0"
+    end
+
+    # The search-preserving half: a shelf that actually holds a live listing is
+    # exactly what the marketplace/search label surfaces, and must stay visible
+    # to the viewer resolving the owner handle. This must not regress.
+    test "a looking_for_home shelf WITH an active listing IS visible to a non-owner" do
+      owner = insert(:user)
+      viewer = insert(:user)
+      shelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+      insert(:placement, bookshelf: shelf, book: insert(:book), listing_status: "active")
+
+      assert lfh_visible_to?(viewer.id, shelf.id) == 1,
+             "a looking_for_home shelf with a live listing must stay visible — this is the search-preserving arm"
+    end
+
+    test "a removed active listing stops exposing the looking_for_home shelf" do
+      owner = insert(:user)
+      viewer = insert(:user)
+      shelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+
+      placement =
+        insert(:placement, bookshelf: shelf, book: insert(:book), listing_status: "active")
+
+      assert lfh_visible_to?(viewer.id, shelf.id) == 1
+
+      placement |> Ecto.Changeset.change(removed_at: DateTime.utc_now()) |> Repo.update!()
+
+      assert lfh_visible_to?(viewer.id, shelf.id) == 0,
+             "once the only listing is removed the shelf must return to the owner alone"
+    end
+
+    test "the owner still sees their own empty looking_for_home shelf" do
+      owner = insert(:user)
+      shelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+
+      assert lfh_visible_to?(owner.id, shelf.id) == 1,
+             "the owner arm (user_id = op.current_scope()) is unaffected by the narrowing"
+    end
+  end
 end

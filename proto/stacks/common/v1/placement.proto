@@ -282,6 +282,18 @@ message Bookshelf {
 
   // When this bookshelf was last updated.
   google.protobuf.Timestamp updated_at = 7 [json_name = "updated_at"];
+
+  // Denormalised count of this shelf's placements that are an active marketplace
+  // listing (listing_status = 'active' AND removed_at IS NULL — identical to the
+  // op.active_listings view predicate), recomputed from truth by a trigger on
+  // op.bookshelf_placements. DB-only: present so the looking_for_home row-level
+  // policy can narrow to shelves that actually hold a public listing
+  // (name = 'looking_for_home' AND active_listing_count > 0) — an indexable
+  // equality instead of a non-indexable "has an active listing" SubPlan. Never
+  // serialised: no bookshelf wire shape (each a Map.take subset) includes it, and
+  // it is excluded from the warehouse (a derived, non-PII count the warehouse has
+  // no reason to copy).
+  int32 active_listing_count = 8 [json_name = "active_listing_count"];
 }
 
 // Placement represents a book placed on a bookshelf — the canonical DB-backed record.

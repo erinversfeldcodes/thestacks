@@ -588,7 +588,12 @@
       field_overrides: %{
         user_id: %{belongs_to: Stacks.Accounts.User},
         visibility: %{default: "owner"},
-        visibility_group_id: %{ecto_type: :binary_id}
+        visibility_group_id: %{ecto_type: :binary_id},
+        # Denormalised active-listing count, recomputed by a trigger on
+        # op.bookshelf_placements. `null: false, default: 0` so the narrowed
+        # looking_for_home policy predicate (active_listing_count > 0) is always
+        # defined. dbt_exclude keeps this derived count out of the warehouse.
+        active_listing_count: %{null: false, default: 0, dbt_exclude: true}
       }
     },
     %{

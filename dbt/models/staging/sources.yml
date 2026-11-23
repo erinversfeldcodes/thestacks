@@ -109,6 +109,8 @@ sources:
             description: Row creation timestamp (UTC).
           - name: updated_at
             description: Last modification timestamp (UTC).
+          - name: active_listing_count
+            description: Denormalised count of this shelf's placements that are an active marketplace listing (listing_status = 'active' AND removed_at IS NULL), maintained by a trigger on bookshelf_placements. Present in the DB but deliberately EXCLUDED from the staging model — a derived operational counter the warehouse has no reason to copy.
 
       - name: shelves
         description: Physical horizontal shelves within a bookshelf.
