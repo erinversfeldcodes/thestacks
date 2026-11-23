@@ -10,7 +10,8 @@
 # majority do so on an unhandled Python `FileNotFoundError` for an anchor file,
 # which is fail-closed by ACCIDENT: the moment such a gate's anchor read moves
 # from a direct `open()` to a glob, the traceback disappears and the gate
-# reports a clean pass over nothing. Thirteen gates are in that position today.
+# reports a clean pass over nothing. Thirteen gates are in that position today,
+# and the whole-corpus section at the end of this suite enumerates them.
 #
 # Three real defects were found by running that probe, and this suite pins their
 # fixes:
@@ -38,8 +39,20 @@
 # but it derives `REPO_ROOT` from `BASH_SOURCE`, so it always `cd`s into the
 # real repository and the probe never reached it. Its exit 0 was a correct pass
 # over the real specs. Four gates derive `REPO_ROOT` that way and are out of
-# the probe's reach by construction — a clean result from this probe says
-# nothing about them.
+# the `run_starved` probe's reach by construction — a clean result from THAT
+# probe says nothing about them.
+#
+# ⬛ THE WHOLE-CORPUS SECTION AT THE END CLOSES THAT GAP. The three named cases
+# below pin specific fixes with their own mechanisms; past them, a loop starves
+# EVERY `scripts/check-*.sh` via the sandbox-copy mechanism the licences case
+# uses — copy the gate into an otherwise-empty `scripts/` and run it there, with
+# `git` shadowed. That reaches a gate whether it roots itself on `git rev-parse`
+# (REPO_ROOT falls to ".") or on `BASH_SOURCE`/`dirname "$0"` (its parent is the
+# empty sandbox), so the four BASH_SOURCE gates are no longer out of reach. The
+# invariant the loop holds is that ZERO gates fail OPEN — a gate that exits 0
+# over nothing is a defect and a NEW one reds this suite. The thirteen that fail
+# CLOSED via an unhandled exception are enumerated and pinned there, with the
+# anchor each crashes on and the disposition for the set.
 
 set -uo pipefail
 
@@ -155,5 +168,123 @@ test_case "licenses_gate_reports_how_many_legs_ran" "a partial run says how part
 REAL_LIC="$(cd "$REPO_ROOT" && bash scripts/check-licenses.sh 2>&1)"
 assert_contains "$REAL_LIC" "dependency trees inspected" \
     "the success message states the number of trees actually inspected"
+
+# ══ 4. the WHOLE corpus: no gate may pass over a starved population ══════════
+#
+# The cases above pin three specific gates. This reaches every one, via the
+# sandbox-copy mechanism — copy the gate into an otherwise-empty scripts/ and
+# run it there with `git` shadowed, so both root-resolution styles land in an
+# empty tree. Each gate is classified:
+#
+#   CLEAN  exit!=0, no python traceback  — a deliberate refusal (good).
+#   TRACE  exit!=0, python traceback     — fail-closed by ACCIDENT (ugly but
+#          safe today; see the thirteen below).
+#   OPEN   exit 0 over nothing           — a DEFECT. Must be zero.
+#
+# ⬛ DISPOSITION OF THE THIRTEEN TRACEBACK GATES. Each fails CLOSED (non-zero
+# exit), so none emits a false pass — the traceback-refusal is ACCEPTABLE as it
+# stands, just ugly. But each is FRAGILE: it fails closed only because its
+# anchor read is an unhandled `open()` (twelve) or a `subprocess(check=True)`
+# (one), and the moment that read becomes a glob, or gains a `try/except` that
+# falls through to the success path, the gate would pass over nothing. So the
+# set is PINNED, not converted here (thirteen gate edits, each needing its own
+# planted red, is a separate adoption): the loop reds if ANY gate fails open —
+# catching exactly the glob-ification that would turn one of these fail-open —
+# and reds if this documented set drifts, forcing a conscious decision. A gate
+# that ADOPTS a clean refusal leaves the set and must be dropped from the list
+# (the ratchet toward clean refusals); a NEW traceback gate must be given a
+# clean refusal or added here with its anchor.
+#
+#   gate                                anchor it crashes on (starved)
+#   check-css-contrast.sh               open('frontend/css/main.css')
+#   check-css-values.sh                 open('frontend/css/main.css')
+#   check-css.sh                        open('frontend/css/main.css')
+#   check-dbt-model-drift.sh            open('docs/technical-architecture.md')
+#   check-mapping-truth.sh              open('docs/implementation-mapping.md')
+#   check-oban-queue-drift.sh           open('apps/core/config/config.exs')
+#   check-orphan-classes.sh             open('frontend/css/main.css')
+#   check-phase-scheme.sh               open('docs/implementation-mapping.md')
+#   check-public-route-metering.sh      open('apps/core/lib/core_web/router.ex')
+#   check-route-clients.sh              open('apps/core/lib/core_web/router.ex')
+#   check-route-reachability.sh         open('frontend/src/Main.elm')
+#   check-session-expiry-coverage.sh    open('frontend/src/Api.elm')
+#   check-tracker-refs.sh               subprocess ['git','ls-files','-z'] (check=True)
+EXPECTED_TRACEBACK="
+check-css-contrast.sh
+check-css-values.sh
+check-css.sh
+check-dbt-model-drift.sh
+check-mapping-truth.sh
+check-oban-queue-drift.sh
+check-orphan-classes.sh
+check-phase-scheme.sh
+check-public-route-metering.sh
+check-route-clients.sh
+check-route-reachability.sh
+check-session-expiry-coverage.sh
+check-tracker-refs.sh
+"
+
+# Copy ONE gate into an empty scripts/ and run it there with git shadowed. The
+# `$SANDBOX/bin/git` stub and the empty-tree starve are the same ones the cases
+# above use; only the ROOT differs — here it is the copy's own parent, which
+# starves the BASH_SOURCE/`dirname` gates that `run_starved` leaves in the real
+# repository.
+starve_copy() {
+    local gate="$1" dir
+    dir="$(mktemp -d "$SANDBOX/corpus.XXXXXX")"
+    mkdir -p "$dir/scripts"
+    cp "$REPO_ROOT/scripts/$gate" "$dir/scripts/$gate"
+    STARVED_OUT="$(cd "$dir" && PATH="$SANDBOX/bin:$PATH" timeout 60 bash "scripts/$gate" 2>&1)"
+    STARVED_RC=$?
+    rm -rf "$dir"
+}
+
+sorted_unique() { printf '%s\n' $1 | grep -v '^[[:space:]]*$' | sort -u; }
+
+mapfile -t ALL_GATES < <(cd "$REPO_ROOT" && ls scripts/check-*.sh | sed 's#scripts/##' | sort)
+
+# ⛔ The loop's OWN floor — an empty gate list makes every assertion below
+# vacuous, the exact shape this suite exists to catch. The corpus is ~50; this
+# refuses a glob that returned implausibly few.
+EXPECTED_GATE_FLOOR=45
+test_case "corpus_probe_enumerates_a_plausible_number_of_gates" \
+    "a broken glob must not make the whole-corpus probe pass over nothing"
+if [[ "${#ALL_GATES[@]}" -lt "$EXPECTED_GATE_FLOOR" ]]; then
+    _record_fail "enumerated only ${#ALL_GATES[@]} gate(s) under scripts/check-*.sh (floor $EXPECTED_GATE_FLOOR) — the probe would assert over an empty population. This is a refusal, not a pass."
+else
+    _record_pass "enumerated ${#ALL_GATES[@]} gate(s) to starve"
+fi
+
+open_gates=""
+trace_gates=""
+for g in "${ALL_GATES[@]}"; do
+    starve_copy "$g"
+    if [[ "$STARVED_OUT" == *"Traceback (most recent call last)"* ]]; then
+        trace_gates="$trace_gates $g"
+    elif [[ "$STARVED_RC" -eq 0 ]]; then
+        open_gates="$open_gates $g"
+    fi
+done
+
+test_case "no_gate_fails_open_over_a_starved_population" \
+    "every gate exits non-zero when it has nothing to inspect"
+if [[ -n "${open_gates// /}" ]]; then
+    _record_fail "these gate(s) exited 0 over a starved tree — a fail-open defect:$open_gates. A gate whose population is empty must refuse, not pass; give it an anti-vacuity floor (see scripts/check-gate-floors.sh)."
+else
+    _record_pass "no gate passed over nothing"
+fi
+
+test_case "the_traceback_set_is_exactly_the_documented_thirteen" \
+    "a new accidental traceback — or a gate that adopted a clean refusal — must update the list"
+NEW_TRACE="$(comm -13 <(sorted_unique "$EXPECTED_TRACEBACK") <(sorted_unique "$trace_gates") | tr '\n' ' ')"
+GONE_TRACE="$(comm -23 <(sorted_unique "$EXPECTED_TRACEBACK") <(sorted_unique "$trace_gates") | tr '\n' ' ')"
+if [[ -n "${NEW_TRACE// /}" ]]; then
+    _record_fail "gate(s) now fail closed via an UNDOCUMENTED traceback:${NEW_TRACE% }. Give each a clean refusal, or add it to EXPECTED_TRACEBACK with the anchor it crashes on — an accidental fail-closed is one glob away from fail-open."
+elif [[ -n "${GONE_TRACE// /}" ]]; then
+    _record_fail "documented traceback gate(s) no longer crash:${GONE_TRACE% }. Good — they likely adopted a clean refusal; drop them from EXPECTED_TRACEBACK so the list stays honest."
+else
+    _record_pass "the accidental-traceback set is exactly the thirteen documented"
+fi
 
 summarise

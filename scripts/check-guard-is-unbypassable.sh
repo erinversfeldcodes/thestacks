@@ -106,7 +106,15 @@ SUCCESS_EXIT = re.compile(
 # size of the platform-suite array, so a truncated list cannot run the survivors
 # and still print "all platform suites PASSED". The UNLISTED/MISSING guards there
 # could not catch a shrink; this pins it.
-EXPECTED_GUARDED_SCRIPTS = 25
+#
+# ⚖️ 25 → 27 on 2026-11-23: two anti-vacuity floors landed together.
+# `scripts/check-gate-floors.sh` — a meta-gate asserting every scripts/check-*.sh
+# carries a floor or an allowlist reason — gained `MIN_GATES`, the floor on its own
+# corpus, so a broken glob cannot pass over an empty gate list. And
+# `test/platform/gate_fail_closed_test.sh` gained `EXPECTED_GATE_FLOOR`, the floor on
+# the gate list its whole-corpus starvation probe walks, for the same reason. Both
+# declarations sit above every success exit in their file.
+EXPECTED_GUARDED_SCRIPTS = 27
 
 guarded = {}
 violations = []

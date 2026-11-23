@@ -197,6 +197,12 @@ if has_group platform; then
     if ! run_group "platform: script wiring" bash scripts/check-script-wiring.sh; then
         FAILED+=(platform-script-wiring)
     fi
+    # Every scripts/check-*.sh carries an anti-vacuity floor or an allowlist
+    # reason — the meta-gate that keeps a gate from passing over a population it
+    # never read, with a floor of its own so it cannot do the same.
+    if ! run_group "platform: gate floors" bash scripts/check-gate-floors.sh; then
+        FAILED+=(platform-gate-floors)
+    fi
     # Every CHANGED file of running code maps to a review axis (or an allowlisted
     # tree) — the inverse of STACK_PATHS, so a module reviewed by nobody is a
     # failing diff rather than a silent pass (RL-472/RL-450).

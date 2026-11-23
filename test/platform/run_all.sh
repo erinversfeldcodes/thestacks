@@ -63,6 +63,7 @@ SUITES=(
     "$HERE/deploy_stack_prod_posture_execution_test.sh"
     "$HERE/deploy_stack_prod_guards_execution_test.sh"
     "$HERE/gate_fail_closed_test.sh"
+    "$HERE/check_gate_floors_test.sh"
     "$HERE/dbt_elixir_reference_test.sh"
     "$HERE/protojson_completeness_test.sh"
     "$HERE/breaking_suppressions_test.sh"
@@ -96,7 +97,7 @@ SUITES=(
 # population is the exact shape `check-deployed-posture.sh` records as mandatory,
 # retrofitted there from a real regression. The count changes only when someone
 # adds or removes a suite — a reviewable decision; a silent shrink is not.
-EXPECTED_SUITES=67
+EXPECTED_SUITES=68
 if [[ "${#SUITES[@]}" -ne "$EXPECTED_SUITES" ]]; then
     printf '# SUITE COUNT DRIFT: SUITES holds %d, EXPECTED_SUITES declares %d.\n' \
         "${#SUITES[@]}" "$EXPECTED_SUITES"

@@ -19,23 +19,29 @@ in code by" and check it before relying on it.
 | script | called by | purpose |
 |---|---|---|
 | `scripts/bootstrap-worktree.sh` | `justfile` |  |
-| `scripts/campaign-residue.sh` | `justfile`, `test/platform/campaign_residue_ledger_test.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
+| `scripts/campaign-residue.sh` | `justfile`, `scripts/ci.sh`, `test/platform/campaign_residue_ledger_test.sh` | Residual-findings sweep — the reading aid behind `just campaign-residue`. |
+| `scripts/characterise/billing-decompose.py` | `scripts/characterise/drive-cost-burst.py`, `scripts/characterise/preview-cost-harness.py` | What Modal ACTUALLY billed for a window of vision traffic, per identification. |
+| `scripts/characterise/digit-beam-false-accept.py` | ⚠️ none | Digit-beam false-accept rate: the load-bearing unknown for a barcode rescue. |
+| `scripts/characterise/drive-cost-burst.py` | ⚠️ none | Drive the packed + spaced GPU bursts the cost solve needs, directly at Modal. |
 | `scripts/characterise/make-synthetic-strata.py` | _manual: Corpus construction, run once per batch of new clean originals rather than on a schedule. It derives the mirrored/rotated and deliberately-illegible strata from clean-* photographs — the corpus plan names programmatic transforms as the correct source for exactly those two, since a mirrored barcode is precisely what pyzbar cannot decode and reproducing it by hand adds variance without information. ⬛ A derived image INHERITS its source's identity, so no label can be invented, and the transform rides in the filename so a synthetic failure is never read as a real-world one. Deliberately manual: it writes corpus images, and a corpus is forever._ | Generate the mirrored/rotated and illegible strata from clean originals. |
 | `scripts/characterise/ocr-yield.py` | _manual: An analysis, not a gate. It reads vision-eval run artefacts and computes what the CPU cover-text pass READ against what the corpus EXPECTED — the figure the architecture decision turns on is not 'did OCR read something' but P(OCR yields a title the existing cached title search would resolve). Deliberately manual: the pass runs in shadow, so a run produces evidence rather than a verdict, and a verdict is a human decision. ⛔ It REFUSES to print a yield when any run reports engine='unavailable' — a 0% that means 'tesseract did not install' and a 0% that means 'these covers are hard' lead to opposite decisions, and the first shadow run showed the pass reading social-media chrome at 0.95 confidence, so a confident zero is exactly the shape to distrust._ | What the CPU cover-text pass read, measured against what the VLM answered. |
+| `scripts/characterise/preview-cost-harness.py` | `scripts/characterise/drive-cost-burst.py` | Solve a vision architecture's cost constants from what a preview was BILLED. |
 | `scripts/characterise/rowless-upload-objects.py` | _manual: A one-off, READ-ONLY characterisation of the production bucket, kept as the record of how a deletion decision was measured rather than as a gate. It lists objects and compares them against uploaded_images rows; it calls list_objects_v2 and nothing else, so it cannot write or delete. Wiring it into CI would hit a production bucket on every run to re-answer a question that was already answered and acted on. The STANDING protection for the same property is ImageRetention.storage_consistency_check/0, which reports both populations as a metric on every sweep._ | Read-only characterisation of objects under `uploads/` that no database row points at. |
 | `scripts/characterise/scaledown-frontier.py` | _manual: An analysis, not a gate. It prices the GPU scaledown window against latency across a range of arrival rates, because measurement put 98.1% of a lone identification's cost in idle GPU rather than inference — so the window is the largest cost lever in the system and it is one literal. Deliberately manual: its one decisive input, how often readers actually upload, is the one thing neither the eval corpus nor any test can measure, so the output is a band and choosing a point on it is a human decision. ⚠️ Validated against both measured extremes before use (0.378c simulated vs 0.429c measured back-to-back; 9.97c vs 9.34c lone) — an earlier version never billed the window at all and was 11x optimistic._ | What the GPU scaledown window costs, and what it buys back in latency. |
 | `scripts/characterise/vision-cost-decomposition.py` | _manual: An analysis, not a gate. It reads a directory of vision-eval run artefacts and computes the idle-vs-inference split, per-tier latency percentiles, cost per identification and the barcode-tier hit rate — the decomposition the vision-architecture decision is argued from. ⚖️ Deliberately not wired into CI: it answers a question once per measurement campaign, not once per PR, and its output is a judgement for a document rather than a pass/fail. ⚠️ It also needs REPEATED runs to mean anything — measured vlm-cls variance on this corpus is 60% median and 6.8x max, so a single-run invocation would report percentiles that are noise. It refuses an empty directory and prints n<5 instead of a percentile rather than dressing a maximum as a p95._ | Cost and latency decomposition over repeated vision-eval runs. |
+| `scripts/characterise/visual-recall.py` | ⚠️ none | Recall@k of a cover/spine embedding index over the reader's OWN library. |
 | `scripts/check-api-only-is-skipped.sh` | `scripts/lint-elixir.sh`, `test/platform/api_only_is_skipped_test.sh` | An api_only field must also be skipped by its message's JSON serializer. |
+| `scripts/check-axis-coverage.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `test/platform/axis_coverage_test.sh` | check-axis-coverage.sh — every changed file of RUNNING CODE must belong to a |
 | `scripts/check-book-adapter-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/book_adapter_coverage_test.sh` | A hand-written adapter that is narrower than its payload loses fields in |
 | `scripts/check-breaking-suppressions-are-spent.sh` | `.github/workflows/suppression-expiry.yml`, `scripts/lint-proto.sh`, `test/platform/breaking_suppressions_test.sh`, `test/platform/guard_unbypassable_test.sh` | A `buf breaking` suppression that suppresses nothing must fail the build. |
 | `scripts/check-cli-stub-provenance.sh` | `scripts/lint-elixir.sh`, `test/platform/cli_stub_provenance_test.sh` | A stubbed CLI must say which real tool output it was copied from, and when. |
 | `scripts/check-component-dispatch.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | A component that exposes `update` is a component that expects to be driven. |
 | `scripts/check-csrf-clients.sh` | `scripts/lint-elixir.sh`, `test/platform/csrf_clients_gate_test.sh` | Every non-browser client that writes to our own API carries the CSRF proof. |
 | `scripts/check-csrf-scope.sh` | `scripts/lint-elixir.sh` | The CSRF counter's declared scope must match the router's actual population. |
-| `scripts/check-css-contrast.sh` | `scripts/lint-elm.sh` | ⛔ THE STYLESHEET HAD NO CONTRAST GATE, AND A 3.81:1 TEXT COLOUR SHIPPED. |
-| `scripts/check-css-values.sh` | `scripts/lint-elm.sh` |  |
-| `scripts/check-css.sh` | `scripts/lint-elm.sh`, `test/platform/status_after_substitution_test.sh` |  |
-| `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh` | The documented dbt model counts must match the models on disk. |
+| `scripts/check-css-contrast.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | ⛔ THE STYLESHEET HAD NO CONTRAST GATE, AND A 3.81:1 TEXT COLOUR SHIPPED. |
+| `scripts/check-css-values.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` |  |
+| `scripts/check-css.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh`, `test/platform/status_after_substitution_test.sh` |  |
+| `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh`, `test/platform/gate_fail_closed_test.sh` | The documented dbt model counts must match the models on disk. |
 | `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/decoder_coverage_test.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
 | `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml`, `test/platform/deployed_posture_test.sh` | Asserts, against a real deployed database, the invariants that a per-diff gate |
 | `scripts/check-e2e-mock-routes.sh` | `scripts/lint-elixir.sh` |  |
@@ -44,37 +50,39 @@ in code by" and check it before relying on it.
 | `scripts/check-effect-seam.sh` | `scripts/lint-elm.sh`, `test/platform/effect_seam_gate_test.sh` |  |
 | `scripts/check-enum-coverage.py` | `scripts/lint-proto.sh` | Fail the build when an Elixir consumer stops handling a proto enum |
 | `scripts/check-error-token-spelling.sh` | `scripts/lint-elixir.sh`, `test/platform/error_token_spelling_test.sh` | Two spellings of one error token is a client that matches on one of them. |
+| `scripts/check-exacttext-ratchet.sh` | `scripts/lint-elm.sh`, `test/platform/exacttext_ratchet_test.sh` |  |
+| `scripts/check-gate-floors.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `test/platform/check_gate_floors_test.sh`, `test/platform/gate_fail_closed_test.sh` | Every gate refuses a starved population; so does the one that checks for it. |
 | `scripts/check-guard-is-unbypassable.sh` | `.github/workflows/suppression-expiry.yml`, `scripts/lint-elixir.sh`, `test/platform/guard_unbypassable_test.sh` | A declared-count guard must not sit below a path that exits successfully. |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-idor-response.sh` | `.github/workflows/ci.yml`, `test/platform/idor_gate_test.sh` |  |
 | `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/gate_fail_closed_test.sh` |  |
-| `scripts/check-mapping-truth.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | A story that describes the system as it stands must cite things that exist. |
+| `scripts/check-mapping-truth.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh` | A story that describes the system as it stands must cite things that exist. |
 | `scripts/check-never-serialized.sh` | `scripts/lint-elixir.sh`, `test/platform/never_serialized_test.sh` | A credential must not appear in any JSON serializer, generated or hand-written. |
 | `scripts/check-no-stored-session.sh` | `scripts/lint-elm.sh` | The session is never written to, or read from, browser storage. |
-| `scripts/check-oban-queue-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | The documented Oban queues must be the queues that exist. |
+| `scripts/check-oban-queue-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh` | The documented Oban queues must be the queues that exist. |
 | `scripts/check-one-credential-derivation.sh` | `scripts/lint-elm.sh`, `test/platform/one_credential_derivation_test.sh` | The credential is spelled in exactly one place, and nothing may spell it again. |
-| `scripts/check-orphan-classes.sh` | `scripts/check-css.sh`, `scripts/lint-elm.sh` | check-orphan-classes.sh — Elm class literals with no CSS rule behind them. |
+| `scripts/check-orphan-classes.sh` | `scripts/check-css.sh`, `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | check-orphan-classes.sh — Elm class literals with no CSS rule behind them. |
 | `scripts/check-outbound-test-default.sh` | `scripts/lint-elixir.sh`, `test/platform/platform_suites_job_test.sh` |  |
-| `scripts/check-phase-scheme.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | Every story's Phase cell must name a phase that exists, and nothing else. |
+| `scripts/check-phase-scheme.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh` | Every story's Phase cell must name a phase that exists, and nothing else. |
 | `scripts/check-ports-wired.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh`, `test/platform/platform_suites_job_test.sh`, `test/platform/ports_wired_test.sh` |  |
 | `scripts/check-prose-assertions.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-protojson-completeness.sh` | `scripts/lint-elixir.sh`, `test/platform/protojson_completeness_test.sh` | A proto field that reaches no surface is a field that was added for nothing. |
-| `scripts/check-public-route-metering.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh` | An anonymously-reachable route must be metered, or say why it is not. |
+| `scripts/check-public-route-metering.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh` | An anonymously-reachable route must be metered, or say why it is not. |
 | `scripts/check-rls-scope.sh` | `scripts/lint-elixir.sh`, `test/platform/rls_scope_gate_test.sh` | scripts/check-rls-scope.sh — every query against a row-level-secured table |
-| `scripts/check-route-clients.sh` | `justfile`, `scripts/lint-elixir.sh` |  |
-| `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh` | Can a reader actually GET to every page that exists? |
+| `scripts/check-route-clients.sh` | `justfile`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh` |  |
+| `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | Can a reader actually GET to every page that exists? |
 | `scripts/check-schema-diff.sh` | `.github/workflows/ci.yml`, `test/platform/schema_diff_test.sh` |  |
 | `scripts/check-script-wiring.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `test/platform/script_wiring_test.sh` | Every script has a caller, and the inventory that says so is generated. |
-| `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/session_expiry_forms_test.sh` |  |
+| `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh`, `test/platform/session_expiry_forms_test.sh` |  |
 | `scripts/check-sigpipe-hazards.sh` | `scripts/lint-elixir.sh`, `scripts/wave-status.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Refuse a pipeline whose exit status is read but can be 141 instead of the |
 | `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `test/platform/check_slo_gate_test.sh`, `test/platform/deploy_production_workflow_test.sh` … |  |
 | `scripts/check-status-after-substitution.sh` | `scripts/lint-elixir.sh`, `test/platform/status_after_substitution_test.sh` | Refuse a `$?` read in the same command as a substitution that precedes it. |
 | `scripts/check-storage-selection-is-deliberate.sh` | `scripts/lint-elixir.sh`, `test/platform/storage_selection_test.sh` | Holds: object-storage backend selection is a DELIBERATE declaration, never |
-| `scripts/check-tracker-refs.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/tracker_refs_gate_test.sh` | Code must not cite tracker artefacts — state the substance instead. |
+| `scripts/check-tracker-refs.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh`, `test/platform/tracker_refs_gate_test.sh` | Code must not cite tracker artefacts — state the substance instead. |
 | `scripts/check-unbounded-sweeps.sh` | `scripts/lint-elixir.sh`, `test/platform/unbounded_sweeps_test.sh` | A retention sweep whose cost grows with how long it has been failing cannot |
 | `scripts/check-version-drift.sh` | `justfile`, `scripts/ci.sh` |  |
 | `scripts/check-workflow-health.sh` | `.github/workflows/workflow-health.yml`, `test/platform/workflow_health_test.sh` | A workflow nobody's pull request depends on can stay red indefinitely. |
-| `scripts/ci.sh` | `e2e/tests/rate-limit.spec.ts`, `justfile`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh`, `scripts/hooks/pre-push` … |  |
+| `scripts/ci.sh` | `e2e/tests/rate-limit.spec.ts`, `justfile`, `scripts/check-tracker-refs.sh`, `scripts/hooks/lib/post-deployed-e2e-to-pr.sh` … |  |
 | `scripts/classify-credential-rewrite-equivalence.sh` | _manual: Evidence over three fixed commits, not a gate. It classifies every credential rewrite in the one-builder migration against a table of equivalences; its corpus is historical and the question it answers can only be asked once, so wiring it into CI would re-run a settled measurement forever. ⚠️ The standing protection for the same property WAS check-credential-origin.sh, which is now deleted: every request in the client is a RequestSpec whose url is an Api.Url.SameOriginUrl, so the property that script parsed for is checked by the compiler on every build. frontend/tests/ApiRequestHeadersTest.elm still runs and covers the header half._ | Every credential rewrite in the one-builder migration, classified against a |
 | `scripts/cleanup-preview.sh` | `.github/workflows/ci.yml`, `.github/workflows/cleanup-preview.yml`, `scripts/ci.sh`, `scripts/deploy-preview.sh` | scripts/cleanup-preview.sh — destroy EVERYTHING deploy-preview.sh creates |
 | `scripts/dashboard-emission-gate.sh` | `.github/workflows/ci.yml` |  |
@@ -144,4 +152,4 @@ in code by" and check it before relying on it.
 | `scripts/test-mcp.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` | Run the project-tools MCP server's own test suite. |
 | `scripts/test-python.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
 | `scripts/test-rust.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh` |  |
-| `scripts/wave-status.sh` | `justfile`, `test/platform/tracker_refs_gate_test.sh`, `test/platform/wave_status_stack_guard_test.sh` |  |
+| `scripts/wave-status.sh` | `justfile`, `scripts/check-axis-coverage.sh`, `test/platform/axis_coverage_test.sh`, `test/platform/tracker_refs_gate_test.sh` … |  |
