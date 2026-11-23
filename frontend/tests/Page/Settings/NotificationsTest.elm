@@ -180,7 +180,7 @@ suite =
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "The library is unreachable, so your notification preferences were not saved." ]
+                    |> Query.has [ Selector.text "The library is unreachable, so we could not save your notification preferences." ]
         , -- ⛔ All three of these were "Could not save notification
           test "a 422 sends the reader to a reload, not to a repeat" <|
             \_ ->
@@ -195,7 +195,7 @@ suite =
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "we cannot say whether your notification preferences were saved" ]
+                    |> Query.has [ Selector.text "we cannot say whether your notification preferences went through" ]
         , test "an unrecognised status admits it is unrecognised" <|
             \_ ->
                 Notifications.update (SaveCompleted (Err (Http.BadStatus 502))) (loadedWith allOff) (Just (TestHelpers.creds "test-token"))

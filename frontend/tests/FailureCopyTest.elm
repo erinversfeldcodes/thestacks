@@ -105,7 +105,7 @@ suite =
             , test "a dropped connection says the change was not saved" <|
                 \_ ->
                     FailureCopy.saveFailure "your preferences" Http.NetworkError
-                        |> String.contains "were not saved"
+                        |> String.contains "could not save"
                         |> Expect.equal True
             , test "⛔ a timeout does NOT claim the change was lost" <|
                 \_ ->
