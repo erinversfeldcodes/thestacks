@@ -506,4 +506,28 @@ defmodule Stacks.ReleaseTest do
       end
     end
   end
+
+  describe "install_role_passwords/2 — the boot-time credential install" do
+    test "sets a role's LOGIN password safely even when the password holds a quote" do
+      Repo.query!(~s|CREATE ROLE "stacks_ri_quote_test" NOLOGIN|)
+      hostile = "a'b'; DROP ROLE postgres; --"
+
+      assert :ok = Release.install_role_passwords(Repo, [{"stacks_ri_quote_test", hostile}])
+
+      %{rows: [[canlogin]]} =
+        Repo.query!("SELECT rolcanlogin FROM pg_roles WHERE rolname = $1", [
+          "stacks_ri_quote_test"
+        ])
+
+      assert canlogin,
+             "the install should grant LOGIN; a quote in the password must be quoted, not break the statement"
+
+      # Idempotent — a second install does not raise.
+      assert :ok = Release.install_role_passwords(Repo, [{"stacks_ri_quote_test", hostile}])
+    end
+
+    test "is a no-op for a role that does not exist" do
+      assert :ok = Release.install_role_passwords(Repo, [{"stacks_ri_absent_role", "whatever"}])
+    end
+  end
 end

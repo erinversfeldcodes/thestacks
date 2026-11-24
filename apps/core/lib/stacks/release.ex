@@ -205,9 +205,12 @@ defmodule Stacks.Release do
 
   @doc """
       The deploy entry point (`release_command` in fly.core.toml): corrections,
-      migrate, corrections again. Order matters — a migration adding a constraint
-      is a claim about existing data, so repairs run before it; the second sweep
-      covers corrections whose target column the migration just added.
+      migrate, install the runtime-role passwords, corrections again. Order
+      matters — a migration adding a constraint is a claim about existing data, so
+      repairs run before it; the second sweep covers corrections whose target
+      column the migration just added. The password install runs after migrate so
+      the roles it targets already exist, and before the second sweep so the rest
+      of the deploy proceeds against a role whose credential is current.
   """
   @spec deploy() :: :ok
   def deploy do
@@ -215,9 +218,72 @@ defmodule Stacks.Release do
 
     migrate()
 
+    install_runtime_role_passwords()
+
     correct_data(apply: true)
 
     :ok
+  end
+
+  @runtime_role_password_env [
+    {"stacks_app", "STACKS_APP_DB_PASSWORD"},
+    {"stacks_dbt", "STACKS_DBT_DB_PASSWORD"}
+  ]
+
+  @doc """
+      Installs each least-privilege runtime role's LOGIN password from the secret
+      the deploy holds, on EVERY boot. A password set only by a once-run migration
+      goes stale the moment the secret is rotated — the role keeps the old password
+      until someone re-runs that migration by hand — so the deploy, which holds the
+      current secret, reinstalls it each time instead. Idempotent; a no-op for a
+      role whose secret is unset. Runs as the owner, the only role that may ALTER
+      another.
+  """
+  @spec install_runtime_role_passwords() :: :ok
+  def install_runtime_role_passwords do
+    load_app()
+    with_owner_repo(Repo, fn repo -> install_role_passwords(repo, collect_role_passwords()) end)
+    :ok
+  end
+
+  defp collect_role_passwords do
+    for {role, var} <- @runtime_role_password_env,
+        pw = System.get_env(var),
+        is_binary(pw) and pw != "" do
+      {role, pw}
+    end
+  end
+
+  @doc false
+  # Factored out so a test can drive it on the sandbox connection without the
+  # owner-repo swap (which refuses a started pool). The role name and password
+  # travel as bound parameters into transaction-local GUCs, then the ALTER is
+  # assembled server-side with `format(%I/%L)` — so a password holding a quote
+  # cannot break or escape the statement, and the secret never appears in SQL
+  # text (only as a bound parameter).
+  def install_role_passwords(repo, installs) do
+    Enum.each(installs, fn {role, pw} ->
+      repo.transaction(fn ->
+        repo.query!(
+          "SELECT set_config('stacks.ri_role', $1, true), set_config('stacks.ri_pw', $2, true)",
+          [role, pw]
+        )
+
+        repo.query!("""
+        DO $install$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_setting('stacks.ri_role')) THEN
+            EXECUTE format(
+              'ALTER ROLE %I LOGIN PASSWORD %L',
+              current_setting('stacks.ri_role'),
+              current_setting('stacks.ri_pw')
+            );
+          END IF;
+        END
+        $install$;
+        """)
+      end)
+    end)
   end
 
   @doc """

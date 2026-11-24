@@ -377,6 +377,40 @@ defmodule Core.DatabaseRoleSplitTest do
     end
   end
 
+  describe "the deploy installs the runtime-role passwords on every boot" do
+    test "deploy/0 runs the install after migrate and before the final correction sweep" do
+      src = release_src()
+
+      assert src =~
+               ~r/def deploy do.*?migrate\(\).*?install_runtime_role_passwords\(\).*?correct_data\(apply: true\).*?:ok/s,
+             "deploy/0 must install the runtime-role passwords after migrate — so the roles exist — and before the final sweep"
+    end
+
+    test "the password is bound and quoted server-side, never interpolated into SQL" do
+      src = release_src()
+
+      assert src =~ "ALTER ROLE %I LOGIN PASSWORD %L",
+             "the ALTER must be assembled with format placeholders, not string interpolation"
+
+      assert src =~
+               "set_config('stacks.ri_role', $1, true), set_config('stacks.ri_pw', $2, true)",
+             "the role and password must reach Postgres as bound parameters"
+
+      refute src =~ ~r/PASSWORD '#\{/,
+             "a password is being interpolated straight into a PASSWORD literal again"
+    end
+
+    test "the role-login migration also binds its password rather than interpolating it" do
+      mig = File.read!(Path.join(@migrations, "20260310000001_fix_db_role_login.exs"))
+
+      refute mig =~ ~r/PASSWORD '#\{/,
+             "the migration interpolates a password into a literal again"
+
+      assert mig =~ "format('ALTER ROLE stacks_app LOGIN PASSWORD %L'",
+             "the migration must quote its password server-side"
+    end
+  end
+
   # The `config :core, <repo>, …` block, up to the next blank line, so an
   # assertion about one repo cannot be satisfied by the other's settings.
   defp config_block(src, repo) do
