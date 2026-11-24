@@ -795,6 +795,34 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
+  describe "warehouse privilege boundary" do
+    # The erasure claim "personal data is kept out of the warehouse" must rest on
+    # a privilege, not on the absence of a dbt model. `op`'s default privileges
+    # once granted stacks_dbt SELECT on every FUTURE op table, so a new personal
+    # table became warehouse-readable the moment it was created and nothing
+    # failed. The grant is revoked; this guard keeps it revoked, so a reader for
+    # the warehouse is a deliberate per-table grant a reviewer can see.
+    test "stacks_dbt holds no default privilege on future op tables" do
+      {:ok, %{rows: rows}} =
+        Repo.query("""
+        SELECT acl.privilege_type
+        FROM pg_default_acl d
+        JOIN pg_namespace n ON n.oid = d.defaclnamespace
+        CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
+        WHERE n.nspname = 'op'
+          AND d.defaclobjtype = 'r'
+          AND acl.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'stacks_dbt')
+        """)
+
+      assert rows == [],
+             "stacks_dbt has a default privilege on new op tables (#{inspect(rows)}), so every " <>
+               "future op table — a personal-data one included — is warehouse-readable the " <>
+               "moment it is created, and 'kept out of the warehouse' is a convention rather " <>
+               "than a privilege boundary. Revoke ALTER DEFAULT PRIVILEGES … GRANT … TO " <>
+               "stacks_dbt; a table the warehouse legitimately sources is granted explicitly."
+    end
+  end
+
   describe "erasure completeness — schema-level guard" do
     @nilify_user_fk_allowlist %{
       "transactions" => "financial-audit / legal retention; no user free-text",
