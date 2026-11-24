@@ -904,6 +904,67 @@ defmodule Stacks.GDPR.DeletionTest do
                "on it is erased by a delete_user_data/1 step."
     end
 
+    # Tables that reach op.users ONLY through a non-CASCADE link to a user-owned
+    # parent, so the FK graph does not carry erasure to them — each must instead
+    # be removed by an explicit, user-scoped step in `delete_user_data/1`. The
+    # direct-FK guard above cannot see these: it queries FKs to `op.users`, while
+    # these point at a parent (a bookshelf, a post) that is itself user-owned.
+    # This is the miss "one level out" — a table parented below a user-owned row
+    # with a non-cascading FK survives erasure while every direct-FK test stays
+    # green. The value is a SENTENCE naming the step that erases it; nothing here
+    # checks the sentence is true, exactly as for the nilify allowlist.
+    @indirect_explicit_step_allowlist %{
+      "bookshelf_placement_history" =>
+        "reaches users only through op.bookshelves (from_bookshelf/to_bookshelf are NO ACTION); " <>
+          "erased by the from_bookshelf/to_bookshelf-scoped delete_all in delete_user_data/1, " <>
+          "scoped through the erased user's bookshelf_ids"
+    }
+
+    test "every op.* table reaching op.users only indirectly is CASCADE-reachable or an allowlisted explicit step" do
+      # `user_owned` is the CASCADE transitive closure rooted at op.users: every
+      # op table the FK graph deletes when `repo.delete(user)` fires. A table
+      # that references something in that closure but is NOT itself in it reaches
+      # user data over a link the cascade does not follow, so erasure can only
+      # reach it by an explicit step — which this guard requires be declared.
+      {:ok, %{rows: rows}} =
+        Repo.query("""
+        WITH RECURSIVE user_owned AS (
+          SELECT c.oid
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'op' AND c.relname = 'users'
+          UNION
+          SELECT child.oid
+          FROM pg_constraint con
+          JOIN pg_class child ON child.oid = con.conrelid
+          JOIN pg_namespace cn ON cn.oid = child.relnamespace
+          JOIN user_owned uo ON uo.oid = con.confrelid
+          WHERE con.contype = 'f' AND con.confdeltype = 'c' AND cn.nspname = 'op'
+        )
+        SELECT DISTINCT c.relname
+        FROM pg_constraint con
+        JOIN pg_class c ON c.oid = con.conrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'op'
+          AND con.contype = 'f'
+          AND con.confrelid IN (SELECT oid FROM user_owned)
+          AND con.confrelid <> 'op.users'::regclass
+          AND con.conrelid NOT IN (SELECT oid FROM user_owned)
+        ORDER BY c.relname
+        """)
+
+      offenders =
+        for [table] <- rows,
+            not Map.has_key?(@indirect_explicit_step_allowlist, table),
+            do: table
+
+      assert offenders == [],
+             "op.* tables that reach op.users only through a non-CASCADE link to a user-owned " <>
+               "parent, so the FK cascade does not erase them and nothing here proves an " <>
+               "explicit step does. Offenders: #{inspect(offenders)}. Either make the FK " <>
+               "CASCADE, or add the table to @indirect_explicit_step_allowlist naming the " <>
+               "delete_user_data/1 step that erases it."
+    end
+
     test "every user-referencing column in op and audit has a foreign key to op.users" do
       {:ok, %{rows: rows}} =
         Repo.query("""
