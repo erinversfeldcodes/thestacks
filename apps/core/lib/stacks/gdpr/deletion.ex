@@ -243,7 +243,7 @@ defmodule Stacks.GDPR.Deletion do
     # down at the only moment anything still knows them — after the rows go,
     # nothing links those objects to this user, or to any user, ever again.
     |> Multi.run(:delete_image_objects, fn _repo, %{uploaded_image_rows: rows} ->
-      {deleted, failed} = ImageRetention.delete_storage_objects(rows)
+      {deleted, absent, failed} = ImageRetention.delete_storage_objects(rows)
 
       if failed != [] do
         Logger.error(
@@ -252,7 +252,9 @@ defmodule Stacks.GDPR.Deletion do
         )
       end
 
-      {:ok, length(deleted)}
+      # Count both removed-now and already-gone as handled: either way the bytes
+      # are no longer present. Only `failed` left an object behind, logged above.
+      {:ok, length(deleted) + length(absent)}
     end)
     |> Multi.run(:delete_uploaded_images, fn repo, %{uploaded_image_rows: rows} ->
       ids = Enum.map(rows, & &1.id)

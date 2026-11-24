@@ -1161,7 +1161,7 @@ defmodule Stacks.GDPR.DeletionTest.FailingStorage do
   def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []), do: {:ok, key}
 
   @impl true
-  def head(_key), do: {:error, :not_found}
+  def head(_key), do: {:ok, 1}
 
   @impl true
   def list(_prefix), do: {:ok, []}
@@ -1190,7 +1190,7 @@ defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
   def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []), do: {:ok, key}
 
   @impl true
-  def head(_key), do: {:error, :not_found}
+  def head(_key), do: {:ok, 1}
 
   @impl true
   def list(prefix), do: {:ok, Process.get({__MODULE__, prefix}, [])}

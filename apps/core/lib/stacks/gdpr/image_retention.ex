@@ -216,7 +216,7 @@ defmodule Stacks.GDPR.ImageRetention do
     # So a storage failure is NOT swallowed here, where `delete_storage_objects/1`
     # swallows it for the sweeps that delete the row anyway. The row is staying,
     # so its path must keep pointing at whatever is actually there.
-    {deleted, failed} = delete_storage_objects(rows)
+    {deleted, absent, failed} = delete_storage_objects(rows)
 
     if failed != [] do
       Logger.warning(
@@ -225,14 +225,24 @@ defmodule Stacks.GDPR.ImageRetention do
       )
     end
 
-    deleted_ids = Enum.map(deleted, & &1.id)
+    if absent != [] do
+      Logger.info(
+        "ImageRetention: #{length(absent)} finished image object(s) were already absent; " <>
+          "counted apart from the #{length(deleted)} this run removed"
+      )
+    end
+
+    # Deleted and absent both mean the object is gone, so the row's path is
+    # cleared for both and the discard event fires for both — the bytes are not
+    # there either way. Only a failed delete keeps its path for the next run.
+    gone_ids = Enum.map(deleted ++ absent, & &1.id)
 
     {count, _} =
       UploadedImage
-      |> where([i], i.id in ^deleted_ids)
+      |> where([i], i.id in ^gone_ids)
       |> Repo.update_all(set: [storage_path: nil])
 
-    emit_discard_events(deleted_ids)
+    emit_discard_events(gone_ids)
 
     :telemetry.execute([:stacks, :gdpr, :image, :expired], %{count: count}, %{
       reason: "finished"
@@ -593,56 +603,73 @@ defmodule Stacks.GDPR.ImageRetention do
   end
 
   @doc """
-      Deletes the storage object for each row that carries a non-empty
-      `storage_path`, and **reports which ones actually went**. Returns
-      `{deleted, failed}`, both lists of the rows given.
+      Splits the given rows by what happened to each one's storage object:
+      `{deleted, absent, failed}`, three lists of the rows passed in.
 
-      ⚖️ A storage failure does NOT block the DB-side removal, and that policy
-      is deliberate: a surviving row still pointing a reader at their image is
-      an erasure leak, while a leaked object is not reachable by anyone.
+      ⚖️ An object already gone is NOT a deletion and NOT a failure — it is the
+      third outcome. A data subject asking "did you delete my image?" is owed the
+      difference between "removed it" and "it was already gone", and
+      `Storage.delete_image/1` cannot supply it: an S3/R2 DELETE returns success
+      whether or not the object was there. So existence is established by a
+      `head` BEFORE the delete; a head that errors for any other reason (a circuit
+      open, say) is `failed`, not `absent`, and the row keeps its path for a retry.
 
-      ⛔ But "the caller may ignore a failure" and "the caller cannot SEE a
-      failure" are different things, and this used to be the second. It returned
-      a bare `:ok`, so `GDPR.Deletion` reported `length(rows)` as its deletion
-      count — during a storage outage, erasure would report five objects deleted
-      having deleted none, then remove the rows, leaving objects that no row
-      points at. That population is not hypothetical: a production
-      characterisation found 4,234 of them, and the reason it was expensive is
-      precisely that nothing records WHICH objects leaked at the moment they do.
+      ⚖️ A storage failure does NOT block DB-side removal, deliberately: a
+      surviving row still pointing a reader at their image is an erasure leak,
+      while a leaked object is reachable by no one. `deleted` and `absent` both
+      mean the object is now gone, so a caller clears the row's storage_path for
+      both and keeps it only for `failed`.
 
-      So the failure is now returned. What the caller does with it is the
-      caller's decision; what it may no longer do is report success for it.
+      ⛔ "The caller may ignore a failure" and "the caller cannot SEE a failure"
+      are different, and this used to be the second: it returned a bare `:ok`, so
+      `GDPR.Deletion` reported `length(rows)` deleted — during a storage outage it
+      would claim objects deleted having deleted none, then remove the rows,
+      leaving objects no row points at. That population is not hypothetical: a
+      production characterisation found 4,234 of them, expensive precisely because
+      nothing recorded WHICH objects leaked at the moment they did. The outcome is
+      now returned, so the caller reports it truthfully.
 
       Shared by the retention sweeps AND by `Stacks.GDPR.Deletion.delete_user_data/1`,
       which calls it while erasing a user so the objects go BEFORE the FK cascade
-      removes the rows (the rows are the only pointer to the storage keys). Takes a
-      list of `%{storage_path: String.t | nil}` maps.
-
-      ⚠️ A row with no usable `storage_path` counts as DELETED: there is nothing
-      to remove, and reporting it as a failure would make a caller retry forever.
-      Since `cleanup_finished_image_bytes/1`, a finished row legitimately has a
-      `nil` path, so this is the common case rather than an edge.
+      removes the rows (the rows are the only pointer to the keys). Takes a list of
+      `%{storage_path: String.t() | nil}` maps; a row with no usable path is
+      `absent` — there was never an object to remove.
   """
-  @spec delete_storage_objects([%{optional(any) => any}]) :: {[map()], [map()]}
+  @spec delete_storage_objects([%{optional(any) => any}]) :: {[map()], [map()], [map()]}
   def delete_storage_objects(rows) do
-    Enum.split_with(rows, fn
-      %{storage_path: path} when is_binary(path) and path != "" ->
+    grouped = Enum.group_by(rows, &classify_object_deletion/1)
+
+    {Map.get(grouped, :deleted, []), Map.get(grouped, :absent, []), Map.get(grouped, :failed, [])}
+  end
+
+  defp classify_object_deletion(%{storage_path: path}) when is_binary(path) and path != "" do
+    case Storage.head_image(path) do
+      {:error, :not_found} ->
+        :absent
+
+      {:ok, _size} ->
         case Storage.delete_image(path) do
           :ok ->
-            true
+            :deleted
 
           {:error, reason} ->
             Logger.warning(
               "ImageRetention: failed to delete storage object #{path}: #{inspect(reason)}"
             )
 
-            false
+            :failed
         end
 
-      _ ->
-        true
-    end)
+      {:error, reason} ->
+        Logger.warning(
+          "ImageRetention: could not check storage object #{path}: #{inspect(reason)}"
+        )
+
+        :failed
+    end
   end
+
+  defp classify_object_deletion(_row), do: :absent
 
   # ⛔ ONE statement for the whole batch, not one per image — and this is the
   # difference between a backlog that clears and one that does not.

@@ -417,7 +417,9 @@ defmodule Stacks.GDPR.ImageRetentionTest.RecordingStorage do
   def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []), do: {:ok, key}
 
   @impl true
-  def head(_key), do: {:error, :not_found}
+  # Objects are reported present so the retention sweep's pre-delete existence
+  # check proceeds to the delete this backend records.
+  def head(_key), do: {:ok, 1}
 
   @impl true
   def list(_prefix), do: {:ok, []}
@@ -447,7 +449,9 @@ defmodule Stacks.GDPR.ImageRetentionTest.FailingStorage do
   def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []), do: {:ok, key}
 
   @impl true
-  def head(_key), do: {:error, :not_found}
+  # Present, so the retention sweep's pre-delete existence check proceeds to the
+  # delete this backend fails — the failure is the point of this mock.
+  def head(_key), do: {:ok, 1}
 
   @impl true
   def list(_prefix), do: {:ok, []}
@@ -472,6 +476,7 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
   alias Stacks.GDPR.ImageRetention
   alias Stacks.GDPR.ImageRetentionTest.FailingStorage
   alias Stacks.GDPR.ImageRetentionTest.RecordingStorage
+  alias Stacks.Storage.Mock
 
   describe "cleanup_orphan_objects/1 — the objects no row points at" do
     # ⛔ EVERY CASE HERE PLANTS A REAL ORPHAN, because a sweep attested clean
@@ -564,6 +569,24 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
 
       {:ok, remaining} = Stacks.Storage.list_objects("uploads/")
       assert length(remaining) == 1
+    end
+  end
+
+  describe "delete_storage_objects/1 tells a deletion from an already-absent object" do
+    test "a present object is counted deleted; one already gone is counted absent, not deleted" do
+      Mock.put("uploads/present-xyz", "bytes", [])
+
+      present = %{id: Ecto.UUID.generate(), storage_path: "uploads/present-xyz"}
+      gone = %{id: Ecto.UUID.generate(), storage_path: "uploads/already-gone-xyz"}
+
+      {deleted, absent, failed} = ImageRetention.delete_storage_objects([present, gone])
+
+      assert deleted == [present], "the object that existed is counted as deleted"
+      assert absent == [gone], "the object already gone is counted absent, not deleted"
+      assert failed == []
+
+      assert {:error, :not_found} = Stacks.Storage.head_image("uploads/present-xyz"),
+             "the present object was actually removed"
     end
   end
 
