@@ -19,7 +19,7 @@ defmodule Core.Repo.Migrations.ScrubRetainedUserPiiFromObanErrors do
 
     execute("""
     UPDATE public.oban_jobs
-       SET errors = '[]'::jsonb
+       SET errors = '{}'::jsonb[]
      WHERE errors::text LIKE '%password_hash%'
     """)
   end

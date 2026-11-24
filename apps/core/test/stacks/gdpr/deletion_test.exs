@@ -873,7 +873,15 @@ defmodule Stacks.GDPR.DeletionTest do
           "subject resolves nothing and no-ops.",
       "public.oban_jobs.meta" =>
         "Oban's own bookkeeping (recorded uniqueness key, cron hints). Library-owned; this " <>
-          "application never writes it."
+          "application never writes it.",
+      "public.oban_jobs.errors" =>
+        "job error history (a jsonb[] array). ⚠️ THE HISTORICAL OFFENDER, now closed: a worker " <>
+          "that raised with a %Stacks.Accounts.User{} argument had the Argon2 hash, the email and " <>
+          "the one-time tokens inspected into here and retained outside erasure. The redacting " <>
+          "Inspect impl on the user struct closes it at the source — a failure recorded now " <>
+          "carries ids and `**redacted**`, never the person — and a one-off scrub emptied the " <>
+          "rows that already held it. Erasure does not reach this table and is not expected to: " <>
+          "the invariant, as for args, is that it holds ids and never the subject."
     }
 
     # The schemas whose JSONB columns the declaration test governs. `staging`,
@@ -1070,7 +1078,7 @@ defmodule Stacks.GDPR.DeletionTest do
              AND c.relkind = 'r'
              AND a.attnum > 0
              AND NOT a.attisdropped
-             AND t.typname IN ('jsonb', 'json')
+             AND t.typname IN ('jsonb', 'json', '_jsonb', '_json')
            ORDER BY 1, 2, 3
           """,
           [@jsonb_governed_schemas]
