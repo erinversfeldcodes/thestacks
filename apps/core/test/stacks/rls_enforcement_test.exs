@@ -636,4 +636,37 @@ defmodule Stacks.RlsEnforcementTest do
              "the owner arm (user_id = op.current_scope()) is unaffected by the narrowing"
     end
   end
+
+  describe "the owner's data-correction reads do not lean on the bypass exemption" do
+    # `Stacks.Release.correct_data/1` runs the default corrections as the OWNER
+    # (via `with_owner_repo/2`), reading these tables with direct queries rather
+    # than through a SECURITY DEFINER. On a deployed stack the owner carries
+    # `rolbypassrls`, which would silently satisfy a read against an RLS-guarded
+    # table — so a correction that quietly depended on the exemption would pass
+    # in production and fail only where a non-bypass role runs, with nothing to
+    # show the dependency. These tables carry no row security at all, so the
+    # owner reaches them through ordinary grants and the exemption is never
+    # consulted. If a later change enables RLS on one of them without giving the
+    # owner an unscoped read path, this fails here — under the superuser whose
+    # bypass cannot mask it — instead of silently in a deploy.
+    test "every table the default corrections read directly has row security OFF" do
+      reads = [{"op", "book_editions"}, {"op", "uploaded_images"}, {"public", "oban_jobs"}]
+
+      for {schema, table} <- reads do
+        %{rows: [[rls, force]]} =
+          Repo.query!(
+            "SELECT c.relrowsecurity, c.relforcerowsecurity FROM pg_class c " <>
+              "JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+            [schema, table]
+          )
+
+        refute rls,
+               "#{schema}.#{table} now has RLS enabled; correct_data/1 reads it as the owner, so " <>
+                 "give the owner a policy or a request scope rather than leaning on rolbypassrls"
+
+        refute force,
+               "#{schema}.#{table} now forces RLS on its owner — the correction read would need bypass"
+      end
+    end
+  end
 end
