@@ -765,6 +765,36 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
+  describe "financial-record retention across erasure" do
+    test "a seller's transaction survives their erasure, de-linked, keeping its financial facts" do
+      seller = insert(:user)
+      listing = insert(:listing, seller: seller)
+
+      txn =
+        insert(:transaction,
+          listing: listing,
+          seller: seller,
+          seller_id: seller.id,
+          amount_cents: 4200,
+          currency: "ZAR"
+        )
+
+      assert {:ok, _} = Deletion.delete_user_data(seller.id)
+
+      # The listing — which carries free text — is erased with the user.
+      refute Repo.get(Stacks.Marketplace.Listing, listing.id)
+
+      # The transaction is RETAINED for financial/legal audit, with every
+      # reference to the person nulled: the retention the two existing SET NULLs
+      # promised and the listing_id CASCADE used to defeat.
+      kept = Repo.get(Stacks.Marketplace.Transaction, txn.id)
+      assert kept, "the financial record must survive the seller's erasure"
+      assert kept.seller_id == nil, "the seller reference must be nulled"
+      assert kept.listing_id == nil, "the listing reference must be nulled (the listing is gone)"
+      assert kept.amount_cents == 4200, "the retained record keeps its financial facts"
+    end
+  end
+
   describe "erasure completeness — schema-level guard" do
     @nilify_user_fk_allowlist %{
       "transactions" => "financial-audit / legal retention; no user free-text",
@@ -905,19 +935,26 @@ defmodule Stacks.GDPR.DeletionTest do
     end
 
     # Tables that reach op.users ONLY through a non-CASCADE link to a user-owned
-    # parent, so the FK graph does not carry erasure to them — each must instead
-    # be removed by an explicit, user-scoped step in `delete_user_data/1`. The
+    # parent, so the FK graph does not carry erasure to them. Each must resolve
+    # erasure some other way, and the value here is the SENTENCE saying how —
+    # either an explicit, user-scoped delete step in `delete_user_data/1`, or
+    # deliberate retention with every reference to the person nulled. The
     # direct-FK guard above cannot see these: it queries FKs to `op.users`, while
     # these point at a parent (a bookshelf, a post) that is itself user-owned.
     # This is the miss "one level out" — a table parented below a user-owned row
     # with a non-cascading FK survives erasure while every direct-FK test stays
-    # green. The value is a SENTENCE naming the step that erases it; nothing here
-    # checks the sentence is true, exactly as for the nilify allowlist.
+    # green. Nothing here checks the sentence is true, exactly as for the nilify
+    # allowlist.
     @indirect_explicit_step_allowlist %{
       "bookshelf_placement_history" =>
-        "reaches users only through op.bookshelves (from_bookshelf/to_bookshelf are NO ACTION); " <>
-          "erased by the from_bookshelf/to_bookshelf-scoped delete_all in delete_user_data/1, " <>
-          "scoped through the erased user's bookshelf_ids"
+        "erased: reaches users only through op.bookshelves (from_bookshelf/to_bookshelf are NO " <>
+          "ACTION); removed by the from_bookshelf/to_bookshelf-scoped delete_all in " <>
+          "delete_user_data/1, scoped through the erased user's bookshelf_ids",
+      "transactions" =>
+        "retained: a financial record kept past erasure for audit/legal reasons, with the person " <>
+          "fully de-linked — buyer_id, seller_id and listing_id are all ON DELETE SET NULL, so a " <>
+          "seller's erasure deletes the listing (and its free text) while this row survives " <>
+          "carrying only its amount, currency, status and date. No user free-text lives on it."
     }
 
     test "every op.* table reaching op.users only indirectly is CASCADE-reachable or an allowlisted explicit step" do
