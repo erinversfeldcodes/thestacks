@@ -43,11 +43,13 @@ defmodule Stacks.GDPRTest do
     "blog_posts" => :blog_posts,
     "bookshelf_placements" => :placements,
     "bookshelves" => :bookshelves,
+    "corpus_annotations" => :corpus_annotations,
     "embeddings" => :embeddings_summary,
     "feedback_entries" => :feedback,
     "group_invitations" => :reading_group_invitations,
     "group_members" => :reading_group_memberships,
     "groups" => :reading_groups,
+    "imported_works" => :imported_works,
     "invite_codes" => :invitations,
     "library_imports" => :library_imports,
     "listings" => :marketplace_listings,
@@ -186,7 +188,7 @@ defmodule Stacks.GDPRTest do
       refute Map.has_key?(row, :operator_session_id)
     end
 
-    test "payload contains all 25 documented keys" do
+    test "payload contains all 27 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -201,6 +203,8 @@ defmodule Stacks.GDPRTest do
                  :writing_assistant_sessions,
                  :writing_assistant_feedback,
                  :embeddings_summary,
+                 :imported_works,
+                 :corpus_annotations,
                  :uploaded_images,
                  :blog_posts,
                  :blog_comments,
@@ -289,7 +293,7 @@ defmodule Stacks.GDPRTest do
         title: "The Name of the Rose",
         shelf: "library",
         content_date: ~U[2026-01-02 03:04:05.000000Z],
-        embedding: Pgvector.new(vector)
+        embedding: vector
       )
 
       assert {:ok, export} = Export.export_user_data(user.id)

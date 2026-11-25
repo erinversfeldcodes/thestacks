@@ -15,7 +15,7 @@ defmodule Stacks.GDPR.Export do
   alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
-  alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
+  alias Stacks.WritingAssistant.{CorpusAnnotation, Embedding, ImportedWork, Session, TurnFeedback}
 
   @doc """
       Exports all data for a user. Returns a JSON-serialisable map.
@@ -63,6 +63,32 @@ defmodule Stacks.GDPR.Export do
           source_title: e.title,
           shelf: e.shelf,
           date_embedded: e.content_date
+        })
+        |> Repo.all()
+
+      # The author's own imported writing — the text (title) goes out in full;
+      # the vector never does (summarised like embeddings).
+      imported_works =
+        ImportedWork
+        |> where([w], w.user_id == ^user_id)
+        |> select([w], %{
+          title: w.title,
+          source_format: w.source_format,
+          source_sha256: w.source_sha256,
+          imported_at: w.imported_at
+        })
+        |> Repo.all()
+
+      corpus_annotations =
+        CorpusAnnotation
+        |> where([a], a.user_id == ^user_id)
+        |> select([a], %{
+          work_id: a.work_id,
+          embedding_id: a.embedding_id,
+          tags: a.tags,
+          exemplar_quality: a.exemplar_quality,
+          do_not_retrieve: a.do_not_retrieve,
+          note: a.note
         })
         |> Repo.all()
 
@@ -176,6 +202,8 @@ defmodule Stacks.GDPR.Export do
         writing_assistant_sessions: Enum.map(sessions, &session_to_map/1),
         writing_assistant_feedback: Enum.map(feedback, &feedback_to_map/1),
         embeddings_summary: embeddings_summary,
+        imported_works: imported_works,
+        corpus_annotations: corpus_annotations,
         uploaded_images: uploaded_images,
         blog_posts: Enum.map(blog_posts, &blog_post_to_map/1),
         blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),

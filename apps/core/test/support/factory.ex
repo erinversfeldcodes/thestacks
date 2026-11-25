@@ -34,7 +34,9 @@ defmodule Stacks.Factory do
 
   alias Stacks.WritingAssistant.{
     BookContentChunk,
+    CorpusAnnotation,
     Embedding,
+    ImportedWork,
     RetrievalLog,
     Session,
     TurnFeedback,
@@ -846,7 +848,13 @@ defmodule Stacks.Factory do
       title: sequence(:embedding_title, &"Embedded item #{&1}"),
       shelf: "library",
       content_date: DateTime.utc_now(),
-      embedding: Pgvector.new(List.duplicate(0.1, 1024))
+      embedding: List.duplicate(0.1, 1024),
+      chunk_text: "A chunk of the reader's own writing.",
+      chunk_index: 0,
+      char_start: 0,
+      char_end: 36,
+      model: "bge-m3",
+      embedding_version: 1
     }
   end
 
