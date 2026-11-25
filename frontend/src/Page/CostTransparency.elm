@@ -289,14 +289,28 @@ the page, and they were printing `$0.00/mo` for categories whose lines are
 unmeasured — the same false claim as the header, on the cards a reader sees
 first.
 -}
-viewStoryCard : String -> String -> CostCategory -> Html Msg
-viewStoryCard title narrative cat =
+viewStoryCard : String -> String -> Maybe CostCategory -> Html Msg
+viewStoryCard title narrative maybeCat =
     div [ class "costs__story-card" ]
         [ h3 [ class "costs__story-title" ] [ text title ]
         , p [ class "costs__story-text" ] [ text narrative ]
         , span [ class "costs__story-cost" ]
-            [ text (categoryMoneyText cat ++ "/mo" ++ unmeasuredSuffix cat) ]
+            [ text (storyCostText maybeCat) ]
         ]
+
+
+{-| The cost line for a story card. `Nothing` — the category is absent from the
+payload, i.e. we did not measure it — says exactly that, rather than printing
+the "$0.00/mo" a zeroed category used to manufacture.
+-}
+storyCostText : Maybe CostCategory -> String
+storyCostText maybeCat =
+    case maybeCat of
+        Just cat ->
+            categoryMoneyText cat ++ "/mo" ++ unmeasuredSuffix cat
+
+        Nothing ->
+            "not yet measured"
 
 
 viewCategoryCards : List CostCategory -> Html Msg
@@ -798,14 +812,22 @@ count, which is how the story cards kept printing a bare `$0.00/mo` after the
 header had learned not to.
 
 -}
-categoryFor : String -> List CostCategory -> CostCategory
+categoryFor : String -> List CostCategory -> Maybe CostCategory
 categoryFor name categories =
-    let
-        matching =
-            List.filter (\c -> c.category == name) categories
-    in
-    { category = name
-    , totalCents = matching |> List.map .totalCents |> List.sum
-    , unmeasuredCount = matching |> List.map .unmeasuredCount |> List.sum
-    , items = List.concatMap .items matching
-    }
+    case List.filter (\c -> c.category == name) categories of
+        [] ->
+            -- ⛔ Nothing, NOT a zeroed CostCategory. An absent category means
+            -- "we did not measure this", and a manufactured `{ totalCents = 0 }`
+            -- rendered that as a confident "$0.00/mo" — the very "$0.00 for
+            -- something we did not measure" defect this page exists to kill,
+            -- surviving behind a different door. The type now makes the absent
+            -- case unrepresentable as a measured zero.
+            Nothing
+
+        matching ->
+            Just
+                { category = name
+                , totalCents = matching |> List.map .totalCents |> List.sum
+                , unmeasuredCount = matching |> List.map .unmeasuredCount |> List.sum
+                , items = List.concatMap .items matching
+                }

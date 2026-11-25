@@ -35,6 +35,8 @@ suite =
         , bannerTermSaysWhenIncomplete
         , storyCardUnitAttachesToTheMoney
         , totalCaveatCountsOnlyTheMeasured
+        , allMeasuredBannerSaysSo
+        , absentCategoryStoryCardSaysNotMeasured
         , displaysMonthlyTrend
         , byServiceShownWhenCategoriesExist
         , byServiceAbsentWhenEmpty
@@ -576,5 +578,33 @@ totalCaveatCountsOnlyTheMeasured =
                     [ Selector.all
                         [ Selector.class "costs__banner-caveat"
                         , Selector.text "1 of 2 services measured"
+                        ]
+                    ]
+
+
+{-| ⛔ THE ALL-MEASURED BRANCH, which no fixture exercised: every caveat test
+used `startMixed` (one absent line), so `totalCaveat`'s `unmeasured == 0` arm —
+the one a reader sees when nothing is missing — rendered in no test. This drives
+it on `sampleCostResponseJson`, whose five lines are all measured.
+-}
+absentCategoryStoryCardSaysNotMeasured : Test
+absentCategoryStoryCardSaysNotMeasured =
+    test "absent_category: a story card whose category is absent says 'not yet measured', not a $0.00/mo it never measured" <|
+        \() ->
+            startCostPage
+                |> ProgramTest.simulateHttpOk "GET" "/api/costs" emptyCategoriesResponseJson
+                |> ProgramTest.expectViewHas [ Selector.exactText "not yet measured" ]
+
+
+allMeasuredBannerSaysSo : Test
+allMeasuredBannerSaysSo =
+    test "all_measured: the banner says all N services are measured when none is absent" <|
+        \() ->
+            startCostPage
+                |> ProgramTest.simulateHttpOk "GET" "/api/costs" sampleCostResponseJson
+                |> ProgramTest.expectViewHas
+                    [ Selector.all
+                        [ Selector.class "costs__banner-caveat"
+                        , Selector.exactText " — all 5 services measured"
                         ]
                     ]
