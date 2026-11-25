@@ -98,10 +98,11 @@ updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model =
     -- ⚠️ DISPATCHES ON THE MSG FIRST, then on the model, rather than on the pair.
     -- A `case ( msg, model ) of` reads more naturally here and was how this page
-    -- was written — but `check-session-expiry-coverage.sh` matches an expiry
-    -- branch as `^\s+Constructor ->$`, so `( SessionExpiryDetected, _ ) ->` is
-    -- invisible to it and the page reports as dropping its 401. The gate is right
-    -- that the routing must be greppable per-msg; this shape makes it so.
+    -- was written; it was flattened when `check-session-expiry-coverage.sh` could
+    -- only see an expiry branch spelled `^\s+Constructor ->$`. That gate now also
+    -- recognises the constructor inside a tuple pattern (`( SessionExpiryDetected,
+    -- _ ) ->`), so the flattening is no longer required — kept only because it is
+    -- already here, and the per-msg routing stays greppable either way.
     case msg of
         SessionExpiryDetected ->
             ( model, Effect.none, SessionExpired )

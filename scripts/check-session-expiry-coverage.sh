@@ -107,11 +107,16 @@ def top_level_definitions(text):
 # parsed, so MIN_PARSED_DEFINITIONS was satisfied, and what caught it was the
 # exemption having nothing left to protect.
 #
-# ⚠️ Matched on the CREDENTIAL CONSTRUCTOR rather than on the wrapper
-# function's name, because there are two wrappers — `requestHeaders` returning
-# data and `httpHeaders` returning `Http.Header` — and a third would otherwise
-# silently fall out of the population. The constructor IS the declaration;
-# the function around it is plumbing.
+# ⚠️ Matched on the CREDENTIAL CONSTRUCTOR — `Session` / `Optional` — rather than
+# on the wrapper function's name. This pattern used to ALSO carry wrapper-name
+# literals (`authedHeaders` / `authHeaders`); they were removed. Two reasons, and
+# the first is the load-bearing one: that spelling is the SAME literal the class
+# closure reads, so a rename there would have silently blinded this gate —
+# coupled by construction. The second: they contradicted this very docstring,
+# which already said the gate matches the constructor, not the wrapper. The
+# constructor at the call site (`requestHeaders method ( Session … )`) IS the
+# declaration; the wrapper around it is plumbing, and a new wrapper cannot fall
+# out of the population because the gate never names one.
 #
 # ⚠️ `Session` is the mandatory marker and `Optional` the maybe-authenticated
 # one, which is why those constructors must stay separately nameable at the call
@@ -120,15 +125,13 @@ def top_level_definitions(text):
 # decides whether a page must route a 401 to the session-expiry interceptor.
 MANDATORY = re.compile(
     r"headers\s*=\s*("
-    r"authedHeaders\b"
-    r"|\[\s*Http\.header\s+\"Authorization\""
+    r"\[\s*Http\.header\s+\"Authorization\""
     r"|\w*[Hh]eaders(?:\s+\S+){1,2}\s+\(\s*Session\b"
     r")"
 )
 OPTIONAL = re.compile(
     r"headers\s*=\s*("
-    r"authHeaders\b"
-    r"|\w*[Hh]eaders(?:\s+\S+){1,2}\s+\(\s*Optional\b"
+    r"\w*[Hh]eaders(?:\s+\S+){1,2}\s+\(\s*Optional\b"
     r"|\w*[Hh]eaders(?:\s+\S+){1,2}\s+NoCredential\b"
     r"|$)",
     re.M,
@@ -148,17 +151,17 @@ OPTIONAL = re.compile(
 # read only the first key would have watched 72 walk down to 0 while printing
 # success over whatever was left.
 #
-# ⛔ MATCHED BY THE CONSTRUCTOR'S NAME, like `authedHeaders` above, and for the
-# same reason: a name is greppable per call site. The obligation could have been
-# expressed as a flag on the existing constructor — and a `Bool` would have
-# blinded this gate completely, because `True` and `False` carry no searchable
-# identity and the first site passing a variable would drop out of the
+# ⛔ MATCHED BY A NAME — `Effect.authed` — and the `Session` constructor above is
+# matched the same way, because a name is greppable per call site. The obligation
+# could have been expressed as a flag on the existing constructor — and a `Bool`
+# would have blinded this gate completely, because `True` and `False` carry no
+# searchable identity and the first site passing a variable would drop out of the
 # population with nothing reporting it. `Effect.authed` and `Effect.public` are
 # separate named functions, so every site declares which it is in text.
 #
 # ⚠️ Keep the authenticated plan constructor named `Effect.authed`. Renaming it,
-# or wrapping it in a per-page helper, empties this key silently — the same note
-# `Api.authedHeaders` carries in its own docstring.
+# or wrapping it in a per-page helper, empties this key silently — and because
+# the key is matched by that name alone, nothing else would notice.
 MANDATORY_PLAN = re.compile(r"\bEffect\.authed\b")
 
 BLOCK_COMMENT = re.compile(r"\{-.*?-\}", re.S)
@@ -189,7 +192,10 @@ api_text = read(API)
 definitions = top_level_definitions(api_text)
 authed_endpoints = set()
 for name, body in definitions.items():
-    if name in ("authedHeaders", "authHeaders", "requestHeaders"):
+    # The header wrappers themselves (e.g. `requestHeaders`) are plumbing, not
+    # endpoints; skip them BY SHAPE — a `*Headers` name — rather than by a
+    # hardcoded list of spellings this gate would then have to keep in step.
+    if name.endswith("Headers"):
         continue
     if MANDATORY.search(body) and not OPTIONAL.search(body):
         authed_endpoints.add(name)
@@ -261,7 +267,14 @@ def routes_to_session_expired(text, constructor):
     gate could not see.
     """
     args = r"(?:\s+[A-Za-z_][A-Za-z0-9_']*)*"
-    for match in re.finditer(r"^(\s+)" + re.escape(constructor) + args + r"\s*->\s*$", text, re.M):
+    pat = re.escape(constructor) + args
+    # The branch head is the bare constructor, OR the constructor inside a TUPLE
+    # pattern the page dispatches on — `( SessionGone placementId, model ) ->`,
+    # which `case ( msg, model ) of` requires. Insisting the constructor HEAD the
+    # branch forced single-dimension dispatch, a constraint on the page's
+    # structure rather than on whether it routes the 401.
+    head = r"^(\s+)(?:" + pat + r"|\([^()\n]*\b" + pat + r"[^()\n]*\))\s*->\s*$"
+    for match in re.finditer(head, text, re.M):
         rest = text[match.end():]
         branch = []
         for line in rest.split("\n"):
@@ -438,7 +451,7 @@ if authenticated_requests < MIN_AUTHENTICATED_REQUESTS:
         file=sys.stderr,
     )
     print(
-        "      matching the source — check `headers = authedHeaders` and `Effect.authed`",
+        "      matching the source — check `headers = …Headers … ( Session` and `Effect.authed`",
         file=sys.stderr,
     )
     print(
