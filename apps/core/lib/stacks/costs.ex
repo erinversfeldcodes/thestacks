@@ -216,7 +216,7 @@ defmodule Stacks.Costs do
       # identification the reader performed, so excluding it understates what the
       # page claims to report.
       #
-      # ⚖️ `vision_jobs_this_month/0` is GPU-tier-filtered on purpose — it is the
+      # ⚖️ `gpu_vision_jobs_this_month/0` is GPU-tier-filtered on purpose — it is the
       # denominator the Modal line divides GPU seconds into, and mixing the two
       # populations in one sentence is the defect that filter exists to fix. Two
       # quantities, so two call sites: the same argument this module makes about
