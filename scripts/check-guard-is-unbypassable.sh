@@ -115,7 +115,7 @@ SUCCESS_EXIT = re.compile(
 # `test/platform/gate_fail_closed_test.sh` gained `EXPECTED_GATE_FLOOR`, the floor on
 # the gate list its whole-corpus starvation probe walks, for the same reason. Both
 # declarations sit above every success exit in their file.
-EXPECTED_GUARDED_SCRIPTS = 28
+EXPECTED_GUARDED_SCRIPTS = 29
 
 guarded = {}
 violations = []

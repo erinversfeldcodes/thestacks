@@ -183,6 +183,12 @@ gate check-guard-is-unbypassable.sh
 # wiring check can never falsify a reason, and one such lie once aged verbatim
 # into a generated developer-facing doc.
 gate check-reason-absence-claims.sh
+# Also here because this is the lane that runs. It catches a config key DERIVED
+# from a reader (an env var, a module call) and then REASSIGNED to a bare literal
+# later in the same file — runtime.exs once derived `upload_dir` and then set it
+# to "/tmp/uploads" in the branch a server always takes, so the derivation was
+# dead and the declared value could never win.
+gate check-derived-config-not-reassigned.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict

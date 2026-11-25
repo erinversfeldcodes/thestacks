@@ -44,6 +44,7 @@ in code by" and check it before relying on it.
 | `scripts/check-dbt-model-drift.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/dbt_elixir_reference_test.sh`, `test/platform/gate_fail_closed_test.sh` | The documented dbt model counts must match the models on disk. |
 | `scripts/check-decoder-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/decoder_coverage_test.sh` | A decoder no test ever feeds JSON to is an unverified claim about the server. |
 | `scripts/check-deployed-posture.sh` | `.github/workflows/deployed-posture.yml`, `test/platform/deployed_posture_test.sh` | Asserts, against a real deployed database, the invariants that a per-diff gate |
+| `scripts/check-derived-config-not-reassigned.sh` | `scripts/lint-elixir.sh` | A config key DERIVED from a reader (an env var, a module call) and then |
 | `scripts/check-e2e-mock-routes.sh` | `scripts/lint-elixir.sh` |  |
 | `scripts/check-e2e-repeatability.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh` | A spec that passes must pass again, immediately, against the same stack. |
 | `scripts/check-e2e-vacuous-guards.sh` | `scripts/lint-elm.sh`, `scripts/test-e2e.sh` |  |
