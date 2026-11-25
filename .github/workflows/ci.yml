@@ -923,6 +923,21 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
         with:
           github_token: ${{ github.token }}
+      # ⚖️ Cache deps + _build, as test-elixir and lint-elixir already do. This
+      # job compiles the umbrella (mix ecto.create/migrate below) and until now
+      # did so from COLD on every run — a full build per PR inside a 15-minute
+      # budget, cost and flake with no correctness benefit. Its own key (not the
+      # shared `mix-` one) because this job's MIX_ENV differs from test-elixir's,
+      # so a shared _build subdir would not match; keyed on mix.lock so a lock
+      # bump invalidates it. (If a further dependency pushes this past budget the
+      # alternative is moving the DB/compile suites into test-elixir — but that
+      # splits run_all.sh's single entry point, which its header rejects.)
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            deps
+            _build
+          key: mix-platform-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
       - name: Install mix deps
         run: mix deps.get
       # ⛔ BOTH ELIXIR TARGETS, NOT JUST THE ECTO ONE. `gen-ecto-proto.sh`
