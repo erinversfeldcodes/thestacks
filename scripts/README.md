@@ -54,6 +54,7 @@ in code by" and check it before relying on it.
 | `scripts/check-exacttext-ratchet.sh` | `scripts/lint-elm.sh`, `test/platform/exacttext_ratchet_test.sh` |  |
 | `scripts/check-gate-floors.sh` | `.github/workflows/ci.yml`, `scripts/ci.sh`, `test/platform/check_gate_floors_test.sh`, `test/platform/gate_fail_closed_test.sh` | Every gate refuses a starved population; so does the one that checks for it. |
 | `scripts/check-guard-is-unbypassable.sh` | `.github/workflows/suppression-expiry.yml`, `scripts/lint-elixir.sh`, `test/platform/guard_unbypassable_test.sh` | A declared-count guard must not sit below a path that exits successfully. |
+| `scripts/check-hand-built-credential-request.sh` | `scripts/lint-elixir.sh` | No module but Effect.elm may hand-build a credential-bearing Http.request. |
 | `scripts/check-http-timeouts.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-idor-response.sh` | `.github/workflows/ci.yml`, `test/platform/idor_gate_test.sh` |  |
 | `scripts/check-licenses.sh` | `.github/workflows/ci.yml`, `justfile`, `scripts/ci.sh`, `test/platform/gate_fail_closed_test.sh` |  |

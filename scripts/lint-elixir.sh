@@ -189,6 +189,13 @@ gate check-reason-absence-claims.sh
 # to "/tmp/uploads" in the branch a server always takes, so the derivation was
 # dead and the declared value could never win.
 gate check-derived-config-not-reassigned.sh
+# Also here because this lane is the only one that runs. It holds the line the
+# `Api.Url.SameOriginUrl` type cannot: a hand-built `Http.request` takes a bare
+# String url and a bare header list, escaping the compile-time same-origin
+# proof, so no module but `Effect.elm` may combine `Http.request` with a
+# credential helper. A page once hand-built a credential request and the whole
+# Elm suite and every Elm gate passed.
+gate check-hand-built-credential-request.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict

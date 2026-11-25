@@ -115,7 +115,11 @@ SUCCESS_EXIT = re.compile(
 # `test/platform/gate_fail_closed_test.sh` gained `EXPECTED_GATE_FLOOR`, the floor on
 # the gate list its whole-corpus starvation probe walks, for the same reason. Both
 # declarations sit above every success exit in their file.
-EXPECTED_GUARDED_SCRIPTS = 29
+# ⚖️ 29 → 30 on 2026-11-25: `check-hand-built-credential-request.sh` gained
+# `MIN_ELM_FILES`, the floor on its Elm corpus, so a broken glob cannot pass over
+# an empty scan while the credential-request escape hatch it guards goes unseen.
+# Its floor sits above the file's only success exit.
+EXPECTED_GUARDED_SCRIPTS = 30
 
 guarded = {}
 violations = []
