@@ -727,14 +727,14 @@ defmodule Stacks.CostsTest do
       end)
 
       assert Core.Repo.aggregate(Oban.Job, :count) == 0
-      assert Costs.vision_jobs_this_month() == {:ok, 2}
+      assert Costs.gpu_vision_jobs_this_month() == {:ok, 2}
     end
 
     test "an unreachable metric store yields no count, and never a zero" do
       MockPrometheusClient.put_response({:error, :unreachable})
 
       assert Costs.emails_this_month() == :error
-      assert Costs.vision_jobs_this_month() == :error
+      assert Costs.gpu_vision_jobs_this_month() == :error
     end
 
     test "an unavailable inference count is not priced as zero inferences" do
@@ -1069,7 +1069,7 @@ defmodule Stacks.CostsTest do
     end
   end
 
-  describe "vision_jobs_this_month/0" do
+  describe "gpu_vision_jobs_this_month/0" do
     alias Stacks.Transparency.MockPrometheusClient
 
     # ⛔ THE DENOMINATOR THE MODAL LINE DIVIDES GPU SECONDS INTO. Unfiltered, this
@@ -1079,7 +1079,7 @@ defmodule Stacks.CostsTest do
     test "counts only the tiers that use a GPU" do
       MockPrometheusClient.put_response({:ok, 2.0})
 
-      assert {:ok, 2} = Costs.vision_jobs_this_month()
+      assert {:ok, 2} = Costs.gpu_vision_jobs_this_month()
 
       q = MockPrometheusClient.last_query()
 
@@ -1118,7 +1118,7 @@ defmodule Stacks.CostsTest do
                "unfiltered count and 2 is the GPU-tier subset — reporting 2 excludes every " <>
                "barcode-answered identification from a sentence that claims to count them all"
 
-      assert Costs.vision_jobs_this_month() == {:ok, 2},
+      assert Costs.gpu_vision_jobs_this_month() == {:ok, 2},
              "and the cost denominator must stay GPU-filtered: it is divided into GPU seconds, " <>
                "so counting non-GPU calls halves the apparent cost per inference"
     end

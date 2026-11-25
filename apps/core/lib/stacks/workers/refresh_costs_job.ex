@@ -27,7 +27,7 @@ defmodule Stacks.Workers.RefreshCostsJob do
     period_start = beginning_of_month(now)
     period_end = end_of_month(now)
 
-    vision_jobs = unwrap(Costs.vision_jobs_this_month())
+    vision_jobs = unwrap(Costs.gpu_vision_jobs_this_month())
 
     core_awake_seconds =
       case Costs.core_awake_seconds(period_start, now) do

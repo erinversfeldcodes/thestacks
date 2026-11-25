@@ -333,7 +333,9 @@ defmodule Stacks.Costs do
   #   seconds are divided into. Declared rather than filtered silently.
 
   @doc """
-      Number of Modal vision inferences this month, counted from the per-call
+      Number of GPU-tier Modal vision inferences this month (the VLM tiers; a
+      barcode answer uses no GPU and is counted elsewhere, as an identification
+      under the `vision_jobs_this_month` metric key), counted from the per-call
       request metric.
 
       Not from `oban_jobs`: job rows are pruned, so counting them reports only
@@ -342,15 +344,15 @@ defmodule Stacks.Costs do
       seconds when this was written and is now seven days; the decision is
       unchanged, because a MONTH-to-date figure cannot be derived from a
       seven-day table either. Raising retention further would not rescue it —
-      the counter is the right source, not a longer-lived side effect. Counts the calls Counts the calls
+      the counter is the right source, not a longer-lived side effect. Counts the calls
       that reached Modal and returned, which is what Modal bills for; a call
       that raised before a response is counted separately as an exception.
       Returns `:error` when the metric store cannot be reached, which the cost
       item renders as an estimate rather than as zero.
   """
 
-  @spec vision_jobs_this_month() :: {:ok, non_neg_integer()} | :error
-  def vision_jobs_this_month do
+  @spec gpu_vision_jobs_this_month() :: {:ok, non_neg_integer()} | :error
+  def gpu_vision_jobs_this_month do
     metric_count_this_month(
       "stacks_vision_request_stop_duration_milliseconds_count",
       ~s|tier=~"#{Enum.join(@gpu_tiers, "|")}"|
