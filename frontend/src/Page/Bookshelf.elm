@@ -161,7 +161,7 @@ type alias Model =
     , rssLink : RSSLink.Model
     , viewMode : ShelfViewMode
     , sortState : BookList.SortState
-    , token : Maybe Api.Credentials
+    , isAuthenticated : Bool
     , organiser : ShelfOrganiser.State
     , organiserBusy : Bool
     , organiserError : Maybe String
@@ -352,7 +352,7 @@ initWithEffect config maybeToken userId =
       , rssLink = RSSLink.init
       , viewMode = SpineView
       , sortState = { column = BookList.Title, direction = BookList.Asc }
-      , token = maybeToken
+      , isAuthenticated = maybeToken /= Nothing
       , organiser = ShelfOrganiser.init
       , organiserBusy = False
       , organiserError = Nothing
@@ -412,11 +412,11 @@ expireToastAfterDelay =
     Process.sleep undoToastMillis |> Task.perform (\_ -> ToastExpired)
 
 
-update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
-update msg model =
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
+update msg model maybeToken =
     let
         ( newModel, effect, out ) =
-            updateWithEffect msg model
+            updateWithEffect msg model maybeToken
     in
     ( newModel, Effect.perform effect, out )
 
@@ -428,8 +428,8 @@ this page performs after a mutation — the one whose refetch used to be
 reconstructed by hand in the harness — is the read the tests see.
 
 -}
-updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
-updateWithEffect msg model =
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         ShelvesLoaded key result ->
             if key /= requestKey model.config then
@@ -489,11 +489,11 @@ updateWithEffect msg model =
             ( { model | sortState = { column = column, direction = newDirection } }, Effect.none, NoOut )
 
         OrganiserMsg subMsg ->
-            handleOrganiser subMsg model
+            handleOrganiser subMsg model maybeToken
 
         ShelfMutated (Ok ()) ->
             ( { model | organiserBusy = False, organiserError = Nothing }
-            , reloadShelves model
+            , reloadShelves model maybeToken
             , NoOut
             )
 
@@ -503,15 +503,15 @@ updateWithEffect msg model =
 
             else
                 ( { model | organiserBusy = False, organiserError = Just (mutationError err) }
-                , reloadShelves model
+                , reloadShelves model maybeToken
                 , NoOut
                 )
 
         ReloadRequested ->
-            ( model, reloadShelves model, NoOut )
+            ( model, reloadShelves model maybeToken, NoOut )
 
         UndoRemove ->
-            case ( model.undoToast, mutationToken model ) of
+            case ( model.undoToast, mutationToken model maybeToken ) of
                 ( ToastOffered removal, Just token ) ->
                     ( { model | undoToast = ToastRestoring removal }
                     , Effect.authed (Api.restoreBookRequest removal.placementId)
@@ -527,7 +527,7 @@ updateWithEffect msg model =
 
         UndoCompleted (Ok ()) ->
             ( { model | undoToast = ToastHidden }
-            , reloadShelves model
+            , reloadShelves model maybeToken
             , NoOut
             )
 
@@ -607,13 +607,13 @@ and mutating someone else's shelf. `read_only_undo_is_inert_SECURITY`
 pins it.
 
 -}
-mutationToken : Model -> Maybe Api.Credentials
-mutationToken model =
+mutationToken : Model -> Maybe Api.Credentials -> Maybe Api.Credentials
+mutationToken model maybeToken =
     if model.config.readOnly then
         Nothing
 
     else
-        model.token
+        maybeToken
 
 
 {-| Shelf organisation, split out so `update` stays flat.
@@ -629,9 +629,9 @@ mid-drag is local bookkeeping, not a mutation — a read-only page may hold a dr
 can never complete, because `DropOn` needs the credential it does not have.
 
 -}
-handleOrganiser : ShelfOrganiser.Msg -> Model -> ( Model, Effect Msg, OutMsg )
-handleOrganiser subMsg model =
-    case ( subMsg, mutationToken model, model.shelves ) of
+handleOrganiser : ShelfOrganiser.Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+handleOrganiser subMsg model maybeToken =
+    case ( subMsg, mutationToken model maybeToken, model.shelves ) of
         ( ShelfOrganiser.AddShelf, Just token, _ ) ->
             ( { model | organiserBusy = True }
             , Effect.authed (Api.createShelfRequest model.config.apiName)
@@ -728,9 +728,9 @@ the read-only dispatch across: this used to re-read the viewer's OWN bookshelf
 while browsing someone else's profile shelf.
 
 -}
-reloadShelves : Model -> Effect Msg
-reloadShelves model =
-    fetchShelves model.config model.token
+reloadShelves : Model -> Maybe Api.Credentials -> Effect Msg
+reloadShelves model maybeToken =
+    fetchShelves model.config maybeToken
 
 
 {-| A load failure in the reader's terms. The two cases split from
@@ -1044,7 +1044,7 @@ reverse that. This manages the physical shelves alongside.
 -}
 viewOrganiser : Model -> List Shelf -> Html Msg
 viewOrganiser model shelves =
-    if model.config.readOnly || model.token == Nothing then
+    if model.config.readOnly || not model.isAuthenticated then
         text ""
 
     else

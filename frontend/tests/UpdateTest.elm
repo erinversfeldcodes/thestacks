@@ -22,7 +22,7 @@ libraryInit =
     , rssLink = { showUrl = False }
     , viewMode = SpineView
     , sortState = { column = BookList.Title, direction = BookList.Asc }
-    , token = Nothing
+    , isAuthenticated = False
     , organiser = { dragging = Nothing }
     , organiserBusy = False
     , organiserError = Nothing
@@ -108,6 +108,7 @@ suite =
                             Bookshelf.update
                                 (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Err (Http.BadStatus 403)))
                                 libraryInit
+                                Nothing
                     in
                     Expect.all
                         [ \m -> Expect.equal True m.showAgeGate
@@ -121,6 +122,7 @@ suite =
                             Bookshelf.update
                                 (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Err Http.NetworkError))
                                 libraryInit
+                                Nothing
                     in
                     Expect.all
                         [ \m -> Expect.equal False m.showAgeGate
@@ -134,6 +136,7 @@ suite =
                             Bookshelf.update
                                 (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Ok { shelves = [], visibility = "owner" }))
                                 libraryInit
+                                Nothing
                     in
                     Expect.all
                         [ \m -> Expect.equal False m.showAgeGate
@@ -147,7 +150,7 @@ suite =
                             { libraryInit | showAgeGate = True }
 
                         ( model, _, _ ) =
-                            Bookshelf.update Bookshelf.DismissAgeGate modelWithGate
+                            Bookshelf.update Bookshelf.DismissAgeGate modelWithGate Nothing
                     in
                     Expect.equal False model.showAgeGate
             ]

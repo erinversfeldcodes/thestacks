@@ -34,7 +34,6 @@ type alias Model =
     { books : RemoteData Http.Error (List Placement)
     , showAgeGate : Bool
     , selectedBookId : Maybe String
-    , token : Maybe Api.Credentials
     , cards : List Card.Model
     , saveState : RemoteData Api.ProgressError ()
     , finishedPrompt : Maybe String
@@ -132,7 +131,6 @@ initWithEffect maybeToken =
     ( { books = Loading
       , showAgeGate = False
       , selectedBookId = Nothing
-      , token = maybeToken
       , cards = []
       , saveState = NotAsked
       , finishedPrompt = Nothing
@@ -141,11 +139,11 @@ initWithEffect maybeToken =
     )
 
 
-update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
-update msg model =
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
+update msg model maybeToken =
     let
         ( newModel, effect, out ) =
-            updateWithEffect msg model
+            updateWithEffect msg model maybeToken
     in
     ( newModel, Effect.perform effect, out )
 
@@ -157,8 +155,8 @@ a progress card asks for — including the draft values in its body — is the o
 the tests see. `update` is this composed with `Effect.perform`.
 
 -}
-updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
-updateWithEffect msg model =
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         BooksLoaded result ->
             case result of
@@ -180,7 +178,7 @@ updateWithEffect msg model =
                         ( { model | books = Failure err }, Effect.none, NoOut )
 
         ReloadRequested ->
-            ( model, fetchPile model.token, NoOut )
+            ( model, fetchPile maybeToken, NoOut )
 
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Effect.none, NoOut )
@@ -218,7 +216,7 @@ updateWithEffect msg model =
                         |> List.head
             in
             if List.member Card.ProgressUpdateRequested outMsgs then
-                case ( requestedCard, model.token ) of
+                case ( requestedCard, maybeToken ) of
                     ( Just c, Just token ) ->
                         case cardProgressWrite c of
                             Just spec ->
@@ -343,7 +341,7 @@ updateWithEffect msg model =
                     ( { model | cards = clearSaving placementId model.cards, saveState = Failure other }, Effect.none, NoOut )
 
         RecordReadRequested placementId ->
-            case model.token of
+            case maybeToken of
                 Just token ->
                     ( model
                     , Effect.authed (Api.moveBookRequest placementId "library")

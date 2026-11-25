@@ -22,7 +22,6 @@ import Types.RemoteData exposing (RemoteData(..))
 type alias Model =
     { posts : RemoteData Http.Error (List BlogPostSummary)
     , isAuthenticated : Bool
-    , token : Maybe Api.Credentials
 
     -- The server's cursor for the next page, `Nothing` once the feed is
     -- exhausted. ⚠️ It is the ONLY end-of-feed signal: the window is read before
@@ -59,7 +58,6 @@ initWithEffect : Maybe Api.Credentials -> ( Model, Effect Msg )
 initWithEffect maybeToken =
     ( { posts = Loading
       , isAuthenticated = maybeToken /= Nothing
-      , token = maybeToken
       , nextCursor = Nothing
       , loadingMore = False
       , loadMoreError = False
@@ -84,19 +82,19 @@ postsEffect maybeToken maybeCursor =
         (Api.resolveJson Api.blogPostPageDecoder >> PostsLoaded)
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg )
+update msg model maybeToken =
     let
         ( newModel, effect ) =
-            updateWithEffect msg model
+            updateWithEffect msg model maybeToken
     in
     ( newModel, Effect.perform effect )
 
 
 {-| `update`, with its effects as data.
 -}
-updateWithEffect : Msg -> Model -> ( Model, Effect Msg )
-updateWithEffect msg model =
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg )
+updateWithEffect msg model maybeToken =
     case msg of
         PostsLoaded result ->
             case result of
@@ -136,7 +134,7 @@ updateWithEffect msg model =
             case model.nextCursor of
                 Just cursor ->
                     ( { model | loadingMore = True, loadMoreError = False }
-                    , postsEffect model.token (Just cursor)
+                    , postsEffect maybeToken (Just cursor)
                     )
 
                 Nothing ->

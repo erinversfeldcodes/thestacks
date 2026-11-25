@@ -2112,8 +2112,11 @@ update msg model =
             case model.page of
                 PageBookshelf subModel ->
                     let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
                         ( newSubModel, subCmd, outMsg ) =
-                            Bookshelf.update subMsg subModel
+                            Bookshelf.update subMsg subModel maybeToken
 
                         hasPlacements =
                             case newSubModel.shelves of
@@ -2163,8 +2166,11 @@ update msg model =
             case model.page of
                 PageReadingPile subModel ->
                     let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
                         ( newSubModel, subCmd, outMsg ) =
-                            ReadingPile.update subMsg subModel
+                            ReadingPile.update subMsg subModel maybeToken
 
                         baseModel =
                             { model | page = PageReadingPile newSubModel }
@@ -2747,8 +2753,11 @@ update msg model =
             case model.page of
                 PageBlogArchive subModel ->
                     let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
                         ( newSubModel, subCmd ) =
-                            BlogArchive.update subMsg subModel
+                            BlogArchive.update subMsg subModel maybeToken
                     in
                     ( { model | page = PageBlogArchive newSubModel }
                     , Cmd.map BlogArchiveMsg subCmd
@@ -3130,7 +3139,7 @@ update msg model =
                         BookDetail.PlacementMutated ->
                             let
                                 ( refreshedPage, refreshCmd ) =
-                                    refreshShelfBehindOverlay model.page
+                                    refreshShelfBehindOverlay (Maybe.map .token (currentAuth model.auth)) model.page
                                         |> Maybe.withDefault ( model.page, Cmd.none )
                             in
                             ( { model
@@ -3438,20 +3447,20 @@ which is a different answer from handing back the page and an empty command:
 the caller leaves `model.page` alone rather than rewriting it with itself.
 
 -}
-refreshShelfBehindOverlay : Page -> Maybe ( Page, Cmd Msg )
-refreshShelfBehindOverlay page =
+refreshShelfBehindOverlay : Maybe Api.Credentials -> Page -> Maybe ( Page, Cmd Msg )
+refreshShelfBehindOverlay maybeToken page =
     case page of
         PageBookshelf shelf ->
             let
                 ( refreshed, cmd, _ ) =
-                    Bookshelf.update Bookshelf.ReloadRequested shelf
+                    Bookshelf.update Bookshelf.ReloadRequested shelf maybeToken
             in
             Just ( PageBookshelf refreshed, Cmd.map BookshelfMsg cmd )
 
         PageReadingPile pile ->
             let
                 ( refreshed, cmd, _ ) =
-                    ReadingPile.update ReadingPile.ReloadRequested pile
+                    ReadingPile.update ReadingPile.ReloadRequested pile maybeToken
             in
             Just ( PageReadingPile refreshed, Cmd.map ReadingPileMsg cmd )
 

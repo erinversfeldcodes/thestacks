@@ -110,6 +110,7 @@ staleSiblingShelfResponseIsDiscarded =
                             (Ok staleLibraryResponse)
                         )
                         antiLibraryModel
+                        (Just (TestHelpers.creds "test-token"))
             in
             Expect.all
                 [ \_ -> libraryModel.shelves |> Expect.equal Loading
@@ -136,6 +137,7 @@ staleSiblingShelfResponseDoesNotRender =
                             (Ok staleLibraryResponse)
                         )
                         antiLibraryModel
+                        (Just (TestHelpers.creds "test-token"))
             in
             Bookshelf.view afterStale
                 |> Query.fromHtml
@@ -160,6 +162,7 @@ matchingShelfResponseIsStillApplied =
                             (Ok staleLibraryResponse)
                         )
                         libraryModel
+                        (Just (TestHelpers.creds "test-token"))
             in
             afterFresh.shelves
                 |> Expect.equal (Success staleLibraryResponse.shelves)

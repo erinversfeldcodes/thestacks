@@ -20,7 +20,6 @@ loadingModel =
     { books = Loading
     , showAgeGate = False
     , selectedBookId = Nothing
-    , token = Nothing
     , cards = []
     , saveState = NotAsked
     , finishedPrompt = Nothing
@@ -42,7 +41,7 @@ suite =
             \_ ->
                 let
                     ( model, _, out ) =
-                        ReadingPile.update (BooksLoaded (Ok [ shelfWithOneBook ])) loadingModel
+                        ReadingPile.update (BooksLoaded (Ok [ shelfWithOneBook ])) loadingModel Nothing
                 in
                 ( model.books, out )
                     |> Expect.equal ( Success [ testPlacement ], NoOut )
@@ -50,7 +49,7 @@ suite =
             \_ ->
                 let
                     ( model, _, _ ) =
-                        ReadingPile.update (BooksLoaded (Err (Http.BadStatus 403))) loadingModel
+                        ReadingPile.update (BooksLoaded (Err (Http.BadStatus 403))) loadingModel Nothing
                 in
                 model.showAgeGate
                     |> Expect.equal True
@@ -58,7 +57,7 @@ suite =
             \_ ->
                 let
                     ( _, _, out ) =
-                        ReadingPile.update (BooksLoaded (Err (Http.BadStatus 401))) loadingModel
+                        ReadingPile.update (BooksLoaded (Err (Http.BadStatus 401))) loadingModel Nothing
                 in
                 out
                     |> Expect.equal SessionExpired
@@ -66,7 +65,7 @@ suite =
             \_ ->
                 let
                     ( model, _, _ ) =
-                        ReadingPile.update (BooksLoaded (Err Http.NetworkError)) loadingModel
+                        ReadingPile.update (BooksLoaded (Err Http.NetworkError)) loadingModel Nothing
                 in
                 model.books
                     |> Expect.equal (Failure Http.NetworkError)
@@ -74,7 +73,7 @@ suite =
             \_ ->
                 let
                     ( model, _, _ ) =
-                        ReadingPile.update DismissAgeGate { loadingModel | showAgeGate = True }
+                        ReadingPile.update DismissAgeGate { loadingModel | showAgeGate = True } Nothing
                 in
                 model.showAgeGate
                     |> Expect.equal False
@@ -82,7 +81,7 @@ suite =
             \_ ->
                 let
                     ( model, _, _ ) =
-                        ReadingPile.update (BookHovered "book-9") loadingModel
+                        ReadingPile.update (BookHovered "book-9") loadingModel Nothing
                 in
                 model.selectedBookId
                     |> Expect.equal (Just "book-9")
@@ -90,7 +89,7 @@ suite =
             \_ ->
                 let
                     ( model, _, out ) =
-                        ReadingPile.update (BookClicked testBook) loadingModel
+                        ReadingPile.update (BookClicked testBook) loadingModel Nothing
                 in
                 ( model.selectedBookId, out )
                     |> Expect.equal ( Just testBook.id, NoOut )
@@ -100,6 +99,7 @@ suite =
                     ( _, _, out ) =
                         ReadingPile.update (BookClicked testBook)
                             { loadingModel | selectedBookId = Just testBook.id }
+                            Nothing
                 in
                 out
                     |> Expect.equal (NavigateTo (BookDetail testBook.id))
@@ -109,6 +109,7 @@ suite =
                     ( model, _, _ ) =
                         ReadingPile.update Deselect
                             { loadingModel | selectedBookId = Just "book-9" }
+                            Nothing
                 in
                 model.selectedBookId
                     |> Expect.equal Nothing

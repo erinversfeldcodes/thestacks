@@ -32,7 +32,7 @@ bookshelfIn shelves =
         , rssLink = { showUrl = False }
         , viewMode = SpineView
         , sortState = { column = BookList.Title, direction = BookList.Asc }
-        , token = Nothing
+        , isAuthenticated = False
         , organiser = { dragging = Nothing }
         , organiserBusy = False
         , organiserError = Nothing

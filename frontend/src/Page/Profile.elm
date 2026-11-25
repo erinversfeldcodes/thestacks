@@ -18,7 +18,6 @@ import Types.RemoteData exposing (RemoteData(..))
 
 type alias Model =
     { handle : String
-    , token : Maybe Api.Credentials
     , profile : RemoteData Http.Error PublicProfile
     }
 
@@ -55,7 +54,7 @@ is correct, because an anonymous request is answered rather than refused and a
 -}
 initWithEffect : Maybe Api.Credentials -> String -> ( Model, Effect Msg )
 initWithEffect maybeToken handle =
-    ( { handle = handle, token = maybeToken, profile = Loading }
+    ( { handle = handle, profile = Loading }
     , Effect.public (Api.getProfileRequest handle)
         maybeToken
         Nothing

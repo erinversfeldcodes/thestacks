@@ -224,9 +224,10 @@ readOnlyUndoIsInert =
                             (Ok { shelves = [], visibility = "owner" })
                         )
                         seeded
+                        (Just (TestHelpers.creds "viewer-token"))
 
                 ( after, cmd, _ ) =
-                    Bookshelf.update Bookshelf.UndoRemove loaded
+                    Bookshelf.update Bookshelf.UndoRemove loaded (Just (TestHelpers.creds "viewer-token"))
             in
             Expect.all
                 [ \_ -> Expect.equal (Bookshelf.ToastOffered removal) loaded.undoToast

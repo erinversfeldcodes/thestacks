@@ -149,7 +149,7 @@ lookOnlySpineClick =
                         "viewer-user-id"
 
                 ( _, _, outMsg ) =
-                    Bookshelf.update (Bookshelf.BookClicked testBook) model
+                    Bookshelf.update (Bookshelf.BookClicked testBook) model (Just (TestHelpers.creds "viewer-token"))
             in
             Expect.equal outMsg Bookshelf.NoOut
 
@@ -317,11 +317,12 @@ driveOrganiser config drive =
                     (Ok { shelves = twoShelves, visibility = "owner" })
                 )
                 initial
+                (Just (TestHelpers.creds "viewer-token"))
 
         step subMsg ( model, _ ) =
             let
                 ( next, cmd, _ ) =
-                    Bookshelf.update (Bookshelf.OrganiserMsg subMsg) model
+                    Bookshelf.update (Bookshelf.OrganiserMsg subMsg) model (Just (TestHelpers.creds "viewer-token"))
             in
             ( next, cmd )
     in

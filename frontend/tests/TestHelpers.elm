@@ -1449,7 +1449,7 @@ bookshelfProgram config maybeToken =
             \msg model ->
                 let
                     ( newModel, effect, _ ) =
-                        Bookshelf.updateWithEffect msg model
+                        Bookshelf.updateWithEffect msg model maybeToken
                 in
                 ( newModel, simulateEffect effect )
         , view = Bookshelf.view
@@ -1490,7 +1490,7 @@ readingPileProgram maybeToken =
             \msg model ->
                 let
                     ( newPage, effect, out ) =
-                        ReadingPile.updateWithEffect msg model.page
+                        ReadingPile.updateWithEffect msg model.page maybeToken
                 in
                 ( { page = newPage, lastOut = out }, simulateEffect effect )
         , view = \model -> ReadingPile.view model.page
@@ -1531,7 +1531,7 @@ bookshelfUndoProgram config maybeToken removal =
             \msg model ->
                 let
                     ( newModel, effect, _ ) =
-                        Bookshelf.updateWithEffect msg model
+                        Bookshelf.updateWithEffect msg model maybeToken
                 in
                 ( newModel, simulateEffect effect )
         , view = Bookshelf.view
@@ -1560,7 +1560,7 @@ profileShelfProgram maybeToken handle bookshelfName =
             \msg model ->
                 let
                     ( newModel, effect, _ ) =
-                        Bookshelf.updateWithEffect msg model
+                        Bookshelf.updateWithEffect msg model maybeToken
                 in
                 ( newModel, simulateEffect effect )
         , view = Bookshelf.view

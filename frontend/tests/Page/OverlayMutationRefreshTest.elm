@@ -250,7 +250,7 @@ loadedShelf config =
     , rssLink = { showUrl = False }
     , viewMode = ListView
     , sortState = { column = BookList.Author, direction = BookList.Desc }
-    , token = Just (TestHelpers.creds "owner-token")
+    , isAuthenticated = True
     , organiser = { dragging = Nothing }
     , organiserBusy = False
     , organiserError = Nothing
@@ -273,7 +273,7 @@ refreshReachesTheShelfWithoutBlankingIt =
                 shelf =
                     loadedShelf Bookshelf.libraryConfig
             in
-            case Main.refreshShelfBehindOverlay (Main.PageBookshelf shelf) of
+            case Main.refreshShelfBehindOverlay (Just (TestHelpers.creds "owner-token")) (Main.PageBookshelf shelf) of
                 Just ( Main.PageBookshelf refreshed, _ ) ->
                     Expect.all
                         [ \m -> Expect.equal shelf.shelves m.shelves
@@ -297,7 +297,7 @@ refreshReachesTheReadingPile =
                 ( pile, _ ) =
                     ReadingPile.init (Just (TestHelpers.creds "owner-token"))
             in
-            case Main.refreshShelfBehindOverlay (Main.PageReadingPile { pile | books = Success [ testPlacement ] }) of
+            case Main.refreshShelfBehindOverlay (Just (TestHelpers.creds "owner-token")) (Main.PageReadingPile { pile | books = Success [ testPlacement ] }) of
                 Just ( Main.PageReadingPile refreshed, _ ) ->
                     Expect.equal (Success [ testPlacement ]) refreshed.books
 
@@ -315,7 +315,7 @@ refreshLeavesOtherPagesAlone : Test
 refreshLeavesOtherPagesAlone =
     test "refresh_leaves_other_pages_alone: a page that shows no placements is untouched" <|
         \() ->
-            case Main.refreshShelfBehindOverlay Main.PageAbout of
+            case Main.refreshShelfBehindOverlay Nothing Main.PageAbout of
                 Nothing ->
                     Expect.pass
 

@@ -150,11 +150,13 @@ suite =
                             Archive.update
                                 (Archive.PostsLoaded (Ok { posts = [ postSummary "a" ], nextCursor = Just "c1" }))
                                 initialModel
+                                Nothing
 
                         ( afterSecond, _ ) =
                             Archive.update
                                 (Archive.PostsLoaded (Ok { posts = [ postSummary "b" ], nextCursor = Nothing }))
                                 afterFirst
+                                Nothing
                     in
                     case afterSecond.posts of
                         Success posts ->
@@ -169,6 +171,7 @@ suite =
                             Archive.update
                                 (Archive.PostsLoaded (Ok { posts = [ postSummary "a" ], nextCursor = Nothing }))
                                 initialModel
+                                Nothing
                     in
                     Expect.equal Nothing loaded.nextCursor
             , test "a failed later page keeps the pages already read" <|
@@ -181,11 +184,13 @@ suite =
                             Archive.update
                                 (Archive.PostsLoaded (Ok { posts = [ postSummary "a" ], nextCursor = Just "c1" }))
                                 initialModel
+                                Nothing
 
                         ( afterFailure, _ ) =
                             Archive.update
                                 (Archive.PostsLoaded (Err Http.NetworkError))
                                 afterFirst
+                                Nothing
                     in
                     case afterFailure.posts of
                         Success posts ->
@@ -203,6 +208,7 @@ suite =
                             Archive.update
                                 (Archive.PostsLoaded (Err Http.NetworkError))
                                 initialModel
+                                Nothing
                     in
                     case failed.posts of
                         Failure _ ->
