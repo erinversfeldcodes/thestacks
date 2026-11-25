@@ -107,6 +107,9 @@ staleFailureNote config =
                 Envelope.AssociationOutcomeLlmError ->
                     True
 
+                Envelope.AssociationOutcomeAmbiguous ->
+                    True
+
                 Envelope.AssociationOutcomeUnspecified ->
                     False
 
@@ -176,11 +179,15 @@ viewNoAssociations config =
             Envelope.AssociationOutcomeLlmError ->
                 failureNote
 
+            Envelope.AssociationOutcomeAmbiguous ->
+                failureNote
 
-{-| ⚖️ One note for all three failure outcomes, deliberately.
+
+{-| ⚖️ One note for all four failure outcomes, deliberately.
 
 The author can act on "this did not work, and your post is fine". Which of an
-unparseable answer, a wrong shape, or a provider error it was is ours to fix and
+unparseable answer, a wrong shape, a provider error, or two conflicting
+answers it was is ours to fix and
 not theirs to read — but they are separate enum values because the DASHBOARD
 needs to tell them apart.
 

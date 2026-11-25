@@ -52,7 +52,7 @@ renderWithRows isOwner outcome =
                 [ { id = "a1"
                   , bookId = "b1"
                   , bookTitle = "Piranesi"
-                  , confidence = 0.9
+                  , confidence = Just 0.9
                   , reasoning = "named twice"
                   , status = BlogPost.Confirmed
                   }
@@ -302,7 +302,7 @@ suite =
                     case Decode.decodeString BlogPost.blogPostShowDecoder json of
                         Ok post ->
                             Expect.equal
-                                [ ( "Piranesi", 0.91 ) ]
+                                [ ( "Piranesi", Just 0.91 ) ]
                                 (List.map (\a -> ( a.bookTitle, a.confidence )) post.associations)
 
                         Err err ->
@@ -318,7 +318,7 @@ suite =
                                 [ { id = "a1"
                                   , bookId = "b1"
                                   , bookTitle = "Piranesi"
-                                  , confidence = 0.91
+                                  , confidence = Just 0.91
                                   , reasoning = "named twice"
                                   , status = BlogPost.Confirmed
                                   }
@@ -357,11 +357,18 @@ suite =
                 \_ ->
                     expectDecodeFailure (envelope [ ( "id", "\"a\"" ), ( "book_id", "\"b\"" ), ( "book_title", "\"T\"" ), ( "confidence", "0.9" ) ])
 
-            -- ⚠️ `confidence` defaulting to `0.0` rendered "0%" with a
-            -- low-confidence badge — a number the model never gave.
-            , test "an association without a confidence is a decode failure" <|
+            -- ⚖️ A missing `confidence` now DECODES as unscored (Nothing), not a
+            -- decode failure. The model returned the association without rating
+            -- it; `Nothing` is distinct from a scored 0.0, which once defaulted
+            -- here and rendered a confident "0% low" badge the model never gave.
+            , test "an association without a confidence decodes as unscored" <|
                 \_ ->
-                    expectDecodeFailure (envelope [ ( "id", "\"a\"" ), ( "book_id", "\"b\"" ), ( "book_title", "\"T\"" ), ( "status", "\"confirmed\"" ) ])
+                    case Decode.decodeString BlogPost.blogPostShowDecoder (envelope [ ( "id", "\"a\"" ), ( "book_id", "\"b\"" ), ( "book_title", "\"T\"" ), ( "status", "\"confirmed\"" ) ]) of
+                        Ok post ->
+                            Expect.equal [ Nothing ] (List.map .confidence post.associations)
+
+                        Err err ->
+                            Expect.fail (Decode.errorToString err)
             , test "an association without a book_title is a decode failure" <|
                 \_ ->
                     expectDecodeFailure (envelope [ ( "id", "\"a\"" ), ( "book_id", "\"b\"" ), ( "confidence", "0.9" ), ( "status", "\"confirmed\"" ) ])

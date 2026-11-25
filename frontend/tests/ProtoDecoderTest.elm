@@ -1631,7 +1631,7 @@ blogSuite =
                     original =
                         { id = "a-1"
                         , bookId = "b-1"
-                        , confidence = 0.85
+                        , confidence = Just 0.85
                         , source = "llm"
                         , visible = True
                         , reasoning = "title mentioned"
@@ -1649,7 +1649,7 @@ blogSuite =
                         Expect.all
                             [ \a -> Expect.equal original.id a.id
                             , \a -> Expect.equal original.bookId a.bookId
-                            , \a -> Expect.within (Expect.Absolute 0.001) original.confidence a.confidence
+                            , \a -> Expect.equal original.confidence a.confidence
                             , \a -> Expect.equal original.source a.source
                             , \a -> Expect.equal original.visible a.visible
                             , \a -> Expect.equal original.reasoning a.reasoning
@@ -1963,7 +1963,7 @@ blogResponseSuite =
                         , associations =
                             [ { id = "a-1"
                               , bookId = "b-1"
-                              , confidence = 0.85
+                              , confidence = Just 0.85
                               , source = "llm"
                               , visible = True
                               , reasoning = "title mentioned"
@@ -2028,7 +2028,7 @@ blogResponseSuite =
                         { association =
                             { id = "a-2"
                             , bookId = "b-2"
-                            , confidence = 0.75
+                            , confidence = Just 0.75
                             , source = "manual"
                             , visible = False
                             , reasoning = "user linked"
@@ -2047,7 +2047,7 @@ blogResponseSuite =
                         Expect.all
                             [ \r -> Expect.equal original.association.id r.association.id
                             , \r -> Expect.equal original.association.bookId r.association.bookId
-                            , \r -> Expect.within (Expect.Absolute 0.001) original.association.confidence r.association.confidence
+                            , \r -> Expect.equal original.association.confidence r.association.confidence
                             , \r -> Expect.equal original.association.visible r.association.visible
                             ]
                             decoded
