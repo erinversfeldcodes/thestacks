@@ -238,6 +238,16 @@
         :created_at,
         :updated_at
       ],
+      derive_inspect_except: [
+        :password_hash,
+        :password,
+        :email,
+        :pending_email,
+        :email_confirmation_token,
+        :password_reset_token,
+        :pending_email_token,
+        :pending_email_revert_token
+      ],
       field_overrides: %{
         role: %{default: "user"},
         profile_visibility: %{default: "owner"},

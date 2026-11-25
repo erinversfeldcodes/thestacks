@@ -87,7 +87,7 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
         @primary_key {:id, :binary_id, autogenerate: true}
         @foreign_key_type :binary_id
         @schema_prefix "#{table.schema_prefix}"
-        @type t :: %__MODULE__{}#{derive_jason_line(table)}
+        @type t :: %__MODULE__{}#{derive_jason_line(table)}#{derive_inspect_line(table)}
 
         schema "#{table.table_name}" do
       #{schema_body}#{timestamps_line}#{virtual_lines}
@@ -172,6 +172,19 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
   end
 
   defp derive_jason_line(_), do: ""
+
+  # Redacts sensitive fields from `inspect/2` on the struct, via `@derive` so the
+  # consolidated Inspect protocol carries it reliably (a standalone `defimpl`
+  # does not re-consolidate in an incremental build). The listed fields are shown
+  # as omitted, never with their value — closing the path by which a `%User{}`
+  # argument dumped a password hash and email into a log and `oban_jobs.errors`.
+  defp derive_inspect_line(%{derive_inspect_except: fields})
+       when is_list(fields) and fields != [] do
+    field_list = Enum.map_join(fields, ", ", &":#{&1}")
+    "\n  @derive {Inspect, except: [#{field_list}]}"
+  end
+
+  defp derive_inspect_line(_), do: ""
 
   defp virtual_fields_block(table) do
     virtuals = Map.get(table, :virtual_fields, [])
