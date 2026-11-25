@@ -19,19 +19,17 @@ defmodule Stacks.AI.Client do
   alias Stacks.AI.GpuWindow
   alias Stacks.AI.VisionError
   alias Stacks.Costs
+  alias Stacks.Proto.Enums.AnalysisTier
 
   @behaviour ClientBehaviour
 
   @fuse_name :vision_fuse
 
-  # The tiers this build knows. A label outside this set collapses to "other".
-  @known_tiers [
-    "ANALYSIS_TIER_UNSPECIFIED",
-    "ANALYSIS_TIER_BARCODE",
-    "ANALYSIS_TIER_VLM_CLASSIFY",
-    "ANALYSIS_TIER_VLM_EXTRACT",
-    "ANALYSIS_TIER_OCR"
-  ]
+  # The tiers this build knows; a label outside this set collapses to "other".
+  # Sourced from the proto enum (its single owner) rather than hand-copied, so a
+  # new AnalysisTier value widens `bounded_tier/1` automatically and there is no
+  # second list to drift from the first.
+  @known_tiers AnalysisTier.values()
 
   @modal_function_timeout_ms 300_000
 
@@ -508,6 +506,10 @@ defmodule Stacks.AI.Client do
   # an unknown tier would bill for work we cannot describe; under-charging a
   # new tier is visible as a ledger that lags the invoice, which is the
   # direction someone notices.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_OCR — OCR is not a GPU
+  #   tier, so it bears no surcharge: it falls to the `_unknown -> 0` clause
+  #   below, like every non-VLM tier. (@known_tiers is now sourced from the proto
+  #   and no longer enumerates each tier in a literal, so this is declared here.)
   def tier_surcharge_micro_cents("ANALYSIS_TIER_BARCODE"), do: 0
 
   def tier_surcharge_micro_cents(tier)

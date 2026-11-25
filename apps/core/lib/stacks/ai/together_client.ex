@@ -11,7 +11,7 @@ defmodule Stacks.AI.TogetherClient do
       ⚠️ It used to carry a second operation, `summarize_reviews/2`, for review
       summaries — deleted 2026-10-15 along with the review-summary chain, which
       modelled a table holding no rows. The 500-character truncation that lived
-      in `parse_success_response/1` went with it: it mirrored the review
+      in `parse_and_charge/1` went with it: it mirrored the review
       summary's own column cap, and it was corrupting the JSON that `complete/2`
       callers parse.
   """
@@ -52,7 +52,7 @@ defmodule Stacks.AI.TogetherClient do
   @default_micro_cents_per_token 88
 
   defp handle_response({:ok, %Finch.Response{status: 200, body: resp_body}}) do
-    parse_success_response(resp_body)
+    parse_and_charge(resp_body)
   end
 
   # ⛔ A CLIENT ERROR DOES NOT MELT THE FUSE, AND THE DISTINCTION IS NOT
@@ -149,7 +149,7 @@ defmodule Stacks.AI.TogetherClient do
   end
 
   # a caller to the transport, which is the real implementation detail.
-  def parse_success_response(resp_body) do
+  def parse_and_charge(resp_body) do
     case Jason.decode(resp_body) do
       {:ok, %{"choices" => [%{"message" => %{"content" => content}} | _]} = decoded} ->
         # one billable completion — the cost page counts these
@@ -207,7 +207,7 @@ defmodule Stacks.AI.TogetherClient do
   # decoder makes it survivable.
   @doc false
   # ⚠️ PUBLIC SO IT CAN BE ASSERTED, for the same reason
-  # `parse_success_response/1` is: `complete/2` delegates to
+  # `parse_and_charge/1` is: `complete/2` delegates to
   # `configured_client()`, which in `:test` is `MockTogetherClient`, so no test
   # driving the seam can observe what the real request looks like. The mock is
   # an observability boundary, not just a substitution.

@@ -3,7 +3,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
       What a Together AI 200 body becomes, asserted directly on the parser.
 
       ⚠️ This file exists because of a defect that shipped and a test that could
-      not see it. `parse_success_response/1` used to end in
+      not see it. `parse_and_charge/1` used to end in
       `String.slice(content, 0, 500)`. That cap mirrored the review summary's own
       column limit, but it lived in the SHARED success path — so it also applied
       to the blog post-book association worker, which asks for `max_tokens: 1024`
@@ -86,7 +86,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
     end
   end
 
-  describe "parse_success_response/1 — the content a caller receives" do
+  describe "parse_and_charge/1 — the content a caller receives" do
     test "a long association array survives whole and is still parseable" do
       payload = association_payload()
 
@@ -97,7 +97,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
              "fixture no longer exceeds the old 500-byte cap (#{byte_size(payload)} bytes), " <>
                "so it cannot detect a truncation regression"
 
-      assert {:ok, content} = TogetherClient.parse_success_response(envelope(payload))
+      assert {:ok, content} = TogetherClient.parse_and_charge(envelope(payload))
 
       # The property that actually broke: the caller can still parse it. This
       # fails under a truncation at ANY limit, not just 500.
@@ -120,7 +120,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
       payload = association_payload()
 
       assert {:ok, content} =
-               TogetherClient.parse_success_response(envelope("\n  " <> payload <> "  \n"))
+               TogetherClient.parse_and_charge(envelope("\n  " <> payload <> "  \n"))
 
       assert content == payload
     end
@@ -128,7 +128,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
     test "one billable completion is counted per successful parse" do
       # The counter the cost page reads. Nothing asserted this anywhere before.
       capture_telemetry([:stacks, :ai, :together_completion], fn ->
-        assert {:ok, _} = TogetherClient.parse_success_response(envelope(association_payload()))
+        assert {:ok, _} = TogetherClient.parse_and_charge(envelope(association_payload()))
       end)
 
       assert_received {:telemetry, %{count: 1}}
@@ -140,12 +140,12 @@ defmodule Stacks.AI.TogetherClientParseTest do
       # existed this raised CaseClauseError from inside the HTTP path, bypassing
       # every caller's {:error, _} handling.
       assert {:error, {:undecodable_response, %Jason.DecodeError{}}} =
-               TogetherClient.parse_success_response("<html>502 Bad Gateway</html>")
+               TogetherClient.parse_and_charge("<html>502 Bad Gateway</html>")
     end
 
     test "a 200 with an unexpected JSON shape returns a tagged error" do
       assert {:error, {:unexpected_response, %{"error" => _}}} =
-               TogetherClient.parse_success_response(Jason.encode!(%{"error" => "quota"}))
+               TogetherClient.parse_and_charge(Jason.encode!(%{"error" => "quota"}))
     end
   end
 
@@ -244,7 +244,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
           "usage" => %{"total_tokens" => 2_000_000}
         })
 
-      assert {:ok, "0.8"} = TogetherClient.parse_success_response(body)
+      assert {:ok, "0.8"} = TogetherClient.parse_and_charge(body)
 
       charged = Spend.spent(:together, :daily)
 
@@ -263,7 +263,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
           "usage" => %{"total_tokens" => 500_000}
         })
 
-      assert {:ok, "0.5"} = TogetherClient.parse_success_response(body)
+      assert {:ok, "0.5"} = TogetherClient.parse_and_charge(body)
 
       assert Spend.spent(:together, :daily) == 500_000 * 88
     end
@@ -279,7 +279,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
           "usage" => %{"total_tokens" => 400}
         })
 
-      assert {:ok, "0.7"} = TogetherClient.parse_success_response(body)
+      assert {:ok, "0.7"} = TogetherClient.parse_and_charge(body)
 
       charged = Spend.spent(:together, :daily)
 
@@ -296,7 +296,7 @@ defmodule Stacks.AI.TogetherClientParseTest do
     test "a response with no usage block is charged one token's worth" do
       body = Jason.encode!(%{"choices" => [%{"message" => %{"content" => "0.3"}}]})
 
-      assert {:ok, "0.3"} = TogetherClient.parse_success_response(body)
+      assert {:ok, "0.3"} = TogetherClient.parse_and_charge(body)
 
       assert Spend.spent(:together, :daily) == 88,
              "a completion with an unreadable usage block was free, or was charged a " <>

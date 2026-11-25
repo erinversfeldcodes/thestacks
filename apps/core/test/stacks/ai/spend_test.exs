@@ -171,7 +171,7 @@ defmodule Stacks.AI.SpendTest do
     #
     # `record/3`'s docstring said metering must not fail the work it meters.
     # There was no `rescue`, so an error raised out of
-    # `TogetherClient.parse_success_response/1`, crashed the worker, and Oban
+    # `TogetherClient.parse_and_charge/1`, crashed the worker, and Oban
     # retried the job — calling and paying for the completion a SECOND time. A
     # metering failure costing a second charge is the exact opposite of the
     # claim.

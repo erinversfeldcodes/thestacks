@@ -86,7 +86,7 @@ defmodule Stacks.AI.MockTogetherClient do
         "usage" => %{"total_tokens" => usage_tokens()}
       })
 
-    TogetherClient.parse_success_response(body)
+    TogetherClient.parse_and_charge(body)
   end
 
   @doc """

@@ -332,10 +332,6 @@ defmodule Stacks.Costs do
   #   ~7ms of CPU and no GPU at all, so counting it would dilute a denominator that GPU
   #   seconds are divided into. Declared rather than filtered silently.
 
-  @doc "The GPU tiers whose requests the Modal inference line is priced across."
-  @spec gpu_tiers() :: [String.t()]
-  def gpu_tiers, do: @gpu_tiers
-
   @doc """
       Number of Modal vision inferences this month, counted from the per-call
       request metric.

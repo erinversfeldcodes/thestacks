@@ -62,6 +62,23 @@ config :core, :env, :test
 config :core, :age_gating_enabled, true
 
 config :core, :rate_limiting_enabled, false
+
+# ⛔ EACH MOCK BELOW IS AN OBSERVABILITY BOUNDARY. A test-roster mock replaces a
+# real collaborator, so everything BELOW the swap stops running under test. When
+# you add one, fake the TRANSPORT, not the behaviour: the question to ask is
+# "what runs below this that the mock now skips — billing, validation, a side
+# effect, a retry — and is that behaviour tested somewhere the mock does not
+# reach?" If it is not, deepen the seam (hand a canned transport response to the
+# REAL wrapper) rather than stubbing the wrapper wholesale.
+#
+# Measured: `MockTogetherClient` once replaced `complete/2` whole, so the budget
+# charge in `parse_and_charge/1` never ran and a test could not tell a working
+# meter from an absent one. It now hands a canned envelope to the real function.
+# Audited 2026-11-25: the other roster mocks are transport fakes whose critical
+# below-swap behaviour is covered elsewhere — vision billing by `client_test`
+# (`tier_surcharge_micro_cents`) and `costs_test`, ISBN verification above the
+# faked HTTP, image retention/erasure above the faked storage, the scraper/Brave/
+# SearXNG/geocoder services in their own suites, and the dbt models by `test-dbt`.
 config :core, :vision_client, Stacks.AI.MockClient
 
 config :core, :validate_event_payload_contract, true

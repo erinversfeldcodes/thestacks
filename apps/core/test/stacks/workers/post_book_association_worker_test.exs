@@ -170,7 +170,7 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       # claiming otherwise and the probe caught me.
       #
       # It was written as a regression test for a real production defect:
-      # `TogetherClient.parse_success_response/1` used to end in
+      # `TogetherClient.parse_and_charge/1` used to end in
       # `String.slice(content, 0, 500)` — a cap that mirrored the 500-character
       # limit on a review summary and belonged to the review-summary caller,
       # now deleted. In production that truncation corrupts THIS caller, which
@@ -182,7 +182,7 @@ defmodule Stacks.Workers.PostBookAssociationWorkerTest do
       #
       # This test cannot see any of that. `complete/2` delegates to
       # `configured_client()`, which in test is `MockTogetherClient`, so the
-      # real `parse_success_response/1` never runs — restoring the truncation
+      # real `parse_and_charge/1` never runs — restoring the truncation
       # leaves this test green, which is how I know. The observable I would need
       # is an HTTP 200 body reaching the real parser, and there is no stub server
       # in this suite to produce one; `circuit_breakers_test.exs` points at the

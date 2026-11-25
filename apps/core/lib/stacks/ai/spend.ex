@@ -64,7 +64,7 @@ defmodule Stacks.AI.Spend do
       reader is waiting for.
 
       ⛔ This used to be a promise the code did not keep. There was no `rescue`,
-      so a `Repo` error raised out of `TogetherClient.parse_success_response/1`,
+      so a `Repo` error raised out of `TogetherClient.parse_and_charge/1`,
       crashed the worker, and Oban retried the job — **calling and paying for
       the completion a second time**. A metering failure costing a second
       charge is the exact opposite of what this docstring claimed.
