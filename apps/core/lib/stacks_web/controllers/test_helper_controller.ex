@@ -172,7 +172,8 @@ defmodule StacksWeb.TestHelperController do
                "password" => @mint_password,
                "display_name" => display_name
              },
-             skip_invite_gate: true
+             skip_invite_gate: true,
+             skip_confirmation_email: true
            ),
          {:ok, user} <- Accounts.mark_confirmed(user) do
       issue_session(conn, user)

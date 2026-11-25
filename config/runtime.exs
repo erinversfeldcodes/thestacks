@@ -55,16 +55,28 @@ else
 
   config :core, :metrics_query_url, metrics_query_url
 
-  if auth_limit = System.get_env("RATE_LIMIT_AUTH") do
-    config :core, :rate_limit_auth, String.to_integer(auth_limit)
-  end
+  # One rule for all eight rate-limit ceilings: each is overridable by
+  # RATE_LIMIT_<BUCKET> and defaults (in the limiter) to its compiled figure.
+  # Built in one loop rather than per bucket, so no bucket is left fixed in code
+  # while looking tunable, and none reads a key nothing writes.
+  rate_limit_overrides =
+    for {bucket, env} <- [
+          auth: "RATE_LIMIT_AUTH",
+          password_change: "RATE_LIMIT_PASSWORD_CHANGE",
+          public: "RATE_LIMIT_PUBLIC",
+          admin: "RATE_LIMIT_ADMIN",
+          e2e_helper: "RATE_LIMIT_E2E_HELPER",
+          upload: "RATE_LIMIT_UPLOAD",
+          social: "RATE_LIMIT_SOCIAL",
+          feedback: "RATE_LIMIT_FEEDBACK"
+        ],
+        raw = System.get_env(env),
+        raw != nil do
+      {:"rate_limit_#{bucket}", String.to_integer(raw)}
+    end
 
-  if public_limit = System.get_env("RATE_LIMIT_PUBLIC") do
-    config :core, :rate_limit_public, String.to_integer(public_limit)
-  end
-
-  if e2e_helper_limit = System.get_env("RATE_LIMIT_E2E_HELPER") do
-    config :core, :rate_limit_e2e_helper, String.to_integer(e2e_helper_limit)
+  if rate_limit_overrides != [] do
+    config :core, rate_limit_overrides
   end
 
   # ⛔ THE BACKEND IS A DELIBERATE STATEMENT, NEVER INFERRED FROM A CREDENTIAL.

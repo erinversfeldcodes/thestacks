@@ -14,22 +14,18 @@ defmodule StacksWeb.Plugs.RateLimiter do
       by opting into one of the `rate_limit_*` pipelines; `:api` and `:spa`
       carry none, so there is no floor underneath the rest.
 
-      Overrides, and there are two mechanisms rather than one:
-      `RATE_LIMIT_AUTH`, `RATE_LIMIT_PUBLIC` and `RATE_LIMIT_E2E_HELPER` are
-      applied in the umbrella's ROOT `config/runtime.exs` for every non-test
-      environment, and `RATE_LIMIT_AUTH` plus `RATE_LIMIT_PASSWORD_CHANGE` are
-      applied again by `Server.init/1` at boot. ⚠️ `:admin` and `:feedback`
-      read an `Application` key that no runtime configuration writes, so the
-      figures above are the only ones they take in a running system — a reader
-      with no writer, which is the mirror image of the bucket this docstring
-      used to advertise.
-
-      ⚖️ The two are not symmetric, and the difference is worth a line for
-      whoever makes them configurable: nothing anywhere writes
-      `:rate_limit_admin`, while `:rate_limit_feedback` IS written by two test
-      files (`rate_limiter_test.exs` and `feedback_controller_test.exs`) to
-      exercise the ceiling. So a grep for the feedback key finds writers and
-      they are not a config mechanism.
+      Overrides, one rule for all eight: each bucket's ceiling defaults to its
+      compiled `@*_limit` and is read through
+      `Application.get_env(:core, :rate_limit_<bucket>, @<bucket>_limit)`, so
+      every bucket is overridable by the same key and none is fixed in code
+      while looking configurable. The umbrella's ROOT `config/runtime.exs`
+      writes `:rate_limit_<bucket>` from `RATE_LIMIT_<BUCKET>` for all eight in
+      ONE loop, for every non-test environment; a test sets the `Application`
+      key directly (`rate_limiter_test.exs`, `feedback_controller_test.exs`).
+      There is no second mechanism and no reader without a writer — the
+      per-bucket reads and the single runtime loop are the whole story, so a
+      bucket cannot be half-wired and the "fixed on purpose, or never wired?"
+      question the three previous configurability stories raised cannot recur.
 
       ⚠️ `apps/core/config/` is NOT the whole config tree. The root
       `config/` is what a release evaluates, and reading only the inner one
@@ -125,12 +121,12 @@ defmodule StacksWeb.Plugs.RateLimiter do
   end
 
   defp get_limit(:auth), do: Application.get_env(:core, :rate_limit_auth, @auth_limit)
-  defp get_limit(:upload), do: @upload_limit
+  defp get_limit(:upload), do: Application.get_env(:core, :rate_limit_upload, @upload_limit)
 
   defp get_limit(:password_change),
     do: Application.get_env(:core, :rate_limit_password_change, @password_change_limit)
 
-  defp get_limit(:social), do: @social_limit
+  defp get_limit(:social), do: Application.get_env(:core, :rate_limit_social, @social_limit)
   defp get_limit(:public), do: Application.get_env(:core, :rate_limit_public, @public_limit)
   defp get_limit(:admin), do: Application.get_env(:core, :rate_limit_admin, @admin_limit)
 
@@ -230,14 +226,10 @@ defmodule StacksWeb.Plugs.RateLimiter do
     def init(:ok) do
       :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
 
-      if limit = System.get_env("RATE_LIMIT_AUTH") do
-        Application.put_env(:core, :rate_limit_auth, String.to_integer(limit))
-      end
-
-      if limit = System.get_env("RATE_LIMIT_PASSWORD_CHANGE") do
-        Application.put_env(:core, :rate_limit_password_change, String.to_integer(limit))
-      end
-
+      # ⚖️ The table is all this creates. Every ceiling is wired in ONE place —
+      # the root `config/runtime.exs` loop over all eight buckets — so this boot
+      # path no longer re-reads a subset of `RATE_LIMIT_*`. Two mechanisms for
+      # one job is how `:auth` was written twice and `:admin` not at all.
       schedule_cleanup()
       {:ok, %{}}
     end

@@ -985,7 +985,7 @@ defmodule Stacks.Accounts do
     |> Repo.transaction()
     |> case do
       {:ok, %{set_confirmation: user}} ->
-        enqueue_confirmation_email(user)
+        maybe_enqueue_confirmation_email(user, opts)
         {:ok, user}
 
       {:error, :user, changeset, _} ->
@@ -1005,6 +1005,16 @@ defmodule Stacks.Accounts do
   # through the generic event fan-out put a whole dispatch chain (and its
   # backlog) in front of it. A failed enqueue must not fail the registration —
   # the reader still has the resend affordance.
+  # A caller that confirms the user itself (the e2e mint helper) passes
+  # `skip_confirmation_email: true`: the token this email links to is nulled on
+  # confirmation, so the job would run tokenless and die in `build_email/3` — a
+  # guaranteed-dead enqueue on every mint.
+  defp maybe_enqueue_confirmation_email(user, opts) do
+    unless Keyword.get(opts, :skip_confirmation_email, false) do
+      enqueue_confirmation_email(user)
+    end
+  end
+
   defp enqueue_confirmation_email(user) do
     case Email.send_registration_confirmation(user) do
       {:ok, _user} ->

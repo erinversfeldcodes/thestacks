@@ -458,4 +458,40 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
       assert %{"error" => "rate_limit_exceeded"} = json_response(c, 429)
     end
   end
+
+  describe "configurable ceilings — one rule for all eight buckets" do
+    # :upload and :social were hardcoded `@*_limit` while six buckets read a
+    # config key; they now read `:rate_limit_<bucket>` like the rest. These
+    # prove the override is honoured — before the fix the ceiling stayed at the
+    # compiled 120/20 and the third call below would NOT halt.
+    setup do
+      for key <- [:rate_limit_upload, :rate_limit_social] do
+        original = Application.get_env(:core, key)
+
+        on_exit(fn ->
+          if original,
+            do: Application.put_env(:core, key, original),
+            else: Application.delete_env(:core, key)
+        end)
+      end
+
+      :ok
+    end
+
+    test "the :upload ceiling honours :rate_limit_upload", %{conn: conn} do
+      Application.put_env(:core, :rate_limit_upload, 2)
+      conn = %{conn | remote_ip: {10, 9, 0, 1}}
+
+      for _ <- 1..2, do: refute(RateLimiter.call(conn, bucket: :upload).halted)
+      assert RateLimiter.call(conn, bucket: :upload).halted
+    end
+
+    test "the :social ceiling honours :rate_limit_social", %{conn: conn} do
+      Application.put_env(:core, :rate_limit_social, 2)
+      conn = %{conn | remote_ip: {10, 9, 0, 2}}
+
+      for _ <- 1..2, do: refute(RateLimiter.call(conn, bucket: :social).halted)
+      assert RateLimiter.call(conn, bucket: :social).halted
+    end
+  end
 end

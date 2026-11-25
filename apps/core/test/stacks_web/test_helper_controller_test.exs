@@ -11,6 +11,7 @@ defmodule StacksWeb.TestHelperControllerTest do
       variable; running serially keeps them from leaking into async tests.
   """
   use CoreWeb.ConnCase, async: false
+  use Oban.Testing, repo: Core.Repo
 
   import Stacks.Factory
 
@@ -520,6 +521,21 @@ defmodule StacksWeb.TestHelperControllerTest do
         |> get("/api/placements/mine")
 
       assert json_response(authed, 200)
+    end
+
+    test "mints no confirmation email — the user is pre-confirmed, so the job would run tokenless and die",
+         %{conn: conn} do
+      conn = post(conn, "/api/test/session", %{})
+      assert json_response(conn, 201)
+
+      # The mint confirms the user itself, which nulls the token the
+      # registration-confirmation email links to. Enqueuing it anyway is a
+      # guaranteed FunctionClauseError in build_email/3 — three attempts then
+      # discarded, visible only in oban_jobs.errors, which nothing reads.
+      refute_enqueued(
+        worker: Stacks.Workers.EmailDeliveryJob,
+        args: %{"template" => "registration_confirmation"}
+      )
     end
 
     # ⛔ THE MINT MUST NOT LOG ITS CALLER IN, and this is a regression test for
