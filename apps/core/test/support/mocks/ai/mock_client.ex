@@ -127,6 +127,18 @@ defmodule Stacks.AI.MockClient do
 
   defp cpu_only?(_payload), do: false
 
+  # /embed — one 1024-dim vector per input text, model-stamped. Deterministic
+  # and non-zero so a round-trip through Stacks.EncryptedVector is observable,
+  # and one-vector-per-text so the producer's length check is exercised.
+  defp default_response("embed", payload) do
+    texts = Map.get(payload, :texts) || Map.get(payload, "texts") || []
+    dim = 1024
+    # 0.5 is exactly representable in float32, so the round-trip through
+    # Stacks.EncryptedVector is lossless and a test can assert it exactly.
+    vectors = Enum.map(texts, fn _ -> %{"values" => List.duplicate(0.5, dim)} end)
+    {:ok, %{"vectors" => vectors, "model" => "bge-m3", "dim" => dim}}
+  end
+
   defp default_response(_endpoint, _payload), do: {:ok, %{}}
 
   defp payload_isbn(payload) when is_map(payload) do

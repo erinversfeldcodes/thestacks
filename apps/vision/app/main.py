@@ -18,6 +18,9 @@ from app.config import settings
 from app.proto.gen.vision import (
     AnalyzeRequest,
     AnalyzeResponse,
+    EmbeddingVector,
+    EmbedRequest,
+    EmbedResponse,
     ExtractedBook,
     GpuDispatch,
     OcrAttempt,
@@ -26,6 +29,7 @@ from app.proto.gen.vision import (
 from app.services.cover_text import CoverText, read_cover_text
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
+from app.services.text_embed import embed_texts
 from app.services.url_validator import validate_image_url
 from app.services.vision_client import VisionClient
 
@@ -624,4 +628,49 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             extract=extract_ms,
         ),
         sidecar_cold=cold,
+    )
+
+
+@app.post(
+    "/embed",
+    response_model=EmbedResponse,
+    status_code=200,
+    dependencies=[Depends(verify_hmac)],
+)
+async def embed(body: EmbedRequest) -> EmbedResponse:
+    """Text-embedding backend for the writing-assistant corpus, on the CPU
+    front door — NO GPU dispatch, ever.
+
+    Produces one bge-m3 vector per input text, in request order, on the warm
+    FastAPI container every request already passes through. HMAC-gated
+    identically to /analyze.
+
+    ⛔ THE RESPONSE STAMPS THE MODEL THAT RAN, not `body.model`. The request's
+    model is advisory (the caller may ask for `bge-m3`; an older container may
+    serve something else); `embed_texts` reports what ACTUALLY produced the
+    vectors and the caller persists THAT. Echoing the request here would record
+    a model the row was never embedded with.
+
+    ⚖️ CPU-heavy work off the event loop. The first call also loads the ~2.3GB
+    model; both the load and the encode run in a worker thread so the ASGI loop
+    stays free for the barcode / cover-text / analyze paths — the same offload
+    `read_cover_text` and `local_isbn_scan` get.
+    """
+    if not body.texts:
+        # Deterministic failure: resending an empty batch cannot make it valid,
+        # so it is MALFORMED_REQUEST and the caller must not retry it. (The
+        # proto declares no oneof here, so Pydantic admits `texts: []` and this
+        # is the only place it is rejected.)
+        raise _vision_error(_ERR_MALFORMED_REQUEST, "'texts' must contain at least one string")
+
+    log = logger.bind(endpoint="/embed", text_count=len(body.texts), requested_model=body.model)
+
+    embed_started = time.monotonic()
+    vectors, model, dim = await asyncio.to_thread(embed_texts, list(body.texts))
+    log.info("embed complete", model=model, dim=dim, embed_ms=_elapsed_ms(embed_started))
+
+    return EmbedResponse(
+        vectors=[EmbeddingVector(values=values) for values in vectors],
+        model=model,
+        dim=dim,
     )

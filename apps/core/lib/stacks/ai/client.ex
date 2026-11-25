@@ -106,6 +106,7 @@ defmodule Stacks.AI.Client do
   # the call site rather than silently reach a real endpoint, and a test pins it.
   defp endpoint_path("is_book"), do: "analyze"
   defp endpoint_path("analyze"), do: "analyze"
+  defp endpoint_path("embed"), do: "embed"
 
   defp endpoint_path(other) do
     raise ArgumentError, "unknown vision endpoint: #{inspect(other)}"

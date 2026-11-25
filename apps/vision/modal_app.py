@@ -690,6 +690,15 @@ _fastapi_image = (
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
         "pytesseract>=0.3.13",
+        # ⬛ THE TEXT-EMBEDDING BACKEND RUNS ON THIS CPU FRONT DOOR, not the GPU
+        # class — the writing-assistant corpus is embedded with bge-m3 on the
+        # always-warm container, no GPU wake. `sentence-transformers` pulls
+        # torch + transformers; the weights (~2.3GB) are NOT baked, they are
+        # fetched on the first /embed call and cached for the container's life
+        # (see app/services/text_embed.py — lazy, first-use, off the event
+        # loop), so container start stays fast and a front door that never
+        # embeds never pays for the model.
+        "sentence-transformers==3.3.1",
     )
     .add_local_dir(str(_VISION_DIR / "app"), remote_path="/app/app")
 )

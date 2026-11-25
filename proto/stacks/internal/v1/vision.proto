@@ -417,3 +417,45 @@ message StageTimings {
   // what it would have cost had it answered.
   optional int32 ocr = 5 [json_name = "ocr"];
 }
+
+// POST /embed — text embedding on the CPU front door, NO GPU dispatch.
+//
+// Produces retrieval vectors for the writing-assistant corpus (shelf intent,
+// blog posts, the author's imported writing) on the always-warm CPU container,
+// the same front door the barcode and cover-text passes run on. There is no
+// second service and no GPU wake, by construction.
+//
+// The model is both REQUESTED and STAMPED: the response names the model that
+// actually ran, so persisting that stamp makes a re-embed under a new model a
+// coexisting backfill rather than a destructive one — the same model-identity
+// rule the visual-embedding substrate holds.
+message EmbedRequest {
+  // The texts to embed, in order. The response returns one vector per text in
+  // the same order. A batch rides one HTTP round-trip and one model load.
+  repeated string texts = 1 [json_name = "texts"];
+
+  // The requested embedding model, e.g. "bge-m3". The sidecar may serve a
+  // different one (an older container, a rollout) and says which in the
+  // response's `model`; the caller persists THAT, never this requested value.
+  string model = 2 [json_name = "model"];
+}
+
+// A single embedding vector. Its length is EmbedResponse.dim.
+message EmbeddingVector {
+  // The vector components, model-native precision.
+  repeated float values = 1 [json_name = "values"];
+}
+
+// Response from POST /embed.
+message EmbedResponse {
+  // One vector per request text, in request order.
+  repeated EmbeddingVector vectors = 1 [json_name = "vectors"];
+
+  // The model that actually produced these vectors — the stamp the caller
+  // persists on every row, never the requested value.
+  string model = 2 [json_name = "model"];
+
+  // The dimensionality of each vector, for a cheap caller-side check against
+  // the column width before a write.
+  int32 dim = 3 [json_name = "dim"];
+}
