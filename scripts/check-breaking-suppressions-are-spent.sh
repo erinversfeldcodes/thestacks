@@ -108,7 +108,11 @@ src = buf_yaml.read_text(encoding="utf-8")
 # fail-open enumerates what each BRANCH does, and both defects lived on a PATH
 # rather than in a branch — there a missing `else`, here an early exit above
 # the guard. There is nothing to read in either case.
-EXPECTED_ENTRIES = 4
+# ⚖️ 4 → 5 on 2026-11-25: blog.proto joined FIELD_SAME_CARDINALITY. Its
+# `BookAssociation.confidence` gained `optional` (explicit presence) so an
+# unscored association is distinguishable from a scored 0.0; time-boxed, it goes
+# when this branch lands on the default branch (same trigger as the other four).
+EXPECTED_ENTRIES = 5
 
 ignore_block = re.search(r"^  ignore_only:\n((?:.*\n)*?)(?=^\S|\Z)", src, re.M)
 if not ignore_block:
@@ -306,6 +310,9 @@ EXPECTED_PER_ENTRY = {
     # Those same twelve gaining explicit presence, plus `shelf` and `comment`
     # gaining `optional`.
     ("FIELD_SAME_CARDINALITY", "stacks/common/v1/writing_assistant.proto"): 14,
+    # `BookAssociation.confidence` gaining `optional` (explicit presence) so an
+    # unscored association is distinguishable from a scored 0.0.
+    ("FIELD_SAME_CARDINALITY", "stacks/common/v1/blog.proto"): 1,
 }
 
 miscounted = []

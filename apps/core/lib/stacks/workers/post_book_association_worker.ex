@@ -208,11 +208,13 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
   # associations were dropped, a warning was logged, and the text that would
   # have explained it was discarded.
   #
-  # ⚖️ The two failures are kept apart on purpose. `:unparseable` is the model
-  # answering in a shape nothing can read; `:unexpected_shape` is valid JSON
-  # that is not a list, i.e. the model understood the format and not the task.
-  # They want different fixes — a parsing change versus a prompt change — and
-  # one outcome atom for both would hide which is happening.
+  # ⚖️ The failures are kept apart on purpose. `:unparseable` is the model
+  # answering in a shape nothing can read; `:unexpected_shape` is valid JSON that
+  # is not a list, i.e. the model understood the format and not the task;
+  # `:ambiguous` is two fenced blocks that BOTH parsed — too many answers rather
+  # than too few. They want different fixes — a parsing change, a prompt change,
+  # a "stop illustrating in a second fence" change — and one outcome atom for
+  # several would hide which is happening.
   defp handle_response(post, response) do
     case Structured.decode(response) do
       {:ok, associations} ->
@@ -245,6 +247,20 @@ defmodule Stacks.Workers.PostBookAssociationWorker do
 
         emit_outcome(:unreadable_response)
         :unreadable_response
+
+      {:error, {:ambiguous, raw}} ->
+        # ⚖️ TWO fenced blocks BOTH parsed as the answer: the model gave two
+        # answers and the decoder refused to guess between them. Its own outcome
+        # — here there were too MANY answers, not too few, which is a different
+        # thing to fix than `:unexpected_shape` (one valid-JSON non-answer) or
+        # `:unreadable_response` (no valid JSON at all).
+        Logger.warning(
+          "PostBookAssociationWorker: ambiguous response (two parsing blocks) for post #{post.id}: " <>
+            String.slice(raw, 0, 200)
+        )
+
+        emit_outcome(:ambiguous)
+        :ambiguous
     end
   end
 

@@ -82,7 +82,7 @@ type alias BookAssociation =
     { id : String
     , bookId : String
     , bookTitle : String
-    , confidence : Float
+    , confidence : Maybe Float
     , reasoning : String
     , status : AssociationStatus
     }
@@ -317,10 +317,9 @@ blogPostShowDecoder =
 {-| An association as the envelope sends it.
 
 ⚠️ `reasoning` is absent for a non-owner — the controller deletes the key rather
-than blanking it — so it decodes optionally. ⛔ `confidence` is NOT likewise, and
-this clause used to say it was: it is `Decode.field "confidence" Decode.float`,
-REQUIRED, six lines below. The server always sends it, and a decoder that
-tolerated its absence would have absorbed a producer that stopped.
+than blanking it — so it decodes optionally. `confidence` is ALSO optional now: an association the model returned WITHOUT
+rating it has none, and `Nothing` (unscored) must stay distinct from a scored 0.0
+— the former renders no badge, the latter a low-confidence one.
 
 -}
 associationDecoder : Decoder BookAssociation
@@ -328,18 +327,17 @@ associationDecoder =
     Decode.map6 BookAssociation
         (Decode.field "id" Decode.string)
         (Decode.field "book_id" Decode.string)
-        -- ⚖️ `book_title`, `confidence` and `status` are REQUIRED, because the
-        -- only producer always sends them: `proto_json.ex`'s
-        -- `blog_association/2` merges `book_title` and `status`
-        -- unconditionally, and `confidence` is `null: false` on the column and
-        -- always serialized. A default for a key the server cannot omit buys
-        -- nothing and costs silence — and each of these three had a specific
-        -- lie waiting: `status` defaulting to `Pending` makes every
+        -- ⚖️ `book_title` and `status` are REQUIRED, because the only producer
+        -- always sends them: `proto_json.ex`'s `blog_association/2` merges them
+        -- unconditionally. `status` defaulting to `Pending` would make every
         -- association read as pending for the owner and **vanish** for anyone
-        -- else, and `confidence` defaulting to `0.0` renders "0%" with a
-        -- low-confidence badge.
+        -- else — a default is a lie here, not a convenience.
+        -- ⚖️ `confidence` is now OPTIONAL: an association the model did not
+        -- rate has none, and `Nothing` must stay distinct from a scored 0.0 — a
+        -- missing confidence defaulted to 0.0 rendered a confident "0% low"
+        -- badge. Decoded with `Decode.maybe`, so `Nothing` = unscored = no badge.
         (Decode.field "book_title" Decode.string)
-        (Decode.field "confidence" Decode.float)
+        (Decode.maybe (Decode.field "confidence" Decode.float))
         -- ⬛ `reasoning` IS the exception, and the only honest fallback here:
         -- the controller DELETES the key for a non-owner rather than blanking
         -- it, so its absence is a real server state and carries meaning.

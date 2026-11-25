@@ -77,6 +77,14 @@ enum AssociationOutcome {
 
   // The call to the provider failed.
   ASSOCIATION_OUTCOME_LLM_ERROR = 5;
+
+  // The response carried TWO fenced blocks that BOTH parsed as the
+  // association array — two real answers, and picking one would be a guess
+  // presented as a result. Distinct from UNREADABLE_RESPONSE (no valid JSON)
+  // and UNEXPECTED_SHAPE (valid JSON, wrong shape): here the model answered
+  // twice. A reasoning fence that does NOT parse, followed by a real answer,
+  // is NOT ambiguous and is accepted.
+  ASSOCIATION_OUTCOME_AMBIGUOUS = 6;
 }
 
 // BlogPostShowResponse is returned by GET /api/blog/posts/:id.

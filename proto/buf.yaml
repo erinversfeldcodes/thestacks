@@ -96,3 +96,14 @@ breaking:
       - stacks/common/v1/writing_assistant.proto
     FIELD_SAME_CARDINALITY:
       - stacks/common/v1/writing_assistant.proto
+      # ⚠️ TIME-BOXED, remove once this branch lands on the default branch (buf
+      # breaking compares against it, so after the merge there is nothing left to
+      # flag and this entry only weakens the gate). `BookAssociation.confidence`
+      # gained `optional` (explicit presence) so an UNSCORED association (unset) is
+      # distinguishable from a scored 0.0 — a plain proto3 double omits 0.0 from
+      # JSON and rendered the former as a confident "0%". The wire field number
+      # (3) and type (double) are unchanged; only presence is added. The sibling
+      # `ASSOCIATION_OUTCOME_AMBIGUOUS` enum value is additive and needs no entry.
+      # ⛔ FILE-WIDE: while this stands any cardinality change in blog.proto goes
+      # unflagged — the reason it is time-boxed.
+      - stacks/common/v1/blog.proto

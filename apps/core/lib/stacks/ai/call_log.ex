@@ -41,7 +41,7 @@ defmodule Stacks.AI.CallLog do
   # to share a label, which made a working pass over a post with no books
   # indistinguishable from one that linked three — to the dashboard and to the
   # author alike.
-  @outcomes ~w(associated no_books_found unreadable_response unexpected_shape llm_error)
+  @outcomes ~w(associated no_books_found unreadable_response unexpected_shape llm_error ambiguous)
 
   schema "llm_call_log" do
     field :post_id, :binary_id

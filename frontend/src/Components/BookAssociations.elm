@@ -228,8 +228,21 @@ viewAssociation config assoc =
         ]
 
 
-viewConfidenceBadge : Float -> Html msg
-viewConfidenceBadge confidence =
+viewConfidenceBadge : Maybe Float -> Html msg
+viewConfidenceBadge maybeConfidence =
+    case maybeConfidence of
+        Nothing ->
+            -- ⚖️ Unscored (the model did not rate this match): NO badge. A "0%"
+            -- or "not scored" pill would either lie or add noise; the match is
+            -- still shown, just without a self-rating it never gave.
+            text ""
+
+        Just confidence ->
+            viewConfidenceBadgeScored confidence
+
+
+viewConfidenceBadgeScored : Float -> Html msg
+viewConfidenceBadgeScored confidence =
     let
         pct =
             String.fromInt (round (confidence * 100))

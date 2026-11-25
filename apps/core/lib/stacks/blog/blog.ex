@@ -390,7 +390,9 @@ defmodule Stacks.Blog do
       # answer it exists to handle: every out-of-range value becomes exactly
       # `1.0`. The same keys as the dedup, so the row that survives a collapse
       # is the row that was on top before it.
-      order_by: [desc: a.confidence, desc: a.visible, desc: a.created_at, asc: a.id],
+      # `desc_nulls_last`: an UNSCORED association (nil confidence) sorts BELOW
+      # every scored one rather than being treated as the most or least confident.
+      order_by: [desc_nulls_last: a.confidence, desc: a.visible, desc: a.created_at, asc: a.id],
       preload: [:book]
     )
     |> Repo.all()
@@ -617,8 +619,8 @@ defmodule Stacks.Blog do
     |> validate_inclusion(:visibility, Visibility.audience_levels())
   end
 
-  @assoc_required_fields [:post_id, :book_id, :confidence, :source]
-  @assoc_optional_fields [:reasoning, :visible]
+  @assoc_required_fields [:post_id, :book_id, :source]
+  @assoc_optional_fields [:confidence, :reasoning, :visible]
   @assoc_valid_sources ~w(llm manual)
 
   @doc "Changeset for creating or updating a post-book association."

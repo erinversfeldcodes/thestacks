@@ -26,11 +26,14 @@ defmodule Stacks.AI.Structured do
   @typedoc "One association the model proposes: which book, how sure, and why."
   @type association :: %{
           book_id: String.t(),
-          confidence: float(),
+          confidence: float() | nil,
           reasoning: String.t()
         }
 
-  @type failure :: {:unparseable, String.t()} | {:unexpected_shape, String.t()}
+  @type failure ::
+          {:unparseable, String.t()}
+          | {:unexpected_shape, String.t()}
+          | {:ambiguous, String.t()}
 
   @doc """
       The output schema for a book-association answer.
@@ -109,6 +112,52 @@ defmodule Stacks.AI.Structured do
   """
   @spec decode(String.t(), keyword()) :: {:ok, [association()]} | {:error, failure()}
   def decode(raw, _opts \\ []) when is_binary(raw) do
+    # ⚖️ TWO fenced blocks that BOTH parse as the association answer is two
+    # answers, and picking one would be a guess presented as a result — that is
+    # `:ambiguous`, distinct from `:unparseable` (no valid JSON) and
+    # `:unexpected_shape` (valid JSON, wrong shape). A reasoning or illustration
+    # fence that does NOT parse is not a second answer, so only blocks that decode
+    # are counted: a model that shows its working in a code fence and THEN answers
+    # is accepted, not refused.
+    case fenced_blocks(raw) |> Enum.flat_map(&parse_block/1) do
+      [_, _ | _] -> {:error, {:ambiguous, raw}}
+      [items] -> {:ok, items}
+      [] -> decode_text(raw)
+    end
+  end
+
+  # Every fenced block's inner content, in order. Same opening anchor as
+  # `strip_fence` — the fence must sit at the start or after a RAW newline, which
+  # no input `Jason.decode/1` accepts can satisfy inside itself — so a ``` inside
+  # a JSON string is never mistaken for a block. Non-greedy, so two blocks are two
+  # matches rather than one spanning both.
+  defp fenced_blocks(raw) do
+    Regex.scan(
+      ~r/(?:\A|\r?\n)```[a-zA-Z]*[ \t\r]*\r?\n(.*?)\r?\n[ \t\r]*```[ \t\r]*(?:\r?\n|\z)/s,
+      String.trim(raw)
+    )
+    |> Enum.map(fn [_, inner] -> String.trim(inner) end)
+  end
+
+  # A block that decodes to the answer (a bare array or the object-wrapped array
+  # the schema asks for) yields its normalised items; prose, a diagram or malformed
+  # JSON yields nothing, so it does not count as a second answer.
+  defp parse_block(content) do
+    case Jason.decode(content) do
+      {:ok, items} when is_list(items) ->
+        [Enum.flat_map(items, &normalise/1)]
+
+      {:ok, %{"associations" => items}} when is_list(items) ->
+        [Enum.flat_map(items, &normalise/1)]
+
+      _ ->
+        []
+    end
+  end
+
+  # The whole text as ONE answer: the no-fence (bare array) and single-fence paths.
+  # The multi-fence ambiguity is settled in `decode/1` before this is reached.
+  defp decode_text(raw) do
     case raw |> strip_fence() |> Jason.decode() do
       {:ok, items} when is_list(items) ->
         {:ok, Enum.flat_map(items, &normalise/1)}
@@ -213,7 +262,7 @@ defmodule Stacks.AI.Structured do
     [
       %{
         book_id: book_id,
-        confidence: as_float(Map.get(item, "confidence")),
+        confidence: confidence_or_nil(Map.get(item, "confidence")),
         reasoning: as_string(Map.get(item, "reasoning"))
       }
     ]
@@ -238,6 +287,13 @@ defmodule Stacks.AI.Structured do
   # ⚠️ Done at the BOUNDARY rather than in the changeset, because this is where
   # the provider's answer becomes ours: a changeset rule would leave every
   # other reader of `decode/2` holding an unclamped number.
+  # ⚖️ A MISSING confidence is nil, not 0.0. The model that did not rate its
+  # answer is distinct from the model that rated it zero — only the latter is a
+  # low-confidence signal — and collapsing them rendered an unscored match as a
+  # confident "0%". A present value is still clamped to [0, 1] below.
+  defp confidence_or_nil(nil), do: nil
+  defp confidence_or_nil(value), do: as_float(value)
+
   defp as_float(value) when is_float(value), do: clamp(value)
   defp as_float(value) when is_integer(value), do: clamp(value * 1.0)
 

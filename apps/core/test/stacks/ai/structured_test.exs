@@ -153,13 +153,13 @@ defmodule Stacks.AI.StructuredTest do
     test "a null confidence is handled like a missing one" do
       raw = ~s([{"book_id": "keep", "confidence": null, "reasoning": null}])
 
-      assert {:ok, [%{book_id: "keep", confidence: +0.0, reasoning: ""}]} = Structured.decode(raw)
+      assert {:ok, [%{book_id: "keep", confidence: nil, reasoning: ""}]} = Structured.decode(raw)
     end
 
     test "a missing confidence does not discard the association" do
       raw = ~s([{"book_id": "keep", "reasoning": "named in the second paragraph"}])
 
-      assert {:ok, [%{book_id: "keep", confidence: +0.0, reasoning: reasoning}]} =
+      assert {:ok, [%{book_id: "keep", confidence: nil, reasoning: reasoning}]} =
                Structured.decode(raw)
 
       assert reasoning == "named in the second paragraph"
@@ -231,7 +231,9 @@ defmodule Stacks.AI.StructuredTest do
           ~s([{"book_id": "first"}]) <>
           "\n```\n\nand also:\n\n```json\n" <> ~s([{"book_id": "second"}]) <> "\n```"
 
-      assert {:error, {:unparseable, _}} = Structured.decode(raw)
+      # Two blocks that BOTH parse is two answers: refused as :ambiguous (its own
+      # name) rather than guessed between or blurred into :unparseable.
+      assert {:error, {:ambiguous, _}} = Structured.decode(raw)
     end
 
     test "an unterminated fence is unparseable" do
@@ -405,6 +407,23 @@ defmodule Stacks.AI.StructuredTest do
       raw = ~s([{"book_id": "f", "confidence": "2.5"}])
 
       assert {:ok, [%{confidence: 1.0}]} = Structured.decode(raw)
+    end
+  end
+
+  describe "two answers versus a reasoning fence" do
+    test "a reasoning fence that does not parse, then the answer, decodes to the answer" do
+      raw =
+        "Here is my reasoning:\n\n```\nstep 1 look at the shelves\nstep 2 match the title\n```\n\n```json\n" <>
+          ~s([{"book_id": "answer", "confidence": 0.7, "reasoning": "matched"}]) <>
+          "\n```"
+
+      assert {:ok, [%{book_id: "answer"}]} = Structured.decode(raw)
+    end
+
+    test "an unscored association keeps nil confidence through the decoder" do
+      raw = ~s([{"book_id": "keep", "reasoning": "named but unrated"}])
+
+      assert {:ok, [%{book_id: "keep", confidence: nil}]} = Structured.decode(raw)
     end
   end
 end
