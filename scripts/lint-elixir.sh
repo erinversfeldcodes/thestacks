@@ -177,6 +177,12 @@ gate check-cli-stub-provenance.sh
 # below a path that exits 0 — the shape that let a sibling gate report
 # "nothing to police" with nine live suppressions in the file.
 gate check-guard-is-unbypassable.sh
+# Also not an Elixir gate, here for the same reason — this lane is the only one
+# that runs in `just verify`/`just ci`. It verifies that a free-text reason
+# claiming a test file does NOT assert a symbol is actually true; a structural
+# wiring check can never falsify a reason, and one such lie once aged verbatim
+# into a generated developer-facing doc.
+gate check-reason-absence-claims.sh
 
 step "mix format --check-formatted" mix format --check-formatted
 step "mix credo --strict" mix credo --strict

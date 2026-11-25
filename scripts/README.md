@@ -68,6 +68,7 @@ in code by" and check it before relying on it.
 | `scripts/check-prose-assertions.sh` | `scripts/lint-elm.sh` |  |
 | `scripts/check-protojson-completeness.sh` | `scripts/lint-elixir.sh`, `test/platform/protojson_completeness_test.sh` | A proto field that reaches no surface is a field that was added for nothing. |
 | `scripts/check-public-route-metering.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh` | An anonymously-reachable route must be metered, or say why it is not. |
+| `scripts/check-reason-absence-claims.sh` | `scripts/lint-elixir.sh` | A free-text reason that claims a TEST FILE does not assert something must be |
 | `scripts/check-rls-scope.sh` | `scripts/lint-elixir.sh`, `test/platform/rls_scope_gate_test.sh` | scripts/check-rls-scope.sh — every query against a row-level-secured table |
 | `scripts/check-route-clients.sh` | `justfile`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh` |  |
 | `scripts/check-route-reachability.sh` | `.github/workflows/ci.yml`, `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh` | Can a reader actually GET to every page that exists? |
@@ -111,7 +112,7 @@ in code by" and check it before relying on it.
 | `scripts/hooks/pre-push` | `.github/workflows/ci.yml`, `scripts/install-hooks.sh`, `test/platform/ci_gate_reachability_test.sh` | pre-push hook — runs before every `git push`. |
 | `scripts/install-flyctl.sh` | `justfile` |  |
 | `scripts/install-hooks.sh` | `justfile` |  |
-| `scripts/lib/blank-shell-data.py` | `scripts/check-cli-stub-provenance.sh`, `scripts/check-sigpipe-hazards.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Blank out the parts of a shell script that are DATA, keeping line numbers. |
+| `scripts/lib/blank-shell-data.py` | `scripts/check-cli-stub-provenance.sh`, `scripts/check-guard-is-unbypassable.sh`, `scripts/check-sigpipe-hazards.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Blank out the parts of a shell script that are DATA, keeping line numbers. |
 | `scripts/lib/derive-app-database-url.py` | `scripts/deploy-stack.sh`, `test/platform/app_database_url_derivation_test.sh` | Derive the least-privilege runtime connection URL from the owner's. |
 | `scripts/lib/e2e-handoff.sh` | `e2e/tests/rate-limit.spec.ts`, `scripts/ci.sh`, `scripts/deploy-stack.sh`, `test/platform/e2e_auth_ceiling_handoff_test.sh` | What a preview deploy DECIDES that the E2E step has to be told. |
 | `scripts/lib/postgres.sh` | `scripts/test-dbt.sh`, `scripts/test-e2e.sh`, `scripts/test-elixir.sh` |  |

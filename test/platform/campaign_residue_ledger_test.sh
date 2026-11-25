@@ -114,7 +114,12 @@ assert_exit_zero "$RC" "the row is well-formed and parses"
 assert_contains "$OUT" "RL-003" "the row the substring filter dropped is listed"
 assert_contains "$OUT" "1 ledger row(s) parsed, 1 not closed" "it is counted as open"
 
-# ⛔ THE DIFFERENTIAL HALF: the LEGACY implementation is executed, not modelled.
+# ⛔ THE DIFFERENTIAL HALF: the LEGACY implementation is executed WHEN it is still
+# reachable, not modelled — and self-retires (the sentinel in the `else` below)
+# when it is not. `5148e7b2` left history's reach in a rebase, so a CLEAN CLONE
+# always retires here and the comparison runs only where a developer's local
+# object store still holds the commit. The present-tense promise that it is
+# simply "executed" was false for every clean clone, which is the defect fixed.
 #
 # A differential case looks identical whether or not it discriminates, so the
 # only way to know is to run the old code against the same input and require
