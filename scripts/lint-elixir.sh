@@ -167,6 +167,12 @@ gate check-sigpipe-hazards.sh
 # status. Folding them together would blur a predicate that took five rounds to
 # make precise.
 gate check-status-after-substitution.sh
+# The third of the $?-hazard siblings, here for the same reason as the other
+# two: this lane is the only one that actually runs. It catches a `$?` read
+# after a backgrounded command (`cmd &`), which reads the launch status (0)
+# rather than the job's — the shape a `( … ) &`-wrapped verify used to report
+# green on a red run.
+gate check-status-after-background.sh
 # Also not an Elixir gate, and here for the same reason as its two neighbours:
 # this is the only lane that actually executes. It asks whether each stubbed CLI
 # says what real tool output it encodes — a stub written from its author's

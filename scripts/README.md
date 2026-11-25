@@ -79,6 +79,7 @@ in code by" and check it before relying on it.
 | `scripts/check-session-expiry-coverage.sh` | `scripts/lint-elm.sh`, `test/platform/gate_fail_closed_test.sh`, `test/platform/session_expiry_forms_test.sh` |  |
 | `scripts/check-sigpipe-hazards.sh` | `scripts/lint-elixir.sh`, `scripts/wave-status.sh`, `test/platform/sigpipe_hazard_gate_test.sh` | Refuse a pipeline whose exit status is read but can be 141 instead of the |
 | `scripts/check-slo-gate.sh` | `.github/actions/check-slo-gate/action.yml`, `.github/workflows/deploy-production.yml`, `test/platform/check_slo_gate_test.sh`, `test/platform/deploy_production_workflow_test.sh` … |  |
+| `scripts/check-status-after-background.sh` | `scripts/lint-elixir.sh` | Refuse a `$?` read that follows a BACKGROUNDED command. |
 | `scripts/check-status-after-substitution.sh` | `scripts/lint-elixir.sh`, `test/platform/status_after_substitution_test.sh` | Refuse a `$?` read in the same command as a substitution that precedes it. |
 | `scripts/check-storage-selection-is-deliberate.sh` | `scripts/lint-elixir.sh`, `test/platform/storage_selection_test.sh` | Holds: object-storage backend selection is a DELIBERATE declaration, never |
 | `scripts/check-tracker-refs.sh` | `.github/workflows/ci.yml`, `scripts/lint-elixir.sh`, `test/platform/gate_fail_closed_test.sh`, `test/platform/tracker_refs_gate_test.sh` | Code must not cite tracker artefacts — state the substance instead. |

@@ -119,7 +119,11 @@ SUCCESS_EXIT = re.compile(
 # `MIN_ELM_FILES`, the floor on its Elm corpus, so a broken glob cannot pass over
 # an empty scan while the credential-request escape hatch it guards goes unseen.
 # Its floor sits above the file's only success exit.
-EXPECTED_GUARDED_SCRIPTS = 30
+# ⚖️ 30 → 31 on 2026-11-25: `check-status-after-background.sh` gained
+# `MIN_SH_FILES`, the floor on its shell corpus — the third $?-hazard sibling, so
+# a broken glob cannot pass over an empty scan while a backgrounded-`$?` swallow
+# goes unseen. Its floor sits above the file's only success exit.
+EXPECTED_GUARDED_SCRIPTS = 31
 
 guarded = {}
 violations = []

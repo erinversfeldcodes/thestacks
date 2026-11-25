@@ -32,4 +32,12 @@ paths = [
 # a future leak the way a path or regex entry would — and the alternative,
 # rewriting pushed history, is the owner's call rather than a lint fix.
 description = "A base64 CI fixture for CLOAK_KEY, in history only (see 539c5573)"
+# ⛔ condition = "AND" + regexes NARROWS this to the ONE known literal. A
+# commits-only entry suppresses EVERY finding in 539c5573 (proven in a throwaway
+# repo: two independent rule matches in one commit -> 0 with the entry); with
+# AND it suppresses a finding only when it is BOTH in that commit AND matches the
+# base64 value below, so a different secret ever added in that same commit would
+# still be caught.
+condition = "AND"
 commits = ["539c5573faca9c19451a61b5a72fa10bb261eb34"]
+regexes = ["Y2ktcGxhdGZvcm0tc3VpdGVzLWNsb2FrLWtleS0zMmI="]
