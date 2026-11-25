@@ -10,7 +10,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   timeout: isDeployed ? 90_000 : 30_000,
   workers: process.env.CI ? 2 : 4,
-  reporter: "list",
+  reporter: [["list"], ["./reporters/did-not-run-reporter.ts"]],
   use: {
     baseURL: process.env.BASE_URL ?? "http://localhost:4000",
     trace: "on-first-retry",

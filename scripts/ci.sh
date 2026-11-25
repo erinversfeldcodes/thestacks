@@ -33,10 +33,28 @@ RESET='\033[0m'
 # the jwt_tool lane's own comment says three lines from where it skips.
 _csrf_proof_for() {
     CSRF_JAR="$(mktemp)"
-    curl -sf -o /dev/null --cookie-jar "${CSRF_JAR}" --max-time 15 "$1/" || true
+    # ⛔ CAPTURE the page fetch's status rather than discard it with `-sf -o
+    # /dev/null … || true`. A missing `stacks_csrf` cookie has two unrelated
+    # causes and the WARN must not infer one: a 200 that issued no cookie is a
+    # real CSRF defect, while 000/5xx is the stack not answering at all. The
+    # earlier form threw the status away and then reported "no cookie, logins
+    # refused 403" — a consequence it never observed — so a stack that stopped
+    # serving its own page mid-gate was blamed on CSRF. `-f` is dropped
+    # deliberately: it would make curl exit non-zero on a 4xx/5xx and lose the
+    # very code this needs to read.
+    local _code
+    # curl already prints `000` as the code when it cannot connect; `|| true`
+    # keeps that non-zero exit from aborting under `set -e` without appending a
+    # second `000`, and the `:-000` covers the rare case of no output at all.
+    _code="$(curl -s -o /dev/null -w '%{http_code}' --cookie-jar "${CSRF_JAR}" --max-time 15 "$1/" || true)"
+    _code="${_code:-000}"
     CSRF_PROOF="$(awk '$6 == "stacks_csrf" { print $7 }' "${CSRF_JAR}" 2>/dev/null | tail -1)"
     if [[ -z "${CSRF_PROOF}" ]]; then
-        echo "WARN: no stacks_csrf cookie from $1/ — every login below will be refused 403" >&2
+        if [[ "${_code}" == "200" ]]; then
+            echo "WARN: GET $1/ returned 200 but issued no stacks_csrf cookie — a real CSRF defect; every login below will be refused 403" >&2
+        else
+            echo "WARN: GET $1/ returned HTTP ${_code} (not 200) — the stack did not serve its page, so there is no stacks_csrf cookie; the security lanes below have STOPPED, they are not passing" >&2
+        fi
     fi
 }
 
