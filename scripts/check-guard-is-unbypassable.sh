@@ -36,6 +36,7 @@ cd "$REPO_ROOT" || exit 1
 python3 - <<'PY'
 import glob
 import re
+import subprocess
 import sys
 
 PATHS = sorted(
@@ -125,18 +126,44 @@ for path in PATHS:
     except OSError:
         continue
 
-    decls = [(m.start(), m.group(1)) for m in DECLARED.finditer(src)]
+    # A declared count legitimately lives inside a `<<'PY'` CODE heredoc (a gate's
+    # own expected count), so declarations are found in the RAW source. A success
+    # exit, by contrast, is only a bypass when it is real shell code: one written
+    # as a HEREDOC FIXTURE — a gate's self-test showing `exit 0` — is data, so the
+    # exit scan runs over the source with shell DATA (comments, heredoc bodies,
+    # literal strings) blanked. The classifier emits line-for-line, so a line in
+    # the blanked source keeps its original number.
+    scan_src = src
+    if path.endswith(".sh"):
+        result = subprocess.run(
+            ["python3", "scripts/lib/blank-shell-data.py"],
+            input=src,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(
+                "FAIL check-guard-is-unbypassable: the data/code classifier "
+                "(scripts/lib/blank-shell-data.py) died, so a heredoc body would be "
+                "read as code. Nothing was checked; this is a refusal, not a pass.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        scan_src = result.stdout
+
+    decls = [
+        (src[: m.start()].count("\n") + 1, m.group(1)) for m in DECLARED.finditer(src)
+    ]
     if not decls:
         continue
 
-    first_decl_pos, first_decl_name = decls[0]
-    first_decl_line = src[:first_decl_pos].count("\n") + 1
+    first_decl_line, first_decl_name = decls[0]
     guarded[path] = sorted({name for _, name in decls})
 
-    for m in SUCCESS_EXIT.finditer(src):
-        if m.start() >= first_decl_pos:
+    for m in SUCCESS_EXIT.finditer(scan_src):
+        exit_line = scan_src[: m.start()].count("\n") + 1
+        if exit_line >= first_decl_line:
             continue
-        exit_line = src[: m.start()].count("\n") + 1
         violations.append(
             (path, exit_line, m.group(1).strip(), first_decl_line, first_decl_name)
         )
