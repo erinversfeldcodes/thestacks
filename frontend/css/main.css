@@ -93,6 +93,11 @@
 .shelf-antilibrary {
     --bg: #f5f0e8;
     --text: #2c1f0e;
+    /* Light palette: --text-muted/--accent-text are redefined DARK here;
+       left inheriting :root's light values they render at ~2.76:1 on this
+       bg (sub-AA). check-css-contrast.sh evaluates every palette's own bg. */
+    --text-muted: #6e5a3e;
+    --accent-text: #3f6b50;
     --shelf-bg: #c8a97a;
     --wallpaper-color: #e8e4d6;
     --accent: #7a9e6e;
@@ -123,6 +128,10 @@
 .shelf-looking-for-home {
     --bg: #e8eef5;
     --text: #2c1f0e;
+    /* Light palette: dark muted/accent so they clear AA on this bg; the
+       inherited :root values are ~2.68:1 here. */
+    --text-muted: #6e5a3e;
+    --accent-text: #35586e;
     --shelf-bg: #b8a080;
     --wallpaper-color: #dce8f0;
     --accent: #6a8ea0;

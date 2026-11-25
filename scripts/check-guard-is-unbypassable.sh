@@ -123,7 +123,12 @@ SUCCESS_EXIT = re.compile(
 # `MIN_SH_FILES`, the floor on its shell corpus — the third $?-hazard sibling, so
 # a broken glob cannot pass over an empty scan while a backgrounded-`$?` swallow
 # goes unseen. Its floor sits above the file's only success exit.
-EXPECTED_GUARDED_SCRIPTS = 31
+# ⚖️ 31 → 32 on 2026-11-25: `check-css-contrast.sh` gained `MIN_PALETTES` and
+# `MIN_SURFACE_PAIRS` when it was widened from the first `--bg` to every palette
+# scope plus declared surface pairs; it previously carried only an inline
+# `checked == 0` anti-vacuity and so was not in this corpus. Both floors sit
+# above the file's only success exit.
+EXPECTED_GUARDED_SCRIPTS = 32
 
 guarded = {}
 violations = []
