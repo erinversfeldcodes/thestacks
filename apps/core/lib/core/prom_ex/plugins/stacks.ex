@@ -490,6 +490,24 @@ defmodule Core.PromEx.Plugins.Stacks do
               "tail is billed per. Multiply by the GPU scaledown window for billed idle seconds.",
           measurement: :count
         ),
+        # ⛔ A GPU DISPATCH THAT ERRORED IS STILL BILLED, AND USED TO VANISH. The
+        # sidecar raises 502/504 only AFTER dispatching to a GPU container, so an
+        # all-raising container returns no body, emits no cold-start count, and
+        # its billed lifetime was invisible — under-counting toward "cheap". This
+        # counts the errored dispatch so it reads non-zero rather than a silent
+        # gap. Cold-ness is unknown on an error, so it is NOT folded into the
+        # cold-start series: read that count as a lower bound while this is above
+        # zero, tagged by HTTP status (504 timeout vs 502 failure).
+        counter(
+          [:stacks, :vision, :gpu_dispatch_errored, :count, :total],
+          event_name: [:stacks, :vision, :gpu_dispatch_errored],
+          description:
+            "GPU dispatches that reached a container and then errored (502 failure / 504 " <>
+              "timeout) — billed but answered nothing, so the cold-start count is a lower " <>
+              "bound whenever this is above zero.",
+          measurement: :count,
+          tags: [:status]
+        ),
         counter(
           [:stacks, :vision, :request, :exception, :count, :total],
           event_name: [:stacks, :vision, :request, :exception],

@@ -1404,6 +1404,11 @@
           "expr": "sum(increase(stacks_vision_gpu_telemetry_gap_count_total{app=\"$app\"}[$__rate_interval]))",
           "legendFormat": "TELEMETRY GAP (count is a lower bound)",
           "refId": "C"
+        },
+        {
+          "expr": "sum by (status) (increase(stacks_vision_gpu_dispatch_errored_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "ERRORED DISPATCH {{status}} (billed, cold count is a lower bound)",
+          "refId": "D"
         }
       ]
     },

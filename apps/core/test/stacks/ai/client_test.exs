@@ -601,9 +601,33 @@ defmodule Stacks.AI.ClientTest do
              "a container already awake owes no scaledown window; moved by " <>
                "#{Spend.spent(:modal, :daily) - before}"
     end
+
+    # ⛔ AN ALL-RAISING CONTAINER USED TO BE INVISIBLE. The sidecar raises 504 on
+    # a GPU timeout (502 on failure) only AFTER dispatching to a container, so
+    # the dispatch was billed but returned no body and emitted no cold-start
+    # count — under-counting toward "cheap". This proves the errored dispatch is
+    # now counted; it reds if the emit on the non-200 path is dropped, or if the
+    # status guard stops matching 502/504.
+    test "a 504-timed-out GPU dispatch is counted, not silently dropped" do
+      handler = {__MODULE__, :errored_dispatch_events, self()}
+
+      :telemetry.attach(
+        handler,
+        [:stacks, :vision, :gpu_dispatch_errored],
+        fn _e, measurements, meta, pid -> send(pid, {:errored_dispatch, measurements, meta}) end,
+        self()
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      __MODULE__.StubVision.respond(504, %{"code" => "TIMEOUT", "message" => "timed out"})
+
+      assert {:error, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert_receive {:errored_dispatch, %{count: 1}, %{status: 504}}, 5_000
+    end
   end
 
-  # Reads the EXPORTED series, which is the only number that reflects what a
   # Reads the EXPORTED series, which is the only number that reflects what a
   # reader of the dashboard or the cost page actually gets.
   defp cold_start_series_total do
@@ -634,16 +658,17 @@ defmodule Stacks.AI.ClientTest do
     # telemetry emitted by the code under test rather than by the test.
     import Plug.Conn
 
-    def respond(body), do: :persistent_term.put({__MODULE__, :body}, body)
+    def respond(body), do: respond(200, body)
+    def respond(status, body), do: :persistent_term.put({__MODULE__, :resp}, {status, body})
 
     def init(test_pid), do: test_pid
 
     def call(conn, _test_pid) do
-      body = :persistent_term.get({__MODULE__, :body}, %{})
+      {status, body} = :persistent_term.get({__MODULE__, :resp}, {200, %{}})
 
       conn
       |> put_resp_content_type("application/json")
-      |> send_resp(200, Jason.encode!(body))
+      |> send_resp(status, Jason.encode!(body))
     end
   end
 end

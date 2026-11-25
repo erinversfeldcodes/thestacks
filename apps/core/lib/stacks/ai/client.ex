@@ -193,6 +193,8 @@ defmodule Stacks.AI.Client do
           %{endpoint: endpoint, status: status, tier: "none"}
         )
 
+        maybe_record_errored_gpu_dispatch(status)
+
         error = VisionError.from_http_error(status, resp_body)
         maybe_melt(error)
         {:error, error}
@@ -446,6 +448,30 @@ defmodule Stacks.AI.Client do
       _ -> :ok
     end
   end
+
+  # ⛔ A GPU DISPATCH THAT ERRORED IS STILL A BILLED DISPATCH, AND IT USED TO
+  # VANISH. The sidecar raises 504 (timeout) or 502 (failure) ONLY after it has
+  # dispatched the request to a GPU container, so a container whose every
+  # inference raises returns no response body, emits no cold-start count through
+  # `maybe_record_gpu_cold_start/1`, and its cold start and entire billed
+  # lifetime were invisible — under-counting in precisely the flattering
+  # direction the cost model exists to correct.
+  #
+  # ⚖️ A SEPARATE SERIES, NOT folded into the cold-start count. On an error no
+  # `_container` reading comes back, so whether this dispatch was cold is
+  # unknown — counting it as a cold start would fabricate the one fact we do not
+  # have. This is the "explicit zero-with-reason": the errored dispatch is
+  # visible and flagged (by status), so an all-raising container reads as a
+  # non-zero here rather than a silent zero everywhere.
+  #
+  # ⚖️ 502/504 ONLY. A transport error never reaches a status (it is the
+  # `{:error, reason}` arm, where no GPU was dispatched), and a 4xx is a request
+  # the sidecar refused before dispatching — neither billed a container.
+  defp maybe_record_errored_gpu_dispatch(status) when status in [502, 504] do
+    :telemetry.execute([:stacks, :vision, :gpu_dispatch_errored], %{count: 1}, %{status: status})
+  end
+
+  defp maybe_record_errored_gpu_dispatch(_status), do: :ok
 
   # ⚖️ Anything undeclared collapses to "other" rather than reaching the store,
   # and the visible under-labelling is the signal to come and declare it —
