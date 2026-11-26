@@ -42,7 +42,14 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
   describe "perform/1 — ceiling: owner" do
     test "caps bookshelves stored as platform to owner" do
       user = insert(:user)
-      _bs = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+
+      _bs =
+        insert(:bookshelf,
+          user: user,
+          name: "library",
+          visibility: "platform",
+          allow_over_ceiling: true
+        )
 
       perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "owner"})
 
@@ -64,7 +71,14 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
 
     test "returns :ok" do
       user = insert(:user)
-      _bs = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+
+      _bs =
+        insert(:bookshelf,
+          user: user,
+          name: "library",
+          visibility: "platform",
+          allow_over_ceiling: true
+        )
 
       assert :ok =
                perform_job(VisibilityRecapJob, %{
@@ -75,7 +89,15 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
 
     test "emits user.visibility_recap_completed event" do
       user = insert(:user)
-      _bs = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+
+      _bs =
+        insert(:bookshelf,
+          user: user,
+          name: "library",
+          visibility: "platform",
+          allow_over_ceiling: true
+        )
+
       before_count = event_count("user.visibility_recap_completed")
 
       perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "owner"})
@@ -85,8 +107,22 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
 
     test "event payload includes correct bookshelves_capped count" do
       user = insert(:user)
-      _bs1 = insert(:bookshelf, user: user, name: "library", visibility: "platform")
-      _bs2 = insert(:bookshelf, user: user, name: "wishlist", visibility: "platform")
+
+      _bs1 =
+        insert(:bookshelf,
+          user: user,
+          name: "library",
+          visibility: "platform",
+          allow_over_ceiling: true
+        )
+
+      _bs2 =
+        insert(:bookshelf,
+          user: user,
+          name: "wishlist",
+          visibility: "platform",
+          allow_over_ceiling: true
+        )
 
       perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "owner"})
 
@@ -119,7 +155,7 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
 
     test "does not touch another user's bookshelves" do
       user = insert(:user)
-      other_user = insert(:user)
+      other_user = insert(:user, profile_visibility: "platform")
       other_bs = insert(:bookshelf, user: other_user, name: "library", visibility: "platform")
 
       perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "owner"})
@@ -131,7 +167,7 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
 
   describe "perform/1 — ceiling: platform" do
     test "does not cap bookshelves already at platform" do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bs = insert(:bookshelf, user: user, name: "library", visibility: "platform")
 
       perform_job(VisibilityRecapJob, %{"user_id" => user.id, "new_visibility" => "platform"})
@@ -142,7 +178,7 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
     end
 
     test "returns :ok with no DB changes when nothing to cap" do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       _bs = insert(:bookshelf, user: user, name: "library", visibility: "platform")
 
       assert :ok =
@@ -153,7 +189,7 @@ defmodule Stacks.Workers.VisibilityRecapJobTest do
     end
 
     test "does not emit event when ceiling is platform and nothing is capped" do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       _bs = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       before_count = event_count("user.visibility_recap_completed")
 

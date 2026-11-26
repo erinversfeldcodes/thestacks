@@ -1,0 +1,165 @@
+{
+  "total": 8,
+  "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+  "modal_app": "https://erinversfeldcodes--thestacks-vision-refactor-vision-rede-df1ee4.us-east.modal.run",
+  "per_stratum": {
+    "clean_barcode": {
+      "unscored": 0,
+      "passed": 1,
+      "scored": 1
+    },
+    "hostile_orientation": {
+      "unscored": 0,
+      "passed": 2,
+      "scored": 2
+    },
+    "negative": {
+      "unscored": 0,
+      "passed": 3,
+      "scored": 3
+    },
+    "occlusion": {
+      "unscored": 0,
+      "passed": 1,
+      "scored": 1
+    },
+    "text_clutter": {
+      "unscored": 0,
+      "passed": 1,
+      "scored": 1
+    }
+  },
+  "unscored": 0,
+  "passed": 8,
+  "cases": [
+    {
+      "name": "barcode",
+      "ok": true,
+      "stratum": "clean_barcode",
+      "detail": "is_book=true isbns=[\"9780156001311\"]",
+      "gpu_cold": false,
+      "tier": "ANALYSIS_TIER_BARCODE",
+      "timings_ms": {
+        "barcode": 4,
+        "classify": null,
+        "download": 0,
+        "extract": null
+      },
+      "wall_ms": 5360,
+      "unscored": false
+    },
+    {
+      "name": "not_a_book",
+      "ok": true,
+      "stratum": "negative",
+      "detail": "is_book=false isbns=[]",
+      "gpu_cold": false,
+      "tier": "ANALYSIS_TIER_VLM_CLASSIFY",
+      "timings_ms": {
+        "barcode": 13,
+        "classify": 2018,
+        "download": 0,
+        "extract": null
+      },
+      "wall_ms": 4534,
+      "unscored": false
+    },
+    {
+      "name": "reversed",
+      "ok": true,
+      "stratum": "hostile_orientation",
+      "detail": "is_book=true isbns=[]",
+      "gpu_cold": false,
+      "tier": "ANALYSIS_TIER_VLM_EXTRACT",
+      "timings_ms": {
+        "barcode": 110,
+        "classify": 1573,
+        "download": 0,
+        "extract": 3208
+      },
+      "wall_ms": 7727,
+      "unscored": false
+    },
+    {
+      "name": "reversed_cutoff",
+      "ok": true,
+      "stratum": "hostile_orientation",
+      "detail": "is_book=true isbns=[]",
+      "gpu_cold": false,
+      "tier": "ANALYSIS_TIER_VLM_EXTRACT",
+      "timings_ms": {
+        "barcode": 115,
+        "classify": 1576,
+        "download": 0,
+        "extract": 4598
+      },
+      "wall_ms": 8674,
+      "unscored": false
+    },
+    {
+      "name": "obscured",
+      "ok": true,
+      "stratum": "occlusion",
+      "detail": "is_book=true isbns=[]",
+      "gpu_cold": false,
+      "tier": "ANALYSIS_TIER_VLM_EXTRACT",
+      "timings_ms": {
+        "barcode": 99,
+        "classify": 1960,
+        "download": 0,
+        "extract": 6459
+      },
+      "wall_ms": 10487,
+      "unscored": false
+    },
+    {
+      "name": "mixed_text",
+      "ok": true,
+      "stratum": "text_clutter",
+      "detail": "is_book=true isbns=[]",
+      "gpu_cold": false,
+      "tier": "ANALYSIS_TIER_VLM_EXTRACT",
+      "timings_ms": {
+        "barcode": 93,
+        "classify": 2980,
+        "download": 0,
+        "extract": 13724
+      },
+      "wall_ms": 18797,
+      "unscored": false
+    },
+    {
+      "name": "negative_non_isbn_barcode",
+      "ok": true,
+      "stratum": "negative",
+      "detail": "is_book=false isbns=[]",
+      "gpu_cold": false,
+      "tier": "ANALYSIS_TIER_VLM_CLASSIFY",
+      "timings_ms": {
+        "barcode": 33,
+        "classify": 1732,
+        "download": 0,
+        "extract": null
+      },
+      "wall_ms": 3569,
+      "unscored": false
+    },
+    {
+      "name": "negative_text_document",
+      "ok": true,
+      "stratum": "negative",
+      "detail": "is_book=false isbns=[]",
+      "gpu_cold": false,
+      "tier": "ANALYSIS_TIER_VLM_CLASSIFY",
+      "timings_ms": {
+        "barcode": 108,
+        "classify": 2275,
+        "download": 0,
+        "extract": null
+      },
+      "wall_ms": 4254,
+      "unscored": false
+    }
+  ],
+  "ran_at": "2026-11-12T16:18:36.202254Z"
+}

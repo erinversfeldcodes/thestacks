@@ -12,7 +12,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
       replaced looked nothing alike.
   """
 
-  use Oban.Worker, queue: :vision, max_attempts: 3
+  use Stacks.Worker, scope: :user, queue: :vision, max_attempts: 3
 
   require Logger
 
@@ -235,13 +235,25 @@ defmodule Stacks.Workers.IdentifyBookJob do
   end
 
   defp run_pipeline(context, image_id) do
-    Stacks.Telemetry.phase(:identify_book, %{upload_id: image_id}, fn ->
-      do_run_pipeline(context, image_id)
+    # ⬛ `phase_with_meta`, because the warm/cold fact only exists once the
+    # answer does: a resolved pipeline result carries `cold: true` when a GPU
+    # container on its path reported a cold start (set in Moderation, from the
+    # dispatch records). The label is what lets the SLO gate hold the ruled
+    # warm p95 ≤ 10s without fighting accepted cold-start physics; outcomes
+    # with no answer carry "na" — a rejection has no warmth to classify.
+    Stacks.Telemetry.phase_with_meta(:identify_book, %{upload_id: image_id}, fn ->
+      moderation_result = Moderation.run_pipeline(context)
+
+      {handle_pipeline_result(moderation_result, image_id),
+       %{cold: result_cold(moderation_result)}}
     end)
   end
 
-  defp do_run_pipeline(context, image_id) do
-    case Moderation.run_pipeline(context) do
+  defp result_cold({:ok, %{cold: cold}}) when is_boolean(cold), do: cold
+  defp result_cold(_other), do: "na"
+
+  defp handle_pipeline_result(moderation_result, image_id) do
+    case moderation_result do
       {:ok, %{resolved: books, rejected: rejected}} when is_list(books) ->
         book_ids = Enum.map(books, & &1.id)
         isbns = Enum.map_join(books, ", ", &primary_isbn/1)

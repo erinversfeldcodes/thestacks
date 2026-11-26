@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 /**
  * The public routes, loaded cold and signed out — the way a shared link arrives.

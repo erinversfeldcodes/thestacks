@@ -150,6 +150,40 @@ defmodule Stacks.SocialTest do
       assert %DateTime{} = entry.blocked_at
     end
 
+    test "a blocked reader who never set a display name does not hide the whole list" do
+      # ⛔ The client's `blockedUserDecoder` requires `display_name` as a
+      # non-null string, and a null fails the WHOLE response — so one blocked
+      # reader with no name made every blocked reader invisible, on the one
+      # surface whose purpose is unblocking people. Retrying can never fix it,
+      # because the same row comes back.
+      #
+      # `display_name` is genuinely nullable: it is in
+      # `@registration_optional_fields` while only email and password are
+      # required, and the register endpoint passes params straight through. The
+      # SPA's own form cannot produce it, but the API can.
+      #
+      # ⚠️ Three sibling queries in this module already coalesce to `handle` for
+      # exactly this reason, and say so in a comment. This one did not — so the
+      # defect was fixed at the roster endpoint and left here, which is why the
+      # fix is `coalesce` on the SERVER rather than a tolerant decoder: a
+      # tolerant decoder would render a nameless row.
+      blocker = insert(:user)
+      nameless = insert(:user, display_name: nil, handle: "no_name_set")
+      {:ok, _} = Social.block_user(blocker.id, nameless.id)
+
+      {results, total} = Social.list_blocked_users(blocker.id)
+
+      assert total == 1
+      assert [entry] = results
+
+      refute is_nil(entry.display_name),
+             "a null display_name reaches the client, where the blocked-list decoder requires " <>
+               "a string — so this one row makes the entire blocked list fail to load"
+
+      assert entry.display_name == "no_name_set",
+             "with no name set the reader should be called by their handle, which is NOT NULL"
+    end
+
     test "does not return users blocked by others" do
       user_a = insert(:user)
       user_b = insert(:user)
@@ -617,7 +651,7 @@ defmodule Stacks.SocialTest do
 
   describe "grant_visibility/3" do
     test "happy path: grant created for group-visibility bookshelf" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -629,7 +663,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":unauthorized when caller doesn't own bookshelf" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       other = insert(:user)
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
@@ -638,7 +672,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":not_applicable when bookshelf visibility != group" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
 
@@ -647,7 +681,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":already_granted on duplicate" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -660,7 +694,7 @@ defmodule Stacks.SocialTest do
 
   describe "revoke_visibility/3" do
     test "happy path: grant deleted" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
       {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
@@ -670,7 +704,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":unauthorized for non-owner" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       other = insert(:user)
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
@@ -681,7 +715,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":not_found when no grant exists" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -692,7 +726,7 @@ defmodule Stacks.SocialTest do
 
   describe "list_visibility_grants/2" do
     test "returns grants for bookshelf owner" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
       {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
@@ -703,7 +737,7 @@ defmodule Stacks.SocialTest do
     end
 
     test ":unauthorized for non-owner" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       other = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -713,7 +747,7 @@ defmodule Stacks.SocialTest do
 
   describe "has_visibility_grant?/2" do
     test "returns true when grant exists" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
       {:ok, _} = Social.grant_visibility(bookshelf.id, owner.id, grantee.id)
@@ -722,7 +756,7 @@ defmodule Stacks.SocialTest do
     end
 
     test "returns false when no grant exists" do
-      owner = insert(:user)
+      owner = insert(:user, profile_visibility: "platform")
       grantee = insert(:user)
       bookshelf = insert(:bookshelf, user: owner, visibility: "group")
 
@@ -731,6 +765,29 @@ defmodule Stacks.SocialTest do
   end
 
   describe "list_group_members/2" do
+    test "a member who never set a display name does not hide the whole roster" do
+      # The sibling of the blocked-list case above, and the reason this test
+      # exists even though the query is already correct: `groupMemberDecoder`
+      # requires `display_name` as a non-null string too, and this query's
+      # `coalesce` is the only thing standing between a nameless member and a
+      # roster that fails to decode entirely.
+      #
+      # ⚠️ The coalesce was present and UNPINNED. Removing it broke nothing in
+      # the suite, which is exactly how the blocked-list query came to be missed
+      # when this one was fixed — the fix landed where the defect was found and
+      # nowhere else, with no test to carry it across.
+      owner = insert(:user, display_name: nil, handle: "owner_no_name")
+      {:ok, group} = Social.create_group(owner.id, %{name: "Group", type: "close_friends"})
+
+      assert {:ok, [member]} = Social.list_group_members(group.id, owner.id)
+
+      refute is_nil(member.display_name),
+             "a null display_name reaches the client, where the group-member decoder requires " <>
+               "a string — one nameless member would fail the whole roster"
+
+      assert member.display_name == "owner_no_name"
+    end
+
     test "returns members for a group member viewer" do
       owner = insert(:user)
       {:ok, group} = Social.create_group(owner.id, %{name: "Group", type: "close_friends"})

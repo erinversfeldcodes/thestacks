@@ -53,7 +53,20 @@ defmodule StacksWeb.BookControllerTest do
       assert returned["primary_edition"]["isbn"] == edition.isbn
       assert is_list(returned["editions"])
       assert returned["edition_count"] == 1
-      assert is_integer(returned["community_read_count"])
+
+      # ⛔ This was `assert is_integer(returned["community_read_count"])`,
+      # and the residue ledger names it as the assertion the old confident-zero
+      # made VACUOUS — it held whether the mart existed, was missing, or
+      # errored, because every one of those produced an integer.
+      #
+      # It is now a statement about a knowable state: the test database has no
+      # `marts` schema at all (dbt never runs here), so the count genuinely
+      # cannot be read, and the honest payload omits the key. If a future
+      # change builds the mart in test, this flips to asserting the number —
+      # which is the point: the two states are finally distinguishable.
+      refute Map.has_key?(returned, "community_read_count"),
+             "the test database has no marts schema, so the count is unmeasurable here and " <>
+               "the key must be absent. A number would mean the serializer invented one."
     end
 
     test "returns placement data when user has an active placement for the book", %{conn: conn} do
@@ -86,7 +99,7 @@ defmodule StacksWeb.BookControllerTest do
 
       assert %{"visibility" => "platform"} = json_response(put_conn, 200)
 
-      get_conn = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      get_conn = CoreWeb.ConnCase.proven_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert %{"placement" => placement} = json_response(get_conn, 200)
       assert placement["bookshelf_visibility"] == "platform"
     end
@@ -698,13 +711,13 @@ defmodule StacksWeb.BookControllerTest do
   describe "GET /api/books/:id — visibility gates" do
     test "age_gated book returns 403 for unauthenticated viewer" do
       {book, _edition} = insert_book_with_edition(visibility_tier: "age_gated")
-      conn = build_conn() |> get("/api/books/#{book.id}")
+      conn = CoreWeb.ConnCase.proven_conn() |> get("/api/books/#{book.id}")
       assert %{"error" => "age_verification_required"} = json_response(conn, 403)
     end
 
     test "public book returns 200 for unauthenticated viewer" do
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
-      conn = build_conn() |> get("/api/books/#{book.id}")
+      conn = CoreWeb.ConnCase.proven_conn() |> get("/api/books/#{book.id}")
       assert %{"book" => returned} = json_response(conn, 200)
       assert returned["id"] == book.id
     end
@@ -738,6 +751,107 @@ defmodule StacksWeb.BookControllerTest do
       assert %{"book" => _, "my_writing" => my_writing} = json_response(conn, 200)
       assert length(my_writing) == 1
       assert hd(my_writing)["title"] == "My Review"
+    end
+
+    test "my_writing excludes another author's post about the same book", %{conn: conn} do
+      # The contract that makes `list_posts_for_book_by_user/2` a DIFFERENT
+      # function from the any-author lister deleted alongside it, rather than a
+      # rename of it: it filters `p.user_id == ^user_id`. Every other test in
+      # this describe inserts a single post authored by the viewer, so all of
+      # them pass identically with that filter removed — which is exactly how a
+      # viewer could have ended up reading a stranger's drafts.
+      viewer = insert(:user)
+      stranger = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      mine =
+        insert(:post, user: viewer, title: "Mine", published_at: DateTime.utc_now())
+
+      theirs =
+        insert(:post, user: stranger, title: "Theirs", published_at: DateTime.utc_now())
+
+      {:ok, _} = Stacks.Blog.associate_book(mine, book.id, %{visible: true})
+      {:ok, _} = Stacks.Blog.associate_book(theirs, book.id, %{visible: true})
+
+      conn =
+        conn
+        |> auth_conn(viewer)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"my_writing" => my_writing} = json_response(conn, 200)
+
+      titles = Enum.map(my_writing, & &1["title"])
+      assert titles == ["Mine"]
+
+      refute "Theirs" in titles,
+             "my_writing leaked another author's post: #{inspect(titles)}"
+    end
+
+    test "a draft is carried with published_at NULL, not coerced to a string", %{conn: conn} do
+      # ⚠️ The only test on either side of the wire that proves a draft arrives
+      # as `null`. The client renders a "Draft" label for exactly that value and
+      # a date otherwise, and until this existed BOTH ends of that claim lived
+      # in the client's own diff: every test here inserted
+      # `published_at: DateTime.utc_now()`, and the `null` the Elm tests decode
+      # was written by the Elm test helper.
+      #
+      # The edit this is here to catch is a plausible one, because the contract
+      # invites it: `book_responses.proto` types `published_at` as a
+      # non-optional proto3 `string`, so "make the server match the proto" reads
+      # like a correction. Coercing to `""` here would keep this suite, the
+      # whole Elm suite and the wire shape green while every draft rendered with
+      # a blank date.
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      draft = insert(:post, user: user, title: "Half-written", published_at: nil)
+      {:ok, _assoc} = Stacks.Blog.associate_book(draft, book.id, %{visible: true})
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"my_writing" => [entry]} = json_response(conn, 200)
+      assert entry["title"] == "Half-written"
+
+      assert Map.has_key?(entry, "published_at"),
+             "the key must be present — an absent key and a null one are different payloads, " <>
+               "and only one of them tells the client this post is a draft"
+
+      assert entry["published_at"] == nil,
+             "a draft must serialise as null; got #{inspect(entry["published_at"])}"
+    end
+
+    test "the publication state is stated, not left for the client to infer", %{conn: conn} do
+      # The `published_at` null above is necessary but not sufficient: a proto3
+      # `string` has no null, so any consumer using a GENERATED decoder receives
+      # `""` and cannot tell a draft from a post published at an unknown time.
+      # `publication_state` is the field that survives that crossing, and it has
+      # to be asserted on the server side or the only thing pinning it is the
+      # client's own test helper — which is how the `published_at` claim came to
+      # live entirely inside the client's diff.
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      draft = insert(:post, user: user, title: "Half-written", published_at: nil)
+      live = insert(:post, user: user, title: "On Rereading", published_at: DateTime.utc_now())
+      {:ok, _} = Stacks.Blog.associate_book(draft, book.id, %{visible: true})
+      {:ok, _} = Stacks.Blog.associate_book(live, book.id, %{visible: true})
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert %{"my_writing" => entries} = json_response(conn, 200)
+
+      states =
+        Map.new(entries, fn entry -> {entry["title"], entry["publication_state"]} end)
+
+      # Both in one assertion, so a serialiser that hardcodes either value is
+      # caught. Pinned separately, "draft" alone passes against a constant.
+      assert states == %{"Half-written" => "draft", "On Rereading" => "published"},
+             "publication_state must distinguish the two; got #{inspect(states)}"
     end
 
     test "authenticated user with no associations sees empty my_writing", %{conn: conn} do
@@ -846,7 +960,7 @@ defmodule StacksWeb.BookControllerTest do
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
       BookDetailCache.invalidate(book.id)
 
-      conn1 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      conn1 = CoreWeb.ConnCase.proven_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert json_response(conn1, 200)["book"]["id"] == book.id
 
       assert_receive {:telemetry, [:stacks, :book_detail_cache, :miss], %{count: 1},
@@ -857,7 +971,7 @@ defmodule StacksWeb.BookControllerTest do
 
       assert book_id == book.id
 
-      conn2 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      conn2 = CoreWeb.ConnCase.proven_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert json_response(conn2, 200)["book"]["id"] == book.id
 
       assert_receive {:telemetry, [:stacks, :book_detail_cache, :hit], %{count: 1},
@@ -907,7 +1021,7 @@ defmodule StacksWeb.BookControllerTest do
         })
 
         before_body =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(user)
           |> get("/api/books/#{book.id}")
           |> json_response(200)
@@ -915,7 +1029,7 @@ defmodule StacksWeb.BookControllerTest do
         assert before_body["book"]["edition_count"] == 1
 
         merge_body =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(user)
           |> post("/api/books/#{book.id}/merge-format", %{
             "isbn" => "9780099466031",
@@ -933,7 +1047,7 @@ defmodule StacksWeb.BookControllerTest do
         Oban.drain_queue(queue: :events)
 
         after_body =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(user)
           |> get("/api/books/#{book.id}")
           |> json_response(200)
@@ -956,7 +1070,7 @@ defmodule StacksWeb.BookControllerTest do
       BookDetailCache.invalidate(book.id)
 
       before_body =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(reader)
         |> get("/api/books/#{book.id}")
         |> json_response(200)
@@ -964,7 +1078,7 @@ defmodule StacksWeb.BookControllerTest do
       assert before_body["book"]["visibility_tier"] == "public"
 
       marked =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(insert(:user))
         |> put("/api/books/#{book.id}/age-gate", %{"adults_only" => true})
         |> json_response(200)
@@ -972,7 +1086,7 @@ defmodule StacksWeb.BookControllerTest do
       assert marked["book"]["visibility_tier"] == "age_gated"
 
       assert %{"error" => "age_verification_required"} =
-               build_conn()
+               CoreWeb.ConnCase.proven_conn()
                |> auth_conn(reader)
                |> get("/api/books/#{book.id}")
                |> json_response(403),
@@ -1008,7 +1122,7 @@ defmodule StacksWeb.BookControllerTest do
            }}
         )
 
-        assert build_conn()
+        assert CoreWeb.ConnCase.proven_conn()
                |> auth_conn(user)
                |> get("/api/books/#{book.id}")
                |> json_response(200)
@@ -1018,7 +1132,7 @@ defmodule StacksWeb.BookControllerTest do
 
         Oban.drain_queue(queue: :events)
 
-        assert build_conn()
+        assert CoreWeb.ConnCase.proven_conn()
                |> auth_conn(user)
                |> get("/api/books/#{book.id}")
                |> json_response(200)

@@ -8,6 +8,7 @@ import Json.Encode as Encode
 import Navigation.Route
 import Page.Upload as Upload exposing (Msg(..), OutMsg(..), UploadFailure(..), UploadResult(..), UploadStep(..))
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.Book exposing (Book, Edition, VisibilityTier(..))
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
@@ -48,6 +49,7 @@ dummyBook =
     , editionCount = 0
     , subjects = []
     , visibilityTier = Public
+    , communityReadCount = 0
     }
 
 
@@ -91,6 +93,45 @@ dummyEdition =
     }
 
 
+{-| A just-identified, not-yet-enriched book: a barcode-unverified edition and a
+title that is still the ISBN placeholder, so `Types.Book.isUnidentified` is True.
+-}
+provisionalEdition : Edition
+provisionalEdition =
+    { dummyEdition | isbn = "9780316769488", verificationSource = "barcode_unverified" }
+
+
+provisionalBook : Book
+provisionalBook =
+    { dummyBook
+        | id = "book-prov"
+        , title = "ISBN 9780316769488"
+        , editions = [ provisionalEdition ]
+        , primaryEdition = Just provisionalEdition
+    }
+
+
+{-| The same book after enrichment: same id and edition, a real title — so it is
+no longer `isUnidentified`, which is the page's signal to stop polling.
+-}
+enrichedBook : Book
+enrichedBook =
+    { provisionalBook | title = "The Catcher in the Rye" }
+
+
+{-| Wrap a book in the book-detail response shape the identification and refetch
+handlers decode, with no placement or writing — the fields those handlers read
+off it are only the book itself.
+-}
+identifiedResponse book =
+    { book = book
+    , placement = Nothing
+    , bookshelfVisibility = Nothing
+    , placements = []
+    , myWriting = []
+    }
+
+
 dummyBookWithEdition : Book
 dummyBookWithEdition =
     { id = "book-1"
@@ -102,6 +143,7 @@ dummyBookWithEdition =
     , editionCount = 1
     , subjects = []
     , visibilityTier = Public
+    , communityReadCount = 0
     }
 
 
@@ -159,14 +201,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (UploadAccepted (Ok "img-1")) Upload.init (Just "tok")
+                            Upload.update (UploadAccepted (Ok "img-1")) Upload.init (Just (TestHelpers.creds "tok"))
                     in
                     model.uploadState |> Expect.equal (Success "img-1")
             , test "Err sets uploadState to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (UploadAccepted (Err Http.NetworkError)) Upload.init (Just "tok")
+                            Upload.update (UploadAccepted (Err Http.NetworkError)) Upload.init (Just (TestHelpers.creds "tok"))
                     in
                     model.uploadState |> Expect.equal (Failure Http.NetworkError)
             ]
@@ -178,7 +220,7 @@ suite =
                             serverFrame "resolved" (Just "some-uuid") [ "some-uuid" ] Nothing
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal NoResult
             , test "rejected payload sets result to IdentificationFailed" <|
@@ -188,7 +230,7 @@ suite =
                             serverFrame "rejected" Nothing [] (Just "not_a_book")
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal NotABook
             , test "heartbeat payload leaves model unchanged" <|
@@ -198,7 +240,7 @@ suite =
                             "{\"type\":\"heartbeat\"}"
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal NoResult
@@ -212,7 +254,7 @@ suite =
                             serverFrame "resolved" Nothing [] (Just "not_a_book")
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal NotABook
             , test "isbn_not_found rejection reason sets result to IdentificationFailed" <|
@@ -222,7 +264,7 @@ suite =
                             serverFrame "rejected" Nothing [] (Just "isbn_not_found")
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal (IdentificationFailed IsbnUnreadable)
             , test "isbn_not_found rejection clears pendingBookIds and collectedBooks" <|
@@ -242,7 +284,7 @@ suite =
                             serverFrame "rejected" Nothing [] (Just "isbn_not_found")
 
                         ( model, _, _ ) =
-                            Upload.update (StreamEvent rawJson) modelInFlight (Just "tok")
+                            Upload.update (StreamEvent rawJson) modelInFlight (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal (IdentificationFailed IsbnUnreadable)
@@ -256,14 +298,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update StreamError modelWithImage (Just "tok")
+                            Upload.update StreamError modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal (IdentificationFailed ConnectionLost)
             , test "StreamError leaves uploadState unchanged" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update StreamError modelWithImage (Just "tok")
+                            Upload.update StreamError modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.uploadState |> Expect.equal (Success "img-1")
             ]
@@ -272,7 +314,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (StatusReceived (Ok timeoutPoll)) modelWithImage (Just "tok")
+                            Upload.update (StatusReceived (Ok timeoutPoll)) modelWithImage (Just (TestHelpers.creds "tok"))
                     in
                     model.result |> Expect.equal (IdentificationFailed TookTooLong)
             ]
@@ -287,7 +329,7 @@ suite =
                             { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal (Identified [ dummyBook ])
@@ -302,7 +344,7 @@ suite =
                             { init_ | pendingBookIds = [ "book-1", "book-2" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.pendingBookIds |> Expect.equal [ "book-2" ]
@@ -324,12 +366,87 @@ suite =
                     in
                     model.result |> Expect.equal (IdentificationFailed ConnectionLost)
             ]
+        , describe "provisional refetch — the page polls a just-identified book until enrichment fills in its title"
+            [ test "identifying a book whose title is still the ISBN placeholder starts polling" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        modelPending =
+                            { base | pendingBookIds = [ "book-prov" ], collectedBooks = [] }
+
+                        ( model, _, _ ) =
+                            Upload.update (GotIdentifiedBook "book-prov" (Ok (identifiedResponse provisionalBook))) modelPending Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.step |> Expect.equal (Verifying provisionalBook)
+                        , \m -> m.provisionalRefetches |> Expect.greaterThan 0
+                        ]
+                        model
+            , test "identifying a book that already has a real title does NOT poll" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        modelPending =
+                            { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
+
+                        ( model, _, _ ) =
+                            Upload.update (GotIdentifiedBook "book-1" (Ok (identifiedResponse dummyBook))) modelPending Nothing
+                    in
+                    model.provisionalRefetches |> Expect.equal 0
+            , test "a poll that enriched the title swaps the shown book and stops polling" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        verifying =
+                            { base | step = Verifying provisionalBook, provisionalRefetches = 6 }
+
+                        ( model, _, _ ) =
+                            Upload.update (ProvisionalRefetched (Ok (identifiedResponse enrichedBook))) verifying Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.step |> Expect.equal (Verifying enrichedBook)
+                        , \m -> m.provisionalRefetches |> Expect.equal 0
+                        ]
+                        model
+            , test "a poll still showing the placeholder keeps polling, decrementing the budget" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        verifying =
+                            { base | step = Verifying provisionalBook, provisionalRefetches = 6 }
+
+                        ( model, _, _ ) =
+                            Upload.update (ProvisionalRefetched (Ok (identifiedResponse provisionalBook))) verifying Nothing
+                    in
+                    model.provisionalRefetches |> Expect.equal 5
+            , test "the poll budget runs out so a stuck provisional book does not poll forever" <|
+                \_ ->
+                    let
+                        base =
+                            Upload.init
+
+                        verifying =
+                            { base | step = Verifying provisionalBook, provisionalRefetches = 1 }
+
+                        ( model, _, _ ) =
+                            Upload.update (ProvisionalRefetched (Ok (identifiedResponse provisionalBook))) verifying Nothing
+                    in
+                    model.provisionalRefetches |> Expect.equal 0
+            ]
         , describe "GotDuplicateBook"
             [ test "Ok sets result to DuplicateDetected" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) Upload.init Nothing
+                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] })) Upload.init Nothing
                     in
                     model.result |> Expect.equal (DuplicateDetected dummyBook)
             , test "Err sets result to IdentificationFailed" <|
@@ -373,6 +490,36 @@ suite =
                         , \m -> m.uploadState |> Expect.equal NotAsked
                         ]
                         model
+            , test "RejectIdentification opens NO stream — the reject must land first" <|
+                \_ ->
+                    let
+                        verifying =
+                            { init_
+                                | step = Verifying dummyBook
+                                , result = Identified [ dummyBook ]
+                                , uploadState = Success "img-1"
+                            }
+
+                        ( _, _, out ) =
+                            Upload.update RejectIdentification
+                                verifying
+                                (Just (Api.credentials "t" Nothing))
+                    in
+                    -- A stream opened here races the reject POST; a connect
+                    -- that wins replays the just-rejected terminal state and
+                    -- closes, stranding the page on the old answer (watched
+                    -- live). NoOut is the fix's whole contract.
+                    out |> Expect.equal Upload.NoOut
+            , test "the stream opens once the rejection has landed" <|
+                \_ ->
+                    let
+                        rejected =
+                            { init_ | uploadState = Success "img-1" }
+
+                        ( _, _, out ) =
+                            Upload.update (RejectIdentificationCompleted (Ok ())) rejected Nothing
+                    in
+                    out |> Expect.equal (Upload.OpenStream "/api/upload/img-1/stream")
             , test "ShelfSelected updates selectedShelf" <|
                 \_ ->
                     let
@@ -385,34 +532,34 @@ suite =
                     Upload.init.selectedShelf |> Expect.equal "wishlist"
             ]
         , describe "GoToShelf"
-            [ test "emits NavigateTo with Library route" <|
+            [ test "emits NavigateToArrival with Library route and the placed book's id" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Upload.update (GoToShelf "library") Upload.init Nothing
+                            Upload.update (GoToShelf "library" "book-1") Upload.init Nothing
                     in
-                    outMsg |> Expect.equal (NavigateTo Navigation.Route.Library)
-            , test "emits NavigateTo with AntiLibrary route" <|
+                    outMsg |> Expect.equal (NavigateToArrival Navigation.Route.Library "book-1")
+            , test "emits NavigateToArrival with AntiLibrary route" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Upload.update (GoToShelf "antilibrary") Upload.init Nothing
+                            Upload.update (GoToShelf "antilibrary" "book-1") Upload.init Nothing
                     in
-                    outMsg |> Expect.equal (NavigateTo Navigation.Route.AntiLibrary)
-            , test "emits NavigateTo with WishList route" <|
+                    outMsg |> Expect.equal (NavigateToArrival Navigation.Route.AntiLibrary "book-1")
+            , test "emits NavigateToArrival with WishList route" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Upload.update (GoToShelf "wishlist") Upload.init Nothing
+                            Upload.update (GoToShelf "wishlist" "book-1") Upload.init Nothing
                     in
-                    outMsg |> Expect.equal (NavigateTo Navigation.Route.WishList)
-            , test "unknown shelf falls back to Library route" <|
+                    outMsg |> Expect.equal (NavigateToArrival Navigation.Route.WishList "book-1")
+            , test "unknown shelf falls back to Library route, carrying the book id" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Upload.update (GoToShelf "unknown_shelf") Upload.init Nothing
+                            Upload.update (GoToShelf "unknown_shelf" "book-1") Upload.init Nothing
                     in
-                    outMsg |> Expect.equal (NavigateTo Navigation.Route.Library)
+                    outMsg |> Expect.equal (NavigateToArrival Navigation.Route.Library "book-1")
             ]
         , describe "init state"
             [ test "step is Uploading" <|
@@ -470,14 +617,14 @@ suite =
                             { init_ | step = ChoosingShelf dummyBook }
 
                         ( model, _, _ ) =
-                            Upload.update ConfirmPlacement choosing (Just "tok")
+                            Upload.update ConfirmPlacement choosing (Just (TestHelpers.creds "tok"))
                     in
                     model.placementState |> Expect.equal Loading
             , test "no-ops when not in ChoosingShelf" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update ConfirmPlacement Upload.init (Just "tok")
+                            Upload.update ConfirmPlacement Upload.init (Just (TestHelpers.creds "tok"))
                     in
                     model.placementState |> Expect.equal NotAsked
             , test "no-ops when token absent" <|
@@ -582,7 +729,7 @@ suite =
                             { init_ | manualIsbn = "9780306406157" }
 
                         ( model, _, _ ) =
-                            Upload.update SubmitManualIsbn withIsbn (Just "tok")
+                            Upload.update SubmitManualIsbn withIsbn (Just (TestHelpers.creds "tok"))
                     in
                     model.confirmState |> Expect.equal Loading
             , test "SubmitManualIsbn with invalid ISBN sets showIsbnError" <|
@@ -592,7 +739,7 @@ suite =
                             { init_ | manualIsbn = "1234567890" }
 
                         ( model, _, _ ) =
-                            Upload.update SubmitManualIsbn withBadIsbn (Just "tok")
+                            Upload.update SubmitManualIsbn withBadIsbn (Just (TestHelpers.creds "tok"))
                     in
                     model.showIsbnError |> Expect.equal True
             , test "SubmitManualIsbn without token does nothing" <|
@@ -637,7 +784,7 @@ suite =
                                 Nothing
                     in
                     model.existingShelves |> Expect.equal [ "library" ]
-            , -- #333 — inform, NEVER block: an already-owned book still
+            , -- Inform, NEVER block: an already-owned book still
               test "ConfirmCompleted Ok on an already-owned book still reaches Complete" <|
                 \_ ->
                     let
@@ -659,7 +806,7 @@ suite =
                         , \m -> m.confirmState |> Expect.equal (Success ())
                         ]
                         model
-            , -- #333 — a book the reader does not already own leaves the
+            , -- A book the reader does not already own leaves the
               test "ConfirmCompleted Ok with only the used shelf records no existing shelves" <|
                 \_ ->
                     let
@@ -689,7 +836,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update
@@ -725,7 +872,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
@@ -735,7 +882,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
@@ -773,7 +920,7 @@ suite =
                             }
 
                         ( model, _, _ ) =
-                            Upload.update (ConfirmMergeFormat "book-1") dup (Just "tok")
+                            Upload.update (ConfirmMergeFormat "book-1") dup (Just (TestHelpers.creds "tok"))
                     in
                     model.mergeFormatState |> Expect.equal Loading
             , test "ConfirmMergeFormat no-ops when token absent" <|

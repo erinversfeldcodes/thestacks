@@ -222,7 +222,7 @@ N/A
 - **Materialisation**: Intermediate model
 - **Consumer**: Metrics dashboard source discovery section
 
-### `int_source_health`
+### `int_source_health` — DELETED 2026-10-15 (its only consumer was a deleted mart)
 - **Model**: `int_source_health`
 - **Trigger**: `source_health.recorded` event
 - **Materialisation**: Intermediate model
@@ -272,7 +272,7 @@ N/A
 - **Together AI call counts and latencies**: `complete/2` calls for source scoring — per-call duration and success/failure
 - **Circuit breaker state**: `:brave_fuse` and `:searxng_fuse` open/closed transitions; Brave daily budget exhaustion events; Together AI fuse for scoring failures
 - **Duplicate detection rate**: percentage of search results filtered out by `Discovery.get_source_by_url/1` (already-known URLs)
-- **dbt refresh job duration**: time to rebuild `int_source_approval_rate` and `int_source_health` models
+- **dbt refresh job duration**: time to rebuild `int_source_approval_rate` (`int_source_health` deleted 2026-10-15)
 
 ---
 

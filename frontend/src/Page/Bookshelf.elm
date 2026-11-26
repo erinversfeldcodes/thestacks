@@ -18,6 +18,7 @@ module Page.Bookshelf exposing
     , updateWithEffect
     , view
     , wishListConfig
+    , withArrived
     , withPendingUndo
     )
 
@@ -160,12 +161,17 @@ type alias Model =
     , rssLink : RSSLink.Model
     , viewMode : ShelfViewMode
     , sortState : BookList.SortState
-    , token : Maybe String
+    , isAuthenticated : Bool
     , organiser : ShelfOrganiser.State
     , organiserBusy : Bool
     , organiserError : Maybe String
     , undoToast : UndoToast
     , focusedSpine : Maybe String
+
+    -- The book just placed and navigated to with `?arrived=<id>`, if any. Its
+    -- spine plays the one-shot arrival keyframe once this page renders; it is
+    -- read once from the URL at init and never re-armed.
+    , arrivedId : Maybe String
     }
 
 
@@ -243,12 +249,12 @@ browsing, tagged with the profile's `requestKey` so nothing downstream can tell.
 
 -}
 type ShelvesSource
-    = OwnShelf String String
-    | ProfileShelf (Maybe String) String String
+    = OwnShelf Api.Credentials String
+    | ProfileShelf (Maybe Api.Credentials) String String
     | NoShelvesRequest
 
 
-shelvesSource : Config -> Maybe String -> ShelvesSource
+shelvesSource : Config -> Maybe Api.Credentials -> ShelvesSource
 shelvesSource config maybeToken =
     case ( config.readOnly, config.profileHandle ) of
         ( True, Just handle ) ->
@@ -266,12 +272,13 @@ shelvesSource config maybeToken =
 {-| The one shelf read in this module. `init` and every refetch go through it,
 so there is no second place for the read-only dispatch above to be got wrong.
 -}
-fetchShelves : Config -> Maybe String -> Effect Msg
+fetchShelves : Config -> Maybe Api.Credentials -> Effect Msg
 fetchShelves config maybeToken =
     case shelvesSource config maybeToken of
         ProfileShelf token handle bookshelfName ->
             Effect.public (Api.getProfileShelfRequest handle bookshelfName)
                 token
+                Nothing
                 (Api.resolveJson shelvesResponseDecoder
                     >> Result.map (\shelves -> { shelves = shelves, visibility = "owner" })
                     >> ShelvesLoaded (requestKey config)
@@ -280,7 +287,11 @@ fetchShelves config maybeToken =
         OwnShelf token bookshelfName ->
             Effect.authed (Api.getBookshelfRequest bookshelfName)
                 token
-                (Api.resolveJson bookshelfResponseDecoder >> ShelvesLoaded (requestKey config))
+                { onExpired = SessionGone
+                , onResponse =
+                    Api.resolveJson bookshelfResponseDecoder
+                        >> ShelvesLoaded (requestKey config)
+                }
 
         NoShelvesRequest ->
             Effect.none
@@ -301,9 +312,10 @@ type Msg
     | ToastExpired
     | SpineNavKey String GridNav.Key
     | SpineFocusAttempted
+    | SessionGone
 
 
-init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
+init : Config -> Maybe Api.Credentials -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
         ( model, effect ) =
@@ -314,7 +326,7 @@ init config maybeToken userId =
 
 {-| `init`, with its effect as data — see `updateWithEffect`.
 -}
-initWithEffect : Config -> Maybe String -> String -> ( Model, Effect Msg )
+initWithEffect : Config -> Maybe Api.Credentials -> String -> ( Model, Effect Msg )
 initWithEffect config maybeToken userId =
     let
         apiEffect =
@@ -340,15 +352,30 @@ initWithEffect config maybeToken userId =
       , rssLink = RSSLink.init
       , viewMode = SpineView
       , sortState = { column = BookList.Title, direction = BookList.Asc }
-      , token = maybeToken
+      , isAuthenticated = maybeToken /= Nothing
       , organiser = ShelfOrganiser.init
       , organiserBusy = False
       , organiserError = Nothing
       , undoToast = ToastHidden
       , focusedSpine = Nothing
+
+      -- Defaults to Nothing; `withArrived` arms it from the URL on the one
+      -- navigation that carries `?arrived=<id>`, so ordinary visits and every
+      -- test caller get no arrival without having to pass the id.
+      , arrivedId = Nothing
       }
     , apiEffect
     )
+
+
+{-| Arm the arrival animation for a specific book, read from `?arrived=<id>` on
+the post-placement navigation. Applied by the caller to the model `init`
+returns, so `init`'s own signature stays stable for the many call sites that
+never arrive at a shelf.
+-}
+withArrived : Maybe String -> Model -> Model
+withArrived arrivedId model =
+    { model | arrivedId = arrivedId }
 
 
 {-| How long the "Removed — Undo" toast stays offered, in milliseconds.
@@ -385,11 +412,11 @@ expireToastAfterDelay =
     Process.sleep undoToastMillis |> Task.perform (\_ -> ToastExpired)
 
 
-update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
-update msg model =
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
+update msg model maybeToken =
     let
         ( newModel, effect, out ) =
-            updateWithEffect msg model
+            updateWithEffect msg model maybeToken
     in
     ( newModel, Effect.perform effect, out )
 
@@ -401,8 +428,8 @@ this page performs after a mutation — the one whose refetch used to be
 reconstructed by hand in the harness — is the read the tests see.
 
 -}
-updateWithEffect : Msg -> Model -> ( Model, Effect Msg, OutMsg )
-updateWithEffect msg model =
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         ShelvesLoaded key result ->
             if key /= requestKey model.config then
@@ -462,11 +489,11 @@ updateWithEffect msg model =
             ( { model | sortState = { column = column, direction = newDirection } }, Effect.none, NoOut )
 
         OrganiserMsg subMsg ->
-            handleOrganiser subMsg model
+            handleOrganiser subMsg model maybeToken
 
         ShelfMutated (Ok ()) ->
             ( { model | organiserBusy = False, organiserError = Nothing }
-            , reloadShelves model
+            , reloadShelves model maybeToken
             , NoOut
             )
 
@@ -476,20 +503,22 @@ updateWithEffect msg model =
 
             else
                 ( { model | organiserBusy = False, organiserError = Just (mutationError err) }
-                , reloadShelves model
+                , reloadShelves model maybeToken
                 , NoOut
                 )
 
         ReloadRequested ->
-            ( model, reloadShelves model, NoOut )
+            ( model, reloadShelves model maybeToken, NoOut )
 
         UndoRemove ->
-            case ( model.undoToast, mutationToken model ) of
+            case ( model.undoToast, mutationToken model maybeToken ) of
                 ( ToastOffered removal, Just token ) ->
                     ( { model | undoToast = ToastRestoring removal }
                     , Effect.authed (Api.restoreBookRequest removal.placementId)
                         token
-                        (Api.resolveWhatever >> UndoCompleted)
+                        { onExpired = SessionGone
+                        , onResponse = Api.resolveWhatever >> UndoCompleted
+                        }
                     , NoOut
                     )
 
@@ -498,7 +527,7 @@ updateWithEffect msg model =
 
         UndoCompleted (Ok ()) ->
             ( { model | undoToast = ToastHidden }
-            , reloadShelves model
+            , reloadShelves model maybeToken
             , NoOut
             )
 
@@ -542,6 +571,13 @@ updateWithEffect msg model =
         SpineFocusAttempted ->
             ( model, Effect.none, NoOut )
 
+        SessionGone ->
+            -- Where every authenticated request on this page sends a 401. The
+            -- shelf is left exactly as it was: `Main` decides whether the
+            -- reader is bounced to the login or kept here on a token another
+            -- tab renewed, and a half-cleared shelf would be wrong either way.
+            ( model, Effect.none, SessionExpired )
+
 
 {-| The packed rows as `GridNav` reasons about them: the SAME grouping the
 SpineView renders, each spine as ( book id, the width the packer gave it).
@@ -571,13 +607,13 @@ and mutating someone else's shelf. `read_only_undo_is_inert_SECURITY`
 pins it.
 
 -}
-mutationToken : Model -> Maybe String
-mutationToken model =
+mutationToken : Model -> Maybe Api.Credentials -> Maybe Api.Credentials
+mutationToken model maybeToken =
     if model.config.readOnly then
         Nothing
 
     else
-        model.token
+        maybeToken
 
 
 {-| Shelf organisation, split out so `update` stays flat.
@@ -593,14 +629,16 @@ mid-drag is local bookkeeping, not a mutation — a read-only page may hold a dr
 can never complete, because `DropOn` needs the credential it does not have.
 
 -}
-handleOrganiser : ShelfOrganiser.Msg -> Model -> ( Model, Effect Msg, OutMsg )
-handleOrganiser subMsg model =
-    case ( subMsg, mutationToken model, model.shelves ) of
+handleOrganiser : ShelfOrganiser.Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+handleOrganiser subMsg model maybeToken =
+    case ( subMsg, mutationToken model maybeToken, model.shelves ) of
         ( ShelfOrganiser.AddShelf, Just token, _ ) ->
             ( { model | organiserBusy = True }
             , Effect.authed (Api.createShelfRequest model.config.apiName)
                 token
-                (Api.resolveWhatever >> ShelfMutated)
+                { onExpired = SessionGone
+                , onResponse = Api.resolveWhatever >> ShelfMutated
+                }
             , NoOut
             )
 
@@ -608,7 +646,9 @@ handleOrganiser subMsg model =
             ( { model | organiserBusy = True }
             , Effect.authed (Api.deleteShelfRequest id)
                 token
-                (Api.resolveWhatever >> ShelfMutated)
+                { onExpired = SessionGone
+                , onResponse = Api.resolveWhatever >> ShelfMutated
+                }
             , NoOut
             )
 
@@ -644,13 +684,15 @@ handleOrganiser subMsg model =
 
 {-| Apply an already-computed order locally and persist the whole list.
 -}
-persistOrder : List Shelf -> String -> Model -> ( Model, Effect Msg, OutMsg )
+persistOrder : List Shelf -> Api.Credentials -> Model -> ( Model, Effect Msg, OutMsg )
 persistOrder reordered token model =
     ( { model | shelves = Success reordered, organiserBusy = True, organiserError = Nothing }
     , Effect.authed
         (Api.reorderShelvesRequest model.config.apiName (ShelfOrganiser.orderedIds reordered))
         token
-        (Api.resolveWhatever >> ShelfMutated)
+        { onExpired = SessionGone
+        , onResponse = Api.resolveWhatever >> ShelfMutated
+        }
     , NoOut
     )
 
@@ -686,9 +728,9 @@ the read-only dispatch across: this used to re-read the viewer's OWN bookshelf
 while browsing someone else's profile shelf.
 
 -}
-reloadShelves : Model -> Effect Msg
-reloadShelves model =
-    fetchShelves model.config model.token
+reloadShelves : Model -> Maybe Api.Credentials -> Effect Msg
+reloadShelves model maybeToken =
+    fetchShelves model.config maybeToken
 
 
 {-| A load failure in the reader's terms. The two cases split from
@@ -984,6 +1026,7 @@ viewBookshelfFromShelves model shelves =
                                 , onBookClicked = BookClicked
                                 , onNavKey = SpineNavKey
                                 , tabStopId = tabStopId
+                                , arrivedId = model.arrivedId
                                 }
                             )
             in
@@ -1001,7 +1044,7 @@ reverse that. This manages the physical shelves alongside.
 -}
 viewOrganiser : Model -> List Shelf -> Html Msg
 viewOrganiser model shelves =
-    if model.config.readOnly || model.token == Nothing then
+    if model.config.readOnly || not model.isAuthenticated then
         text ""
 
     else

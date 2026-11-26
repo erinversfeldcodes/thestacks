@@ -10,7 +10,7 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
       not sit inside the ordinary scrape path.
   """
 
-  use Oban.Worker, queue: :scraper, max_attempts: 2
+  use Stacks.Worker, scope: :system, queue: :scraper, max_attempts: 2
 
   import Ecto.Query, only: [from: 2]
 

@@ -42,3 +42,48 @@ mix run apps/core/priv/repo/seeds.exs
 
 (cd dbt && dbt run)
 (cd dbt && dbt test)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The Elixir tests that need a dbt-built warehouse.
+#
+# ⚠️ Eight tests in `upload_dbt_test.exs` assert that the staging views and the
+# community-read mart reflect the operational tables, and NONE of them had ever
+# run. They were tagged `:deployed_only`, a precondition they cannot be
+# satisfied by: each writes a fixture through `Repo` and reads it back from
+# `staging.*` through the same `Repo`, so what they need is ONE database holding
+# both their fixtures and a warehouse — and a deployed stack has the warehouse
+# but not the fixtures. Re-tagged `:needs_dbt_warehouse`; this is the runner
+# that satisfies it, so the tag stops being a claim nothing checks.
+#
+# The TEST database, not the dev one built above: those tests run under
+# `MIX_ENV=test` and `Core.Repo` resolves to `stacks_test` there. A staging VIEW
+# queried on the test's own sandboxed connection sees its uncommitted fixture,
+# which is what makes the arrangement work at all — the views only have to
+# exist.
+#
+# The mart case is the exception and needs the seed: `mart_community_read_count`
+# is `materialized='incremental'`, a table rather than a view, so a rolled-back
+# fixture is invisible to it and only committed rows count.
+echo "==> Preparing the test database for the warehouse-dependent Elixir tests..."
+(
+    cd "$REPO_ROOT/apps/core"
+    MIX_ENV=test mix ecto.create --quiet
+    MIX_ENV=test mix ecto.migrate --quiet
+)
+MIX_ENV=test mix run apps/core/priv/repo/seeds.exs >/dev/null
+
+echo "==> Building the warehouse in the test database..."
+(cd dbt && DBT_DBNAME=stacks_test dbt run)
+
+echo "==> Running the warehouse-dependent Elixir tests..."
+(cd "$REPO_ROOT/apps/core" && MIX_ENV=test mix test --only needs_dbt_warehouse)
+warehouse_tests_rc=$?
+
+# Left seeded, the test database breaks every later `mix test` run that assumes
+# an empty one. This script is already destructive by contract — it drops the
+# dev database on line 38 — so cleaning up after itself is consistent, and the
+# next `mix test` recreates what it needs.
+echo "==> Dropping the seeded test database so later runs start clean..."
+(cd "$REPO_ROOT/apps/core" && MIX_ENV=test mix ecto.drop --quiet) || true
+
+exit "$warehouse_tests_rc"

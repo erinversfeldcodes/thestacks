@@ -3,7 +3,9 @@ module Page.Blog.Post exposing
     , Msg(..)
     , OutMsg(..)
     , init
+    , initWithEffect
     , update
+    , updateWithEffect
     , view
     )
 
@@ -11,13 +13,18 @@ import Api
 import Components.BlockUserModal as BlockModal
 import Components.BookAssociations as BookAssociations
 import Components.Syndication as Syndication
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, h1, h2, p, pre, span, text, textarea)
 import Html.Attributes exposing (class, disabled, href, placeholder, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route(..))
+import Task
+import Time
 import Types.BlogPost exposing (BlogPost, Comment, commentAuthorId, commentBody, commentCreatedAt, commentId, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.RelativeTime as RelativeTime
 
 
 type alias Model =
@@ -32,11 +39,17 @@ type alias Model =
     , blockModal : Maybe BlockModal.Model
     , origin : String
     , syndication : Maybe Syndication.Model
+
+    -- The reader's clock, fetched once on load, so the byline can read the
+    -- post's age relative to now ("2 minutes ago"). `Nothing` until it resolves;
+    -- the byline shows the plain date until then.
+    , now : Maybe Time.Posix
     }
 
 
 type Msg
     = PostLoaded (Result Http.Error BlogPost)
+    | SessionExpiryDetected
     | ConfirmAssociation String
     | DismissAssociation String
     | AssociationActionCompleted (Result Http.Error ())
@@ -52,6 +65,7 @@ type Msg
     | BlockModalMsg BlockModal.Msg
     | SyndicationMsg Syndication.Msg
     | EscapePressed
+    | GotNow Time.Posix
 
 
 type OutMsg
@@ -61,8 +75,17 @@ type OutMsg
     | RequestCopy String
 
 
-init : String -> Maybe String -> Maybe String -> String -> ( Model, Cmd Msg )
+init : String -> Maybe Api.Credentials -> Maybe String -> String -> ( Model, Cmd Msg )
 init postId maybeToken currentUserId origin =
+    let
+        ( newModel, effect ) =
+            initWithEffect postId maybeToken currentUserId origin
+    in
+    ( newModel, Effect.perform effect )
+
+
+initWithEffect : String -> Maybe Api.Credentials -> Maybe String -> String -> ( Model, Effect Msg )
+initWithEffect postId maybeToken currentUserId origin =
     ( { postId = postId
       , post = Loading
       , currentUserId = currentUserId
@@ -74,225 +97,315 @@ init postId maybeToken currentUserId origin =
       , blockModal = Nothing
       , origin = origin
       , syndication = Nothing
+      , now = Nothing
       }
-    , Cmd.batch
-        [ Api.getBlogPost postId maybeToken PostLoaded
-        , Api.getPostComments postId maybeToken CommentsLoaded
+    , Effect.Batch
+        [ Effect.Custom (Task.perform GotNow Time.now)
+        , Effect.public (Api.blogPostRequest postId)
+            maybeToken
+            Nothing
+            (Api.resolveJson Types.BlogPost.blogPostShowDecoder >> PostLoaded)
+        , Effect.public (Api.postCommentsRequest postId)
+            maybeToken
+            Nothing
+            (Api.resolveJson
+                (Decode.field "comments" (Decode.list Types.BlogPost.commentDecoder))
+                >> CommentsLoaded
+            )
         ]
     )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Effect.None, SessionExpired )
+
+        GotNow t ->
+            ( { model | now = Just t }, Effect.None, NoOut )
+
         PostLoaded result ->
             case result of
                 Ok post ->
+                    let
+                        ( syndication, syndicationCmd ) =
+                            if model.currentUserId == Just post.userId then
+                                Syndication.initWithEffect post.id model.origin post.syndicated maybeToken
+                                    |> Tuple.mapFirst Just
+
+                            else
+                                ( Nothing, Effect.None )
+                    in
                     ( { model
                         | post = Success post
                         , blockModal = blockModalFor model.currentUserId post
-                        , syndication =
-                            if model.currentUserId == Just post.userId then
-                                Just (Syndication.init post.id model.origin post.syndicated)
-
-                            else
-                                Nothing
+                        , syndication = syndication
                       }
-                    , Cmd.none
+                    , Effect.map SyndicationMsg syndicationCmd
                     , NoOut
                     )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( { model | post = Failure err }, Cmd.none, NoOut )
+                        ( { model | post = Failure err }, Effect.None, NoOut )
 
         ConfirmAssociation associationId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionResult = Loading }
-                    , Api.confirmAssociation model.postId associationId token AssociationActionCompleted
+                    , Effect.authed
+                        (Api.associationVerdictRequest model.postId associationId Api.ConfirmAssociation)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveWhatever >> AssociationActionCompleted
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         DismissAssociation associationId ->
             case maybeToken of
                 Just token ->
                     ( { model | actionResult = Loading }
-                    , Api.dismissAssociation model.postId associationId token AssociationActionCompleted
+                    , Effect.authed
+                        (Api.associationVerdictRequest model.postId associationId Api.DismissAssociation)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveWhatever >> AssociationActionCompleted
+                        }
                     , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         AssociationActionCompleted result ->
             case result of
                 Ok _ ->
                     ( { model | actionResult = Success () }
-                    , Api.getBlogPost model.postId maybeToken PostLoaded
+                    , Effect.public (Api.blogPostRequest model.postId)
+                        maybeToken
+                        Nothing
+                        (Api.resolveJson
+                            Types.BlogPost.blogPostShowDecoder
+                            >> PostLoaded
+                        )
                     , NoOut
                     )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( { model | actionResult = Failure err }, Cmd.none, NoOut )
+                        ( { model | actionResult = Failure err }, Effect.None, NoOut )
 
         CommentsLoaded result ->
             case result of
                 Ok comments ->
-                    ( { model | comments = Success comments }, Cmd.none, NoOut )
+                    ( { model | comments = Success comments }, Effect.None, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( { model | comments = Failure err }, Cmd.none, NoOut )
+                        ( { model | comments = Failure err }, Effect.None, NoOut )
 
         CommentDraftChanged draft ->
-            ( { model | commentDraft = draft }, Cmd.none, NoOut )
+            ( { model | commentDraft = draft }, Effect.None, NoOut )
 
         ReplyClicked parentId ->
-            ( { model | replyDraft = Just { parentId = parentId, body = "" } }, Cmd.none, NoOut )
+            ( { model | replyDraft = Just { parentId = parentId, body = "" } }, Effect.None, NoOut )
 
         ReplyDraftChanged body ->
             case model.replyDraft of
                 Just draft ->
-                    ( { model | replyDraft = Just { draft | body = body } }, Cmd.none, NoOut )
+                    ( { model | replyDraft = Just { draft | body = body } }, Effect.None, NoOut )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         SubmitComment ->
             if String.trim model.commentDraft == "" then
-                ( model, Cmd.none, NoOut )
+                ( model, Effect.None, NoOut )
 
             else
                 case maybeToken of
                     Just token ->
                         ( { model | commentSubmitting = True }
-                        , Api.createComment model.postId model.commentDraft Nothing token CommentSubmitted
+                        , Effect.authed
+                            (Api.createCommentRequest model.postId model.commentDraft Nothing)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson
+                                    (Decode.field "comment" Types.BlogPost.commentDecoder)
+                                    >> CommentSubmitted
+                            }
                         , NoOut
                         )
 
                     Nothing ->
-                        ( model, Cmd.none, NoOut )
+                        ( model, Effect.None, NoOut )
 
         SubmitReply parentId ->
             case model.replyDraft of
                 Just draft ->
                     if String.trim draft.body == "" then
-                        ( model, Cmd.none, NoOut )
+                        ( model, Effect.None, NoOut )
 
                     else
                         case maybeToken of
                             Just token ->
                                 ( { model | commentSubmitting = True }
-                                , Api.createComment model.postId draft.body (Just parentId) token CommentSubmitted
+                                , Effect.authed
+                                    (Api.createCommentRequest model.postId draft.body (Just parentId))
+                                    token
+                                    { onExpired = SessionExpiryDetected
+                                    , onResponse =
+                                        Api.resolveJson
+                                            (Decode.field "comment" Types.BlogPost.commentDecoder)
+                                            >> CommentSubmitted
+                                    }
                                 , NoOut
                                 )
 
                             Nothing ->
-                                ( model, Cmd.none, NoOut )
+                                ( model, Effect.None, NoOut )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         CommentSubmitted result ->
             case result of
                 Ok _ ->
                     ( { model | commentSubmitting = False, commentDraft = "", replyDraft = Nothing }
-                    , Api.getPostComments model.postId maybeToken CommentsLoaded
+                    , Effect.public (Api.postCommentsRequest model.postId)
+                        maybeToken
+                        Nothing
+                        (Api.resolveJson
+                            (Decode.field "comments" (Decode.list Types.BlogPost.commentDecoder))
+                            >> CommentsLoaded
+                        )
                     , NoOut
                     )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( { model | commentSubmitting = False }, Cmd.none, NoOut )
+                        ( { model | commentSubmitting = False }, Effect.None, NoOut )
 
         DeleteComment commentId ->
             case maybeToken of
                 Just token ->
-                    ( model, Api.deleteComment commentId token CommentDeleted, NoOut )
+                    ( model
+                    , Effect.authed (Api.deleteCommentRequest commentId)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveWhatever >> CommentDeleted
+                        }
+                    , NoOut
+                    )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         CommentDeleted result ->
             case result of
                 Ok _ ->
-                    ( model, Api.getPostComments model.postId maybeToken CommentsLoaded, NoOut )
+                    ( model
+                    , Effect.public (Api.postCommentsRequest model.postId)
+                        maybeToken
+                        Nothing
+                        (Api.resolveJson
+                            (Decode.field "comments" (Decode.list Types.BlogPost.commentDecoder))
+                            >> CommentsLoaded
+                        )
+                    , NoOut
+                    )
 
                 Err err ->
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( model, Effect.None, SessionExpired )
 
                     else
-                        ( model, Cmd.none, NoOut )
+                        ( model, Effect.None, NoOut )
 
         BlockModalMsg subMsg ->
             case model.blockModal of
                 Just blockModal ->
                     let
                         ( newBlockModal, subCmd, outMsg ) =
-                            BlockModal.update subMsg blockModal maybeToken
+                            BlockModal.updateWithEffect subMsg blockModal maybeToken
                     in
                     case outMsg of
                         BlockModal.NoOut ->
                             ( { model | blockModal = Just newBlockModal }
-                            , Cmd.map BlockModalMsg subCmd
+                            , Effect.map BlockModalMsg subCmd
                             , NoOut
                             )
 
                         BlockModal.UserBlocked ->
                             ( { model | blockModal = Just newBlockModal }
-                            , Cmd.batch
-                                [ Cmd.map BlockModalMsg subCmd
-                                , Api.getBlogPost model.postId maybeToken PostLoaded
+                            , Effect.Batch
+                                [ Effect.map BlockModalMsg subCmd
+                                , Effect.public (Api.blogPostRequest model.postId)
+                                    maybeToken
+                                    Nothing
+                                    (Api.resolveJson
+                                        Types.BlogPost.blogPostShowDecoder
+                                        >> PostLoaded
+                                    )
                                 ]
                             , NoOut
                             )
 
                         BlockModal.SessionExpired ->
-                            ( model, Cmd.none, SessionExpired )
+                            ( model, Effect.None, SessionExpired )
 
                         BlockModal.Dismissed ->
                             ( { model | blockModal = Just newBlockModal }
-                            , Cmd.map BlockModalMsg subCmd
+                            , Effect.map BlockModalMsg subCmd
                             , NoOut
                             )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         SyndicationMsg subMsg ->
             case model.syndication of
                 Just syndicationModel ->
                     let
                         ( newSyndication, subCmd, outMsg ) =
-                            Syndication.update subMsg syndicationModel maybeToken
+                            Syndication.updateWithEffect subMsg syndicationModel maybeToken
 
                         baseModel =
                             { model | syndication = Just newSyndication }
                     in
                     case outMsg of
                         Syndication.NoOut ->
-                            ( baseModel, Cmd.map SyndicationMsg subCmd, NoOut )
+                            ( baseModel, Effect.map SyndicationMsg subCmd, NoOut )
 
                         Syndication.RequestCopy payload ->
-                            ( baseModel, Cmd.map SyndicationMsg subCmd, RequestCopy payload )
+                            ( baseModel, Effect.map SyndicationMsg subCmd, RequestCopy payload )
 
                         Syndication.SyndicatedChanged syndicated ->
                             ( { baseModel
@@ -304,35 +417,35 @@ update msg model maybeToken =
                                         other ->
                                             other
                               }
-                            , Cmd.map SyndicationMsg subCmd
+                            , Effect.map SyndicationMsg subCmd
                             , NoOut
                             )
 
-                        Syndication.AuthLost ->
-                            ( baseModel, Cmd.none, SessionExpired )
+                        Syndication.SessionExpired ->
+                            ( baseModel, Effect.None, SessionExpired )
 
                 Nothing ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         EscapePressed ->
             case model.blockModal of
                 Just blockModal ->
                     let
                         ( newBlockModal, subCmd, outMsg ) =
-                            BlockModal.update BlockModal.EscapePressed blockModal maybeToken
+                            BlockModal.updateWithEffect BlockModal.EscapePressed blockModal maybeToken
                     in
                     case outMsg of
                         BlockModal.Dismissed ->
                             ( { model | blockModal = Just newBlockModal }
-                            , Cmd.map BlockModalMsg subCmd
+                            , Effect.map BlockModalMsg subCmd
                             , NoOut
                             )
 
                         _ ->
-                            ( model, Cmd.none, EscapeUnhandled )
+                            ( model, Effect.None, EscapeUnhandled )
 
                 Nothing ->
-                    ( model, Cmd.none, EscapeUnhandled )
+                    ( model, Effect.None, EscapeUnhandled )
 
 
 {-| A block affordance is only offered to a signed-in reader who is not the
@@ -397,7 +510,7 @@ view model =
                         model.currentUserId == Just post.userId
                 in
                 div []
-                    [ viewPost post isOwner
+                    [ viewPost model.now post isOwner
                     , case model.syndication of
                         Just syndicationModel ->
                             Html.map SyndicationMsg
@@ -420,13 +533,13 @@ view model =
         ]
 
 
-viewPost : BlogPost -> Bool -> Html Msg
-viewPost post isOwner =
+viewPost : Maybe Time.Posix -> BlogPost -> Bool -> Html Msg
+viewPost maybeNow post isOwner =
     div [ class "blog-post" ]
         [ div [ class "blog-post__header" ]
             [ h1 [ class "blog-post__title" ] [ text post.title ]
             , viewAuthorByline post
-            , p [ class "blog-post__date" ] [ text post.insertedAt ]
+            , p [ class "blog-post__date" ] [ text (postAge maybeNow post.insertedAt) ]
             , if isOwner then
                 a
                     [ href (Route.toPath (BlogEdit post.id))
@@ -442,10 +555,25 @@ viewPost post isOwner =
         , BookAssociations.view
             { associations = post.associations
             , isOwner = isOwner
+            , outcome = post.associationOutcome
             , onConfirm = ConfirmAssociation
             , onDismiss = DismissAssociation
             }
         ]
+
+
+{-| The post's age for the byline: relative to the reader's clock once it has
+loaded ("2 minutes ago"), and the plain `YYYY-MM-DD` date until then — never the
+raw datetime string the API sends.
+-}
+postAge : Maybe Time.Posix -> String -> String
+postAge maybeNow iso =
+    case maybeNow of
+        Just now ->
+            RelativeTime.relative now iso
+
+        Nothing ->
+            String.left 10 iso
 
 
 {-| Render the author's name as a link to their public profile.

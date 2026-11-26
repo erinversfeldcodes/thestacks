@@ -480,6 +480,93 @@ defmodule Stacks.SchemaConstraintsTest do
     )
   end
 
+  describe "op.users consent columns NOT NULL (20261020090000)" do
+    test "an out-of-band write cannot leave consent as a third state" do
+      # ⛔ Both columns carried `default: false` and no NOT NULL, so a row could
+      # hold a NULL — and `GET /api/settings/privacy` passes the column value
+      # straight to a client that decodes it as a required boolean inside a
+      # `Decode.map4`. One NULL therefore failed the decode of the whole
+      # response, and that response seeds the ENTIRE privacy screen: profile
+      # visibility, per-shelf visibility and the consent toggles. The reader
+      # would see a transport error on the surface where they manage their own
+      # privacy.
+      #
+      # ⚠️ Latent, not live, when this landed: 0 NULLs in 18 local rows and 0 in
+      # 2 production rows, and no write path can produce one — the controller
+      # accepts only `true` or `false`. It is constrained because nothing held
+      # it, which is the same reason two required-string decoders were found
+      # unprotected in the same sweep.
+      user = insert(:user)
+
+      for column <- ["consent_analytics", "consent_writing_assistant"] do
+        error =
+          assert_raise Postgrex.Error, fn ->
+            Repo.query!(
+              "UPDATE op.users SET #{column} = NULL WHERE id = $1",
+              [Ecto.UUID.dump!(user.id)]
+            )
+          end
+
+        assert error.postgres.code == :not_null_violation
+        assert error.postgres.column == column
+      end
+    end
+
+    test "the ordinary registration path produces booleans, not nils" do
+      # Anti-vacuity for the constraint: it would also be satisfied by a path
+      # that never writes the columns at all, leaving the default to do the
+      # work. This asserts the values a real user actually ends up with.
+      user = insert(:user)
+      reloaded = Repo.get!(User, user.id)
+
+      assert reloaded.consent_analytics == false
+      assert reloaded.consent_writing_assistant == false
+    end
+
+    test "the constraint is what refuses the write, and not something else" do
+      # ⛔ Anti-vacuity, driven rather than argued. The test above asserts a
+      # NULL write raises; by itself that is also satisfied by a changeset
+      # validation, a trigger, or a column that does not exist. This drops the
+      # NOT NULL and shows the same write SUCCEEDING, which is the probe — and
+      # it lives in the suite rather than being run once by hand, because a
+      # probe nobody can re-run is a claim about a past afternoon.
+      #
+      # Postgres DDL is transactional and `Core.DataCase` wraps each test in a
+      # sandbox transaction, so the dropped constraint is rolled back with
+      # everything else when this test ends.
+      user = insert(:user)
+      Repo.query!("ALTER TABLE op.users ALTER COLUMN consent_analytics DROP NOT NULL")
+
+      assert {:ok, _} =
+               Repo.query(
+                 "UPDATE op.users SET consent_analytics = NULL WHERE id = $1",
+                 [Ecto.UUID.dump!(user.id)]
+               )
+    end
+
+    test "the timestamps stay nullable, because that is where never-consented lives" do
+      # The tri-state was removed from the FLAGS and deliberately kept in the
+      # timestamps: `false` means not consented, and a nil `*_at` means never
+      # asked. Constraining these too would force a fabricated date.
+      %{rows: rows} =
+        Repo.query!(
+          """
+          SELECT column_name, is_nullable
+            FROM information_schema.columns
+           WHERE table_schema = 'op' AND table_name = 'users'
+             AND column_name IN ('consent_analytics_at', 'consent_writing_assistant_at')
+           ORDER BY column_name
+          """,
+          []
+        )
+
+      assert rows == [
+               ["consent_analytics_at", "YES"],
+               ["consent_writing_assistant_at", "YES"]
+             ]
+    end
+  end
+
   defp insert_raw_token(sub) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 

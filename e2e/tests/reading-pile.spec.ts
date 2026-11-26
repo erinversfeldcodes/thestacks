@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { suiteAuthFile } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("reading-pile") });

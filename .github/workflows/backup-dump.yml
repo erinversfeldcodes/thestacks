@@ -12,7 +12,7 @@
 # to VictoriaMetrics. `now() - that gauge` IS the recoverability statement:
 # everything since the timestamp is protected only by the 6h PITR window. A
 # stale gauge means the safety net has quietly stopped — which is exactly the
-# failure mode #248 taught this project to surface as a far-end value rather
+# failure mode this project learned to surface as a far-end value rather
 # than infer from a green cron.
 #
 # All secrets used here already exist in the repository configuration.
@@ -47,8 +47,8 @@ jobs:
       # One step for resolve + dump, so the connection URI lives and dies as a
       # process-local shell variable — never GITHUB_ENV, never echoed, nothing
       # to mask. (Even the masking workflow command is itself a leak vector: a
-      # copied workflow can stop command processing and print the value, which
-      # is why semgrep blocks that pattern outright.)
+      # copied workflow can stop command processing and print the value, so
+      # this step keeps the URI process-local instead of relying on masking.)
       - name: Resolve the production URI and dump (pg_dump 17, custom format)
         run: |
           set -euo pipefail

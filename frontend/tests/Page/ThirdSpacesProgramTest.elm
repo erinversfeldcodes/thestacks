@@ -7,6 +7,7 @@ simulated user interactions and HTTP responses.
 
 -}
 
+import Api
 import Json.Encode as Encode
 import Page.ThirdSpaces as ThirdSpaces
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
@@ -30,7 +31,7 @@ suite =
         ]
 
 
-thirdSpacesProgram : Maybe String -> ProgramDefinition () ThirdSpaces.Model ThirdSpaces.Msg (SimulatedEffect ThirdSpaces.Msg)
+thirdSpacesProgram : Maybe Api.Credentials -> ProgramDefinition () ThirdSpaces.Model ThirdSpaces.Msg (SimulatedEffect ThirdSpaces.Msg)
 thirdSpacesProgram maybeToken =
     ProgramTest.createElement
         { init =
@@ -52,7 +53,7 @@ thirdSpacesProgram maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-thirdSpacesInitEffects : Maybe String -> SimulatedEffect ThirdSpaces.Msg
+thirdSpacesInitEffects : Maybe Api.Credentials -> SimulatedEffect ThirdSpaces.Msg
 thirdSpacesInitEffects maybeToken =
     case maybeToken of
         Just token ->
@@ -66,7 +67,7 @@ thirdSpacesInitEffects maybeToken =
 
 startThirdSpaces : ProgramTest.ProgramTest ThirdSpaces.Model ThirdSpaces.Msg (SimulatedEffect ThirdSpaces.Msg)
 startThirdSpaces =
-    ProgramTest.start () (thirdSpacesProgram (Just "test-token"))
+    ProgramTest.start () (thirdSpacesProgram (Just (TestHelpers.creds "test-token")))
 
 
 sampleSpacesJson : String
@@ -121,7 +122,7 @@ showsLoadingState =
         \() ->
             startThirdSpaces
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Loading spaces..." ]
+                    [ Selector.exactText "Loading spaces..." ]
 
 
 loadsAndDisplaysSpaces : Test
@@ -133,9 +134,9 @@ loadsAndDisplaysSpaces =
                     "/api/third-spaces"
                     sampleSpacesJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Readers Cafe" ]
+                    [ Selector.exactText "Readers Cafe" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Corner Books" ]
+                    [ Selector.exactText "Corner Books" ]
 
 
 showsEmptyState : Test
@@ -147,7 +148,7 @@ showsEmptyState =
                     "/api/third-spaces"
                     emptySpacesJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "No third spaces found in your area yet." ]
+                    [ Selector.exactText "No third spaces found in your area yet." ]
 
 
 clickSpaceSelectsIt : Test
@@ -173,9 +174,9 @@ selectedSpaceShowsDetail =
                     sampleSpacesJson
                 |> ProgramTest.clickButton "Readers Cafe"
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Readers Cafe" ]
+                    [ Selector.exactText "Readers Cafe" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Cape Town" ]
+                    [ Selector.exactText "Cape Town" ]
 
 
 selectedSpaceShowsEvents : Test
@@ -188,7 +189,7 @@ selectedSpaceShowsEvents =
                     sampleSpacesJson
                 |> ProgramTest.clickButton "Readers Cafe"
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Book Launch" ]
+                    [ Selector.exactText "Book Launch" ]
 
 
 closeDetailHidesOverlay : Test

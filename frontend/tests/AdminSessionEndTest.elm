@@ -5,7 +5,7 @@ module AdminSessionEndTest exposing (suite)
 There are two ways it ends — the operator ends it deliberately from the admin
 chrome, or an admin call comes back 401 mid-action — and they were built as two
 separate pieces of code. The deliberate one passed a notice; the expiry one
-passed a bare `AdminSession.init`. So an operator who chose to sign out got an
+passed a bare `AdminSession.init Nothing`. So an operator who chose to sign out got an
 explanation, and an operator who was signed out mid-action got a bare login form
 with no account of what had happened, on a product where the admin session and
 the ordinary session are different things and "signed out" is ambiguous.
@@ -28,7 +28,7 @@ import Test.Html.Selector as Selector
 -}
 gateAfterEnding : Maybe AdminSession.Model
 gateAfterEnding =
-    case Main.adminGateAfterEnding Route.AdminInvites of
+    case Main.adminGateAfterEnding Nothing Route.AdminInvites of
         Main.PageAdminGate _ session ->
             Just session
 

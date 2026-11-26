@@ -51,17 +51,30 @@ enum ReviewSource {
   // Default unspecified value; should not be used in practice.
   REVIEW_SOURCE_UNSPECIFIED = 0;
 
-  // Reviews sourced from Goodreads.
+  // ⛔ UNREACHABLE by policy: GoodReads ToS prohibits scraping
+  // and it has had no public API since 2020. The number stays (field numbers are
+  // forever) but no sanctioned write may produce it — `review_snapshot_changeset/2`
+  // rejects `source: "goodreads"`.
   REVIEW_SOURCE_GOODREADS = 1;
 
-  // Reviews sourced from Reddit.
+  // Reviews sourced from Reddit (SANCTIONED only via the official API — fetching
+  // old.reddit.com HTML is scraping wearing this source's name).
   REVIEW_SOURCE_REDDIT = 2;
 
-  // Reviews sourced from StoryGraph.
+  // ⛔ UNREACHABLE by policy: StoryGraph has no API; "be
+  // respectful" is a sentiment, not a right. Number retained, write path refuses it.
   REVIEW_SOURCE_STORYGRAPH = 3;
 
   // Reviews from an unclassified source.
   REVIEW_SOURCE_OTHER = 4;
+
+  // SANCTIONED sources. Additive — numbers are
+  // forever. Open Library is the preferred first source (open data, open API).
+  REVIEW_SOURCE_OPEN_LIBRARY = 5;
+  // Partner-pushed reviews: consent on file via the partner agreement.
+  REVIEW_SOURCE_PARTNER = 6;
+  // Author/publisher-published RSS/Atom feeds, labelled as their own source.
+  REVIEW_SOURCE_AUTHOR_RSS = 7;
 }
 
 // ThirdSpaceType classifies the kind of community space.

@@ -41,7 +41,7 @@ pileEndpoint =
 
 startPile : ProgramTest.ProgramTest TestHelpers.ReadingPileTestModel ReadingPile.Msg (ProgramTest.SimulatedEffect ReadingPile.Msg)
 startPile =
-    ProgramTest.start () (readingPileProgram (Just "test-token"))
+    ProgramTest.start () (readingPileProgram (Just (TestHelpers.creds "test-token")))
 
 
 {-| A piled book, addressable in the DOM by the title it renders.
@@ -101,8 +101,8 @@ booksLoadedFlattensAcrossShelves =
                     (Query.findAll [ Selector.class "book-pile__book" ]
                         >> Query.count (Expect.equal 2)
                     )
-                |> ProgramTest.ensureViewHas [ Selector.text "Dune" ]
-                |> ProgramTest.expectViewHas [ Selector.text "Solaris" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Dune" ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Solaris" ]
 
 
 bookHoveredSelectsThatBook : Test
@@ -206,7 +206,7 @@ forbiddenRaisesAgeGate =
                     pileEndpoint
                     (pileErrorResponse 403)
                 |> ProgramTest.ensureViewHas [ Selector.class "age-gate" ]
-                |> ProgramTest.ensureViewHas [ Selector.text "Age Verification Required" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Age Verification Required" ]
                 |> ProgramTest.expectViewHasNot [ Selector.class "reading-pile__scene" ]
 
 
@@ -220,7 +220,7 @@ serverErrorShowsPileErrorMessage =
                     (pileErrorResponse 500)
                 |> ProgramTest.expectViewHas
                     [ Selector.class "error"
-                    , Selector.text "Could not load your reading pile. Please try again."
+                    , Selector.exactText "Could not load your reading pile. Please try again."
                     ]
 
 
@@ -233,7 +233,7 @@ emptyPileShowsEmptyMessage =
                     pileEndpoint
                     (simulateBookshelfResponse [])
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Nothing on the pile right now. Move a book from your Antilibrary to start reading." ]
+                    [ Selector.exactText "Nothing on the pile right now. Move a book from your Antilibrary to start reading." ]
                 |> ProgramTest.expectViewHasNot [ Selector.class "book-pile" ]
 
 
@@ -254,7 +254,7 @@ findPiledBook : String -> Query.Single msg -> Query.Single msg
 findPiledBook title =
     Query.find
         [ Selector.class "book-pile__book"
-        , Selector.containing [ Selector.text title ]
+        , Selector.containing [ Selector.exactText title ]
         ]
 
 

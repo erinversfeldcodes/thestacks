@@ -9,11 +9,14 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
       Only called for tables with `migration_exists: false` in the manifest.
       Tables with `migration_exists: true` already have hand-written migrations.
   """
+
+  alias Mix.Tasks.ProtoSync.FieldOverrides
+
   def generate_create_table(table, fields, timestamp) do
     overrides = Map.get(table, :field_overrides, %{})
     module_name = migration_module_name(table.table_name, timestamp)
 
-    ts_fields = timestamp_field_names(table)
+    ts_fields = FieldOverrides.timestamp_field_names(table)
 
     column_lines =
       fields
@@ -31,19 +34,39 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     defmodule #{module_name} do
       use Ecto.Migration
 
-      # `CREATE INDEX CONCURRENTLY` cannot run inside a transaction, so opt
-      # out of Ecto's default migration-wide transaction.
-      @disable_ddl_transaction true
-
-      # Ecto holds its advisory migration lock on a separate idle connection
-      # for the full CONCURRENTLY build. Neon's managed Postgres drops idle
-      # TCP sockets on its own keepalive window, surfacing as a 300s hang +
-      # `ssl send: closed` on fresh envs (observed 2026-04-22 bootstrapping
-      # the staging project). Disabling the lock prevents that; deploys are
-      # already serialised by the release pipeline.
-      @disable_migration_lock true
-
+      # Transactional, and the indexes below are NOT built concurrently —
+      # deliberately, because this migration CREATES the table it indexes.
+      #
+      # `CREATE INDEX CONCURRENTLY` exists to avoid holding a write lock on a
+      # table other sessions are using. Nothing can be using this one: it did
+      # not exist when the migration began, and no code path can reach it until
+      # the migration that introduces it has committed. So the lock it avoids is
+      # a lock on nothing, the rows it avoids blocking are zero, and the build
+      # is instant either way.
+      #
+      # What CONCURRENTLY did cost was atomicity. It cannot run inside a
+      # transaction, so the whole migration had to opt out of one — and then a
+      # failure partway through (the third of four indexes, a dropped
+      # connection) left the table created, some indexes built, and NO
+      # `schema_migrations` row. Re-running then dies on `relation already
+      # exists`, so a transient error became a migration that can only be
+      # finished by hand, on the deploy where something had already gone wrong.
+      # Inside a transaction the same failure rolls the table back and the retry
+      # is a retry.
+      #
+      # CONCURRENTLY stays right for an index added to an EXISTING populated
+      # table. That shape is hand-written; this one is not.
+      #
+      # `SET LOCAL`, matching the transaction: the settings revert on commit
+      # rather than leaking into whatever else the connection goes on to do.
+      # The `lock_timeout` is what protects availability — it makes a contended
+      # lock fail fast instead of queueing every later query behind this
+      # migration. `statement_timeout` is bounded now that nothing here builds
+      # concurrently; an index on an empty table has no excuse to take 30s.
       def up do
+        execute("SET LOCAL lock_timeout = '5s'")
+        execute("SET LOCAL statement_timeout = '30s'")
+
         create table(:#{table.table_name}, prefix: "#{table.schema_prefix}", primary_key: false) do
           add :id, :binary_id, primary_key: true
     #{column_lines}#{timestamps_line}
@@ -51,6 +74,9 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     #{index_lines}#{grant_lines}  end
 
       def down do
+        execute("SET LOCAL lock_timeout = '5s'")
+        execute("SET LOCAL statement_timeout = '30s'")
+
         drop table(:#{table.table_name}, prefix: "#{table.schema_prefix}")
       end
     end
@@ -127,13 +153,26 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     defmodule #{module_name} do
       use Ecto.Migration
 
+      # `SET LOCAL` here, unlike the create-table migration above: this one runs
+      # inside Ecto's migration transaction, so the settings revert on commit.
+      #
+      # Both are short. `ADD COLUMN` without a volatile default takes ACCESS
+      # EXCLUSIVE but writes no rows, so it is a catalog update that should never
+      # be waiting — and if it is, blocking every reader behind it is worse than
+      # failing and retrying.
       def up do
+        execute("SET LOCAL lock_timeout = '5s'")
+        execute("SET LOCAL statement_timeout = '30s'")
+
         alter table(:#{table.table_name}, prefix: "#{table.schema_prefix}") do
     #{column_lines}
         end
       end
 
       def down do
+        execute("SET LOCAL lock_timeout = '5s'")
+        execute("SET LOCAL statement_timeout = '30s'")
+
         alter table(:#{table.table_name}, prefix: "#{table.schema_prefix}") do
     #{down_lines}
         end
@@ -234,25 +273,38 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   end
 
   defp format_migration_type({:array, inner}), do: "{:array, #{format_migration_type(inner)}}"
+
+  # ⚠️ The COLUMN type is `:timestamptz` while the ECTO type stays
+  # `:utc_datetime_usec`, and the split is deliberate.
+  #
+  # Ecto maps `:utc_datetime_usec` to a bare `timestamp` — `ecto_sql`'s Postgres
+  # adapter does `ecto_to_db(:utc_datetime_usec), do: "timestamp"` — so every
+  # table this generator produced violated the project's own TIMESTAMPTZ
+  # standard by construction. Measured before changing it: 149 `timestamp
+  # without time zone` columns across 56 tables, against exactly one
+  # `timestamptz`.
+  #
+  # The pairing below is not speculative. `op.users.password_reset_sent_at` has
+  # been `:timestamptz` in its migration and `:utc_datetime_usec` in its Ecto
+  # schema since 2026-03, and reads and writes correctly: Postgrex decodes
+  # timestamptz to a UTC `DateTime`, which is exactly what `:utc_datetime_usec`
+  # expects. Only the storage type changes; the Elixir type does not.
+  defp format_migration_type(:utc_datetime_usec), do: ":timestamptz"
+  defp format_migration_type(:utc_datetime), do: ":timestamptz"
   defp format_migration_type(type) when is_atom(type), do: ":#{type}"
 
   defp format_migration_type(type) do
     raise "Unsupported migration type: #{inspect(type)}. Add handling in MigrationGenerator.format_migration_type/1."
   end
 
-  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
-  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
-  defp timestamp_field_names(%{timestamps: false}), do: []
-  defp timestamp_field_names(_), do: ~w(created_at updated_at)
-
   defp timestamps_block(%{timestamps: false}), do: ""
 
   defp timestamps_block(%{timestamps: :standard}) do
-    "\n\n      timestamps(type: :utc_datetime_usec)"
+    "\n\n      timestamps(type: :timestamptz)"
   end
 
   defp timestamps_block(%{timestamps: {:standard, updated_at: false}}) do
-    "\n\n      timestamps(type: :utc_datetime_usec, updated_at: false)"
+    "\n\n      timestamps(type: :timestamptz, updated_at: false)"
   end
 
   defp timestamps_block(_), do: ""
@@ -264,13 +316,31 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     fk_columns_with_index =
       for %{columns: [col]} <- explicit_indexes, into: MapSet.new(), do: col
 
+    # ⚠️ `no_index: true` is how a declaration says "this FK does not want its
+    # own single-column index", and it exists because the alternative was a
+    # SILENT divergence.
+    #
+    # The generator's rule is that every `references_table` override gets an
+    # index, which is right by default — an unindexed FK is a slow cascade
+    # waiting to happen. But a composite index can already lead with that
+    # column, in which case the single-column one is redundant: Postgres uses a
+    # multi-column index for a leading-column lookup.
+    #
+    # Before this flag the only way to drop one was to delete it from the
+    # migration by hand, which `mix proto.sync --check` cannot see — it diffs
+    # GENERATED output against the files it would generate, and a create-table
+    # migration that already exists is not regenerated. So the manifest said
+    # "index" and the database said "no index", and the next regeneration would
+    # have silently reinstated it.
     fk_lines =
       overrides
       |> Enum.filter(fn {_, override} -> Map.has_key?(override, :references_table) end)
-      |> Enum.reject(fn {field_name, _} -> MapSet.member?(fk_columns_with_index, field_name) end)
+      |> Enum.reject(fn {field_name, override} ->
+        Map.get(override, :no_index, false) or MapSet.member?(fk_columns_with_index, field_name)
+      end)
       |> Enum.sort_by(fn {field_name, _} -> field_name end)
       |> Enum.map_join("\n", fn {field_name, _} ->
-        "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\", concurrently: true)"
+        "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\")"
       end)
 
     explicit_lines =
@@ -290,7 +360,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     cols = format_index_columns(idx.columns)
     prefix = table.schema_prefix
     base = "(:#{table.table_name}, #{cols}, prefix: \"#{prefix}\""
-    tail = ", name: \"#{idx.name}\", concurrently: true)"
+    tail = ", name: \"#{idx.name}\")"
 
     if Map.get(idx, :unique, false) do
       "    create unique_index" <> base <> tail

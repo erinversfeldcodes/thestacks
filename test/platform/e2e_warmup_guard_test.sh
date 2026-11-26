@@ -237,4 +237,26 @@ else
     _record_fail "backed off between login POST attempts (got $SLEEPS sleeps)"
 fi
 
+test_case "remote_mode_login_403_excluded_from_warm" \
+    "health 200 + login POST 403 (CSRF reject) forever → NOT warm; retries, warns, proceeds"
+reset_stubs
+echo "ok" > "$CURL_MODE_FILE"     # GET /api/health succeeds
+echo "403" > "$CURL_CODE_FILE"    # every login POST comes back 403 (empty/invalid CSRF proof)
+OUT="$(
+    export E2E_SERVICES=none
+    export BASE_URL="https://preview-175.example.test"
+    with_timeout "$CASE_TIMEOUT" warm_remote_preview 2>&1
+)"
+RC=$?
+assert_no_timeout "the login-POST warm loop honours its own 60s bound on a persistent 403"
+assert_exit_zero "$RC" "warm_remote_preview proceeds (returns 0) after warning on a persistent 403"
+# ⛔ The load-bearing assertion the 502 case cannot make: a 403 is a CSRF
+# rejection that halts BEFORE the Argon2 hash, so it must be EXCLUDED from
+# "warm" (test-e2e.sh warm_remote_preview: `"$code" != "403"`). Dropping that
+# exclusion makes a 403 report as warm — these two assertions red on it.
+assert_not_contains "$OUT" "Login POST path warm" \
+    "a 403 is not a warmed POST path — the Argon2 NimblePool was never touched"
+assert_contains "$OUT" "Login POST not warm yet (HTTP 403)" \
+    "the 403 is reported not-warm, exactly like a 502 (the exclusion is load-bearing)"
+
 summarise

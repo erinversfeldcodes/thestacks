@@ -38,8 +38,26 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 DEPLOY_STARTED_AT="${DEPLOY_STARTED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 
 if [[ "$TEST_MODE" -eq 0 ]]; then
-    : "${CORE_APP:?CORE_APP required in production mode}"
-    : "${METRICS_SCRAPE_TOKEN:?METRICS_SCRAPE_TOKEN required in production mode}"
+    # ⚠️ An explicit test and `exit 1`, NOT `: "${CORE_APP:?message}"`.
+    #
+    # The `${var:?}` idiom is the obvious way to demand a variable, and in this
+    # script it was silently useless: **any `trap … EXIT` makes the `${var:?}`
+    # abort path exit 0.** Measured here — bare, the idiom exits 1; with a
+    # `trap … EXIT` anywhere above it, the same script prints
+    # "CORE_APP required in production mode" and **exits 0**. A
+    # status-preserving `trap 'rc=$?; …; exit $rc'` does not help either,
+    # because `$?` is still 0 when the trap runs on that path.
+    #
+    # This file has `trap 'rm -rf "$WORK_DIR"' EXIT` above, so the production
+    # SLO gate announced its own missing inputs and then reported success — a
+    # gate that cannot fail on the one condition it checks first.
+    for required in CORE_APP METRICS_SCRAPE_TOKEN; do
+        if [[ -z "${!required:-}" ]]; then
+            echo "FAIL slo-gate: ${required} is required in production mode." >&2
+            echo "       Nothing was measured. This is a refusal, not a pass." >&2
+            exit 1
+        fi
+    done
 
     WINDOW="${PROBE_WINDOW_SECONDS:-600}"
     SCRAPE_INTERVAL=60
@@ -217,6 +235,12 @@ COUNTER_NAMES = {
     "core_prom_ex_ecto_repo_query_queue_time_milliseconds_bucket",
     "core_prom_ex_ecto_repo_query_queue_time_milliseconds_sum",
     "core_prom_ex_ecto_repo_query_queue_time_milliseconds_count",
+    "stacks_upload_phase_stop_duration_milliseconds_bucket",
+    "stacks_upload_phase_stop_duration_milliseconds_sum",
+    "stacks_upload_phase_stop_duration_milliseconds_count",
+    "stacks_upload_ack_duration_milliseconds_bucket",
+    "stacks_upload_ack_duration_milliseconds_sum",
+    "stacks_upload_ack_duration_milliseconds_count",
 }
 BEAM_MEMORY_METRICS = (
     "core_prom_ex_beam_memory_atom_total_bytes",
@@ -311,25 +335,80 @@ def windowed_rows_for(name: str):
     """Windowed (last - first) values — used for rate + histogram SLIs."""
     return list(windowed.get(name, {}).values())
 
-def histogram_p95_by_group(metric: str, group_label: str, target_group: str):
-    rows = [
-        r for r in windowed_rows_for(metric)
-        if r["labels"].get(group_label) == target_group
-    ]
-    buckets: list[tuple[float, float]] = []
+def _sum_buckets_by_le(rows):
+    """Sum cumulative bucket counts by ``le`` across every matching series.
+
+    A Prometheus histogram filtered by a SUBSET of its labels leaves one row per
+    ``le`` for each still-free label value (here ``cold`` in {true,false,na}).
+    Those rows share an ``le`` and MUST be summed before the quantile, exactly as
+    PromQL's ``sum by (le)`` does. Appending them as independent buckets (and
+    reading the max +Inf row as the total) understates the tail and trends the
+    gate green on a slow minority series.
+    """
+    by_le: dict = {}
     for r in rows:
         le = r["labels"].get("le")
         if le is None:
             continue
         le_f = float("inf") if le == "+Inf" else float(le)
-        buckets.append((le_f, r["value"]))
-    buckets.sort()
+        by_le[le_f] = by_le.get(le_f, 0.0) + r["value"]
+    return sorted(by_le.items())
+
+def histogram_p95_by_group(metric: str, group_label: str, target_group: str, q: float = 0.95):
+    rows = [
+        r for r in windowed_rows_for(metric)
+        if r["labels"].get(group_label) == target_group
+    ]
+    buckets = _sum_buckets_by_le(rows)
     if not buckets:
         return 0
     total = buckets[-1][1]
     if total <= 0:
         return 0
-    target = 0.95 * total
+    target = q * total
+    prev_le = 0.0
+    prev_count = 0.0
+    for le, count in buckets:
+        if count >= target:
+            if le == float("inf"):
+                return int(prev_le * 2) if prev_le > 0 else 99_999
+            span = count - prev_count
+            if span <= 0:
+                return int(le)
+            frac = (target - prev_count) / span
+            return int(prev_le + frac * (le - prev_le))
+        prev_le = le
+        prev_count = count
+    return int(buckets[-1][0])
+
+def histogram_total_by_group(metric: str, group_label: str, target_group: str):
+    """Windowed sample count: the +Inf bucket of the filtered histogram."""
+    return histogram_total_by_labels(metric, {group_label: target_group})
+
+def histogram_total_by_labels(metric: str, want: dict):
+    """Windowed sample count across rows matching EVERY label in `want`."""
+    return sum(
+        r["value"]
+        for r in windowed_rows_for(metric)
+        if r["labels"].get("le") == "+Inf"
+        and all(r["labels"].get(k) == v for k, v in want.items())
+    )
+
+def histogram_quantile_by_labels(metric: str, want: dict, q: float):
+    """Quantile over the rows matching EVERY label in `want` — the two-label
+    (phase + cold) filter the warm threshold needs; the single-label helper
+    cannot express it."""
+    rows = [
+        r for r in windowed_rows_for(metric)
+        if all(r["labels"].get(k) == v for k, v in want.items())
+    ]
+    buckets = _sum_buckets_by_le(rows)
+    if not buckets:
+        return 0
+    total = buckets[-1][1]
+    if total <= 0:
+        return 0
+    target = q * total
     prev_le = 0.0
     prev_count = 0.0
     for le, count in buckets:
@@ -489,6 +568,103 @@ for group, threshold, name in [
             "breached": p95 > threshold,
         }
     )
+
+# ⬛ THE RULED RESPONSIVENESS THRESHOLDS (vision cost-architecture ruling,
+# revised 2026-11-17): p50 time-to-answer ≤ 5s and acknowledgement < 1s, wired
+# as gating SLIs. The identification p95 gates at the COLD CEILING (35s): the
+# ruling accepts cold p95 ≈ 30s, so 35s catches a hung pipeline without
+# fighting accepted physics. The warm p95 ≤ 10s bar gates further down on the
+# cold="false" population — the label set from the answer's GPU dispatch
+# records (answerless outcomes carry "na" and gate nowhere).
+PHASE_HIST = "stacks_upload_phase_stop_duration_milliseconds_bucket"
+ACK_HIST = "stacks_upload_ack_duration_milliseconds_bucket"
+IDENT_MIN_SAMPLES = 5
+ACK_MIN_SAMPLES = 5
+
+ident_samples = histogram_total_by_group(PHASE_HIST, "phase", "identify_book")
+for name, q, threshold in [
+    ("identification_p50_ms", 0.50, 5000),
+    ("identification_p95_ms", 0.95, 35000),
+]:
+    val = histogram_p95_by_group(PHASE_HIST, "phase", "identify_book", q=q)
+    ident_entry = {
+        "name": name,
+        "value": int(val),
+        "threshold": threshold,
+        "samples": int(ident_samples),
+        "min_samples": IDENT_MIN_SAMPLES,
+        "breached": ident_samples >= IDENT_MIN_SAMPLES and val > threshold,
+    }
+    if ident_samples < IDENT_MIN_SAMPLES:
+        ident_entry["note"] = "below min_samples; not gating"
+    slis.append(ident_entry)
+
+# The ruled WARM bar: p95 ≤ 10s over answers whose GPU dispatches were all
+# warm (cold="false" — set from the dispatch records; cold answers are gated
+# only at the hung-pipeline ceiling above, and answerless outcomes carry "na").
+WARM_WANT = {"phase": "identify_book", "cold": "false"}
+warm_samples = histogram_total_by_labels(PHASE_HIST, WARM_WANT)
+warm_p95 = histogram_quantile_by_labels(PHASE_HIST, WARM_WANT, 0.95)
+warm_entry = {
+    "name": "identification_warm_p95_ms",
+    "value": int(warm_p95),
+    "threshold": 10000,
+    "samples": int(warm_samples),
+    "min_samples": IDENT_MIN_SAMPLES,
+    "breached": warm_samples >= IDENT_MIN_SAMPLES and warm_p95 > 10000,
+}
+if warm_samples < IDENT_MIN_SAMPLES:
+    warm_entry["note"] = "below min_samples; not gating"
+slis.append(warm_entry)
+
+ack_samples = sum(
+    r["value"]
+    for r in windowed_rows_for(ACK_HIST)
+    if r["labels"].get("le") == "+Inf"
+)
+# The ack histogram is unlabelled, so the grouped helper cannot filter it;
+# compute the quantile directly over its bucket rows:
+def _unlabelled_quantile(metric, q):
+    buckets = []
+    for r in windowed_rows_for(metric):
+        le = r["labels"].get("le")
+        if le is None:
+            continue
+        buckets.append((float("inf") if le == "+Inf" else float(le), r["value"]))
+    buckets.sort()
+    if not buckets:
+        return 0
+    total = buckets[-1][1]
+    if total <= 0:
+        return 0
+    target = q * total
+    prev_le = 0.0
+    prev_count = 0.0
+    for le, count in buckets:
+        if count >= target:
+            if le == float("inf"):
+                return int(prev_le * 2) if prev_le > 0 else 99_999
+            span = count - prev_count
+            if span <= 0:
+                return int(le)
+            frac = (target - prev_count) / span
+            return int(prev_le + frac * (le - prev_le))
+        prev_le = le
+        prev_count = count
+    return int(buckets[-1][0])
+
+ack_p95 = _unlabelled_quantile(ACK_HIST, 0.95)
+ack_entry = {
+    "name": "upload_ack_p95_ms",
+    "value": int(ack_p95),
+    "threshold": 1000,
+    "samples": int(ack_samples),
+    "min_samples": ACK_MIN_SAMPLES,
+    "breached": ack_samples >= ACK_MIN_SAMPLES and ack_p95 > 1000,
+}
+if ack_samples < ACK_MIN_SAMPLES:
+    ack_entry["note"] = "below min_samples; not gating"
+slis.append(ack_entry)
 
 UPLOAD_MIN_SAMPLES = 5
 terminal = {

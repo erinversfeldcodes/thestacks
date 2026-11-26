@@ -9,7 +9,7 @@ defmodule Stacks.Workers.DataExportJob do
       received.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :user, queue: :default, max_attempts: 3
 
   require Logger
 

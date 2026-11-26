@@ -1,9 +1,12 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test, expect } from "./fixtures";
+import { type Page } from "@playwright/test";
 import {
   DEV_EMAIL,
   DEV_PASSWORD,
   freshTotp,
+  hasSessionCookie,
   readOwnerMfaSecret,
+  signInAsOwner,
 } from "./helpers";
 
 /**
@@ -41,25 +44,6 @@ import {
  * protection, so parallel specs presenting the same code are fine.
  */
 
-/** Stores an ordinary session so the SPA is signed in. Must be a FLAT blob. */
-async function signInOrdinary(page: Page, request: APIRequestContext) {
-  const login = await request.post("/api/auth/login", {
-    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
-  });
-  expect(login.status()).toBe(200);
-  const body = await login.json();
-  await page.goto("/");
-  await page.evaluate((blob) => {
-    window.localStorage.setItem("stacks-auth", JSON.stringify(blob));
-  }, {
-    token: body.token,
-    userId: body.user.id,
-    email: body.user.email,
-    displayName: body.user.display_name,
-    handle: body.user.handle,
-    role: body.user.role,
-  });
-}
 
 /**
  * Signs in through the gate's own form — the path a person takes.
@@ -118,14 +102,38 @@ async function gateAdvances(page: Page, advanced: Promise<unknown>, what: string
     outcome,
     `${what}. ⚠️ If the value above is the gate's message about a CODE, the owner's ` +
       `single shared MFA factor was replaced mid-run and this run's secret is stale ` +
-      `(#371) — enrolment belongs in auth.setup.ts and nowhere else. If the gate ` +
+      `enrolment belongs in auth.setup.ts and nowhere else. If the gate ` +
       `offered ENROLMENT instead, the setup step's factor never landed.`,
   ).toBe("advanced");
 }
 
 test.describe("Admin session gate", () => {
+  /**
+   * ⛔ EVERY TEST STARTS UNELEVATED, because elevation now survives a reload.
+   *
+   * That is the product behaviour this file's subject exists to deliver — and
+   * it means the gate no longer appears on every load, so a spec that simply
+   * navigates and expects a gate is testing the old defect. Without this reset,
+   * seven cases below fail on a CORRECT build because the operator is still
+   * elevated from the previous test.
+   *
+   * The two alternatives were both worse: a conditional "pass the gate if it
+   * happens to be showing" is a vacuous guard by this repo's own rule
+   * (`check-e2e-vacuous-guards.sh`), and ordering dependencies between tests
+   * makes any single one unrunnable alone.
+   */
+  test.beforeEach(async ({ request }) => {
+    const res = await request.delete("/api/test/admin-sessions", {
+      data: { email: DEV_EMAIL },
+    });
+    expect(
+      res.status(),
+      "could not reset admin elevation — is STACKS_E2E_TEST_HELPERS set?",
+    ).toBe(200);
+  });
+
   test("an owner cannot reach an admin page without an admin session", async ({ page, request }) => {
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
 
     await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
@@ -137,7 +145,7 @@ test.describe("Admin session gate", () => {
 
   test("signing in through the gate loads the real page with rows", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
 
@@ -148,9 +156,43 @@ test.describe("Admin session gate", () => {
     ).toBeVisible({ timeout: 15000 });
   });
 
+  /**
+   * ⛔ THE RELOAD. Elevation is a fact about the session the server holds, not a
+   * credential the page carries — so a full reload inside the MFA window must
+   * land the operator back on the admin surface without a second factor.
+   *
+   * Before, the SPA held an admin token in memory and nothing persisted it, so
+   * every full load cost email + password + TOTP again. That is the defect this
+   * whole change exists to remove, and no unit test can see it: the server-side
+   * mechanism can be perfect while the page still re-gates itself.
+   */
+  test("a reload inside the MFA window does not re-prompt", async ({ page, request }) => {
+    const secret = readOwnerMfaSecret();
+    await signInAsOwner(page, request);
+    await page.goto("/admin/sources");
+    await passTheGate(page, secret);
+    await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 15000 });
+
+    await page.reload();
+
+    // ⚠️ PRESENCE FIRST, THEN ABSENCE. `toBeHidden()` is satisfied by an element
+    // that is merely not there yet, so asserting the gate is hidden while the
+    // page is still booting passes instantly and measures nothing — it passed
+    // against a build that re-gated on every reload. Waiting for the surface
+    // first means the absence is asserted against a page that has finished.
+    await expect(
+      page.locator("tbody tr").first(),
+      "the admin surface did not come back after a reload",
+    ).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.getByTestId("admin-gate"),
+      "a reload re-presented the gate — the elevation the server recorded is not being replayed",
+    ).toBeHidden();
+  });
+
   test("a pending source offers Approve and Reject", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
 
@@ -160,7 +202,7 @@ test.describe("Admin session gate", () => {
 
   test("an admin ACTION succeeds, not merely the page load", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
 
@@ -177,8 +219,14 @@ test.describe("Admin session gate", () => {
     // One fewer button could be a row this page dropped from its own list.
     // Re-entering the console rebuilds the queue from the server, so the source
     // still being gone is the approval having actually been recorded.
+    //
+    // ⚠️ The reload is NOT followed by a second pass through the gate any more,
+    // and that is the point rather than a convenience: elevation lives on the
+    // server's session, so a reload inside the window lands straight back on
+    // the surface. This used to call `passTheGate` again, which was itself a
+    // quiet statement of the defect.
     await page.reload();
-    await passTheGate(page, secret);
+    await expect(page.getByTestId("source-approve").first()).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId("source-approve")).toHaveCount(pendingBefore - 1, {
       timeout: 15000,
     });
@@ -200,7 +248,7 @@ test.describe("Admin session gate", () => {
    */
   test("ending an admin session revokes it server-side", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
 
     const verified = page.waitForResponse(
       (r) => r.url().includes("/api/admin/auth/verify_mfa") && r.status() === 200,
@@ -233,14 +281,18 @@ test.describe("Admin session gate", () => {
   });
 
   /**
-   * The surface closes where the operator is standing, with no reload. A
-   * reload would re-gate anyway — the admin token is memory-only — so
-   * navigating and finding the gate would prove nothing at all; staying put
-   * and watching the page be replaced is what proves it.
+   * The surface closes where the operator is standing, with no reload.
+   *
+   * ⚠️ This used to argue "a reload would re-gate anyway — the admin token is
+   * memory-only — so navigating and finding the gate would prove nothing". That
+   * premise is gone: elevation is on the server's session and a reload does NOT
+   * re-gate. The test is unchanged and still right, for a better reason —
+   * watching the surface be replaced in place is what proves the end took
+   * effect immediately, rather than at the next navigation.
    */
   test("ending an admin session re-gates the surface in place", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 15000 });
@@ -259,25 +311,22 @@ test.describe("Admin session gate", () => {
 
   test("ending an admin session leaves the ordinary session alone", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
 
     await page.getByTestId("admin-end-session").click();
     await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
 
-    const ordinarySession = await page.evaluate(() =>
-      window.localStorage.getItem("stacks-auth"),
-    );
     expect(
-      ordinarySession,
+      await hasSessionCookie(page),
       "ending the ADMIN session signed the operator out of the whole product",
-    ).not.toBeNull();
+    ).toBe(true);
   });
 
   test("an admin failure does NOT sign the operator out of the app", async ({ page, request }) => {
     const secret = readOwnerMfaSecret();
-    await signInOrdinary(page, request);
+    await signInAsOwner(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
     await expect(page.getByTestId("source-approve").first()).toBeVisible({ timeout: 15000 });
@@ -290,12 +339,9 @@ test.describe("Admin session gate", () => {
     await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
     expect(page.url(), "an admin 401 must not redirect to /login").toContain("/admin/sources");
 
-    const ordinarySession = await page.evaluate(() =>
-      window.localStorage.getItem("stacks-auth"),
-    );
     expect(
-      ordinarySession,
+      await hasSessionCookie(page),
       "the ordinary session was cleared by an ADMIN failure",
-    ).not.toBeNull();
+    ).toBe(true);
   });
 });

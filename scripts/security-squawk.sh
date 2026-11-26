@@ -5,6 +5,8 @@ set -euo pipefail
 EXIT_NOTHING_INSPECTED=2
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/lib/squawk-rules.sh
+source "$REPO_ROOT/scripts/lib/squawk-rules.sh"
 DEFAULT_MIGRATIONS_DIR="$REPO_ROOT/apps/core/priv/repo/migrations"
 TARGET_DIR="${SQUAWK_TARGET_DIR:-$DEFAULT_MIGRATIONS_DIR}"
 if [[ -d "$TARGET_DIR" ]]; then
@@ -87,6 +89,7 @@ echo ""
 
 VIOLATIONS=0
 ANALYSED=0
+PARTIAL=0
 
 # A file can enter the changed set through a comment/doc-only edit. Its SQL is
 # what squawk asserts about, so when the base ref holds the same file and the
@@ -115,6 +118,27 @@ for migration in "${MIGRATION_FILES[@]}"; do
         continue
     fi
 
+    # ⛔ PARTIAL EXTRACTION IS REPORTED, because it used to be indistinguishable
+    # from full extraction and that is the more dangerous of the two.
+    #
+    # A migration yielding nothing prints the skip line above, and a reader can
+    # see it was not analysed. A migration yielding SOME statements was analysed,
+    # found clean, and counted toward ANALYSED — so the summary said a file had
+    # been inspected when only part of its SQL had. Measured on this repository:
+    # two migrations on this branch extracted nothing but their `SET LOCAL`
+    # timeout declarations, which are the one thing that cannot itself be unsafe,
+    # and squawk reported "Found 0 issues" for both.
+    #
+    # The extractor now declares what it dropped as a SQL comment. squawk ignores
+    # comments, so nothing it analyses changes; this is purely about the claim
+    # the summary gets to make.
+    unanalysable="$(printf '%s\n' "$sql_block" | grep -- '-- UNANALYSABLE' || true)"
+    if [[ -n "$unanalysable" ]]; then
+        echo "  PARTIAL  $migration"
+        echo "           ${unanalysable#-- UNANALYSABLE: }"
+        PARTIAL=$((PARTIAL + 1))
+    fi
+
     if _base_sql_unchanged "$migration" "$sql_block"; then
         echo "  (SQL identical to $BASE in $migration — comment/doc-only change, skipping)"
         continue
@@ -124,9 +148,18 @@ for migration in "${MIGRATION_FILES[@]}"; do
     mv "$tmpfile" "$tmpfile.sql"
     tmpfile="$tmpfile.sql"
     echo "$sql_block" > "$tmpfile"
+    # Suppressions and their reasoning live in scripts/lib/squawk-rules.sh,
+    # sourced above. Note what the timeout rule asks of a migration author:
+    # `SET LOCAL lock_timeout`/`statement_timeout` in a transactional migration,
+    # plain `SET` under `@disable_ddl_transaction` (there is no transaction for a
+    # LOCAL setting to scope to). The values are per migration on purpose —
+    # `CREATE INDEX CONCURRENTLY` and `VALIDATE CONSTRAINT` need
+    # `statement_timeout = 0`, since a timeout firing mid-build leaves an INVALID
+    # index, while a plain `ADD CONSTRAINT ... NOT VALID` wants a few seconds.
+    # Both want a short lock_timeout.
     if ! squawk \
             --assume-in-transaction \
-            --exclude=require-timeout-settings,adding-field-with-default,ban-concurrent-index-creation-in-transaction \
+            --exclude="$SQUAWK_EXCLUDED_RULES" \
             "$tmpfile"; then
         VIOLATIONS=$((VIOLATIONS + 1))
     fi
@@ -150,3 +183,16 @@ fi
 
 echo "squawk: clean — $ANALYSED of ${#MIGRATION_FILES[@]} changed migration file(s) carried"
 echo "        analysable SQL and every statement passed."
+
+# ⚠️ The claim above is about FILES, and that is exactly how it overstated
+# itself. "Every statement passed" is true of the statements squawk saw; it says
+# nothing about statements the extractor could not hand it. Where some were
+# dropped, say so here rather than letting the clean line stand alone — a reader
+# deciding whether a migration was reviewed needs the difference.
+if [[ $PARTIAL -gt 0 ]]; then
+    echo ""
+    echo "        ⚠️ $PARTIAL of those were only PARTIALLY extracted (listed above)."
+    echo "        For those files the clean result covers the statements squawk"
+    echo "        received, not the migration. Interpolated SQL, DO \$\$ blocks and"
+    echo "        execute() with a non-literal argument are not analysable today."
+fi

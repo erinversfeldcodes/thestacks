@@ -16,6 +16,7 @@ defmodule Stacks.Insights do
   alias Core.Repo
   alias Stacks.Accounts.User
   alias Stacks.Books.Book
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @fingerprint_size 5
@@ -36,12 +37,31 @@ defmodule Stacks.Insights do
   def personal_inferences(%User{id: user_id}, opts \\ []) do
     reveal_risk? = Keyword.get(opts, :reveal_risk, false)
 
-    placements = active_placements(user_id)
-    history_times = history_move_times(user_id)
+    # ⚠️ Scoped once at the context boundary rather than inside each helper: both
+    # of these read row-level-secured tables, and a per-helper scope would open
+    # and commit two transactions to answer one question about one user.
+    {placements, history_times} =
+      Scope.with_user(user_id, fn ->
+        {active_placements(user_id), history_move_times(user_id)}
+      end)
+
+    # ⛔ DELIBERATELY OUTSIDE the scope above, and now answerable there.
+    # `deanonymisation/2` asks how many OTHER users shelve the same rare books —
+    # `bs.user_id <> subject` — which is the whole point of a uniqueness
+    # fingerprint and cannot be answered from one user's rows. Scoped, the owner
+    # policy admits only this user's rows and the `<>` then excludes them, so it
+    # would return a confident ZERO and tell every reader they are maximally
+    # identifiable.
+    #
+    # It goes through `op.count_others_sharing_all/3`, a SECURITY DEFINER
+    # narrowed to this one question and returning one integer — the same
+    # mechanism as the wishlist question and the transparency-page totals. That
+    # function carries the argument guard, because a definer's arguments are its
+    # whole attack surface.
+    deanon = deanonymisation(user_id, placements)
 
     interest = interest_profile(placements)
     behaviour = behaviour(placements, history_times)
-    deanon = deanonymisation(user_id, placements)
 
     base = %{
       interest_profile: interest,
@@ -189,6 +209,34 @@ defmodule Stacks.Insights do
     end)
   end
 
+  # ⚖️ THE RAW COUNT SHIPS, and the alternative was weighed rather than skipped:
+  # send `uniqueness` and the explanation text only, on the principle the public
+  # aggregate page already follows — "counts are rounded to the nearest 10 to
+  # prevent fingerprinting small user bases" (`docs/user-stories.md:282`).
+  #
+  # Withholding it buys nothing here, for three reasons that were measured
+  # rather than assumed.
+  #
+  #   * The number identifies nobody on its own. Getting from
+  #     `others_sharing_all: 1` to a person needs the size of the population
+  #     and which reader it is, and this payload carries neither.
+  #     `op.platform_row_counts()` publishes bookshelves, placements and active
+  #     placements — no user count — so the platform does not supply the first
+  #     of those anywhere else either.
+  #   * `classify/1` preserves the only inference that matters anyway. It maps
+  #     0 to "unique" and 1..5 to "rare", so the 0-versus-non-zero distinction
+  #     — the whole of what a small population leaks — survives the bucket
+  #     exactly. Sending the bucket alone removes no inference.
+  #   * `explanation/2` interpolates the count into the prose, so redacting the
+  #     field and keeping the sentence would be decoration, and dropping the
+  #     sentence too would remove the surface's entire purpose.
+  #
+  # ⚠️ The rounding principle it was weighed against governs a PUBLIC aggregate
+  # about other people. This number is about the subject's own exposure and is
+  # shown only to the subject, and its smallness is precisely what the page
+  # exists to teach. Rounding to the nearest 10 reports "no other reader" and
+  # "four other readers" identically as zero, which misinforms in the direction
+  # that matters.
   defp deanonymisation(user_id, placements) do
     distinct_books = placements |> Enum.map(& &1.book_id) |> Enum.uniq()
 
@@ -202,9 +250,16 @@ defmodule Stacks.Insights do
             "to see how identifiable your combination is."
       }
     else
-      fingerprint = rarest_books(distinct_books)
-      sample_size = length(fingerprint)
-      others = count_others_sharing_all(user_id, fingerprint, sample_size)
+      # ⛔ THE FUNCTION PICKS THE BOOKS NOW, not this module.
+      #
+      # This used to rank the reader's books here and pass the resulting
+      # fingerprint down as a `uuid[]`. The SQL could not check that the array
+      # was the subject's own, and as a SECURITY DEFINER it reads every row —
+      # so "how many others hold ALL of [any set]" was answerable about books
+      # the asker does not own, one probe at a time, with `subject` set to
+      # themselves the whole time. Deriving it inside leaves only the question
+      # this insight exists to answer.
+      {sample_size, others} = count_others_sharing_all(user_id, @fingerprint_size)
 
       %{
         sample_size: sample_size,
@@ -215,54 +270,58 @@ defmodule Stacks.Insights do
     end
   end
 
-  defp rarest_books(distinct_books) do
-    counts = community_read_counts(distinct_books)
+  # ⛔ `rarest_books/1`, `community_read_counts/1` AND `read_counts_unavailable/1`
+  # WERE HERE, and they went with the channel they served.
+  #
+  # They ranked the reader's books by community read count so this module could
+  # pass the rarest few down as a `uuid[]`. That array was the channel: the SQL
+  # could not verify it belonged to the subject, so the definer answered "how
+  # many others hold ALL of these" for any set at all. The ranking now happens
+  # inside `op.count_others_sharing_all`, where the books can only be the
+  # subject's own.
+  #
+  # ⚖️ Their `community_read_counts` degraded rather than lied — an absent key
+  # simply contributed no count to a book's score — and that behaviour is
+  # preserved by the SQL's `count(DISTINCT …)`, which yields 0 for a book
+  # nobody else holds rather than dropping it from the ranking.
 
-    distinct_books
-    |> Enum.sort_by(fn id -> {Map.get(counts, id, 0), id} end)
-    |> Enum.take(@fingerprint_size)
-  end
+  defp count_others_sharing_all(user_id, fingerprint_size) do
+    sql = "SELECT sample_size, others FROM op.count_others_sharing_all($1::uuid, $2::integer)"
 
-  defp community_read_counts([]), do: %{}
+    case Scope.with_user(user_id, fn -> Repo.query(sql, [user_id, fingerprint_size]) end) do
+      {:ok, %{rows: [[sample_size, others]]}} ->
+        {sample_size, others}
 
-  defp community_read_counts(book_ids) do
-    sql =
-      "SELECT book_id::text, read_count FROM marts.mart_community_read_count WHERE book_id = ANY($1::uuid[])"
-
-    case Repo.query(sql, [book_ids]) do
-      {:ok, %{rows: rows}} -> Map.new(rows, fn [id, count] -> {id, count} end)
-      _ -> %{}
+      other ->
+        # ⚠️ The size comes back from the function too, so an unavailable
+        # answer has no size to report either. Reporting the REQUESTED size
+        # beside a nil count would describe a fingerprint that was never built.
+        {nil, log_and_nil(other)}
     end
-  rescue
-    e ->
-      Logger.warning("Insights.community_read_counts failed: #{inspect(e)}")
-      %{}
   end
 
-  defp count_others_sharing_all(user_id, book_ids, sample_size) do
-    sql = """
-    SELECT count(*) FROM (
-      SELECT bs.user_id
-      FROM op.bookshelf_placements p
-      JOIN op.bookshelves bs ON bs.id = p.bookshelf_id
-      WHERE p.book_id = ANY($1::uuid[]) AND p.removed_at IS NULL AND bs.user_id <> $2::uuid
-      GROUP BY bs.user_id
-      HAVING count(DISTINCT p.book_id) = $3
-    ) t
-    """
-
-    case Repo.query(sql, [book_ids, user_id, sample_size]) do
-      {:ok, %{rows: [[count]]}} -> count
-      other -> log_and_nil(other)
-    end
-  rescue
-    e ->
-      Logger.warning("Insights.count_others_sharing_all failed: #{inspect(e)}")
-      nil
-  end
-
+  # ⛔ REACHABLE, AND THAT IS THE POINT OF MEASURING IT.
+  #
+  # Deleting the function-level `rescue` removed one spelling of the silent
+  # fallback, not the behaviour: `Repo.query/3` RETURNS `{:error, …}` rather
+  # than raising, so a `42501` from the definer still lands here, still answers
+  # `nil`, and the reader still reads "could not compute". That is the exact
+  # symptom this issue existed to end, and a `Logger.warning` does not end it —
+  # "a warning in a log nobody reads" is how the original defect survived weeks.
+  #
+  # ⚖️ So the page still degrades rather than 500s, because the rest of the
+  # payload is fine and taking it down helps nobody. What changes is that the
+  # condition is now COUNTABLE: an operator can alarm on it, which is the
+  # difference between a graceful degradation and a quiet one. Same instrument
+  # as `read_counts_unavailable/1` directly above, for the same reason.
   defp log_and_nil(other) do
-    Logger.warning("Insights.count_others_sharing_all unexpected result: #{inspect(other)}")
+    Logger.error(
+      "Insights.count_others_sharing_all could not answer: #{inspect(other)}. " <>
+        "Every reader sees \"could not compute\" on the de-anonymisation insight until this is fixed."
+    )
+
+    :telemetry.execute([:stacks, :insights, :deanonymisation_unavailable], %{count: 1}, %{})
+
     nil
   end
 

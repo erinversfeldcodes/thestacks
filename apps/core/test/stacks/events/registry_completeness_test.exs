@@ -20,7 +20,14 @@ defmodule Stacks.Events.RegistryCompletenessTest do
 
   @lib_root Path.expand("../../../lib", __DIR__)
 
-  @emit_functions [:emit, :emit_safe]
+  # ⚠️ `emit_many/1` is here but its argument is a LIST built by an `Enum.map`,
+  # so `literal_event_type/1` can never read a type out of it. That is not a
+  # gap: a bulk emitter's types are declared in `@indirect_emit_sites` below,
+  # the same mechanism the two builder-style emitters already use. Leaving
+  # `emit_many` OUT of this list would be the actual gap — the scan would not
+  # even see the call, so a file that emits only in bulk would read as emitting
+  # nothing and its types would look orphaned.
+  @emit_functions [:emit, :emit_safe, :emit_many]
 
   # Emit sites whose `event_type` is not a literal in the call's own argument,
   # so the scan cannot read it. Each is declared with the call path that proves
@@ -37,6 +44,29 @@ defmodule Stacks.Events.RegistryCompletenessTest do
       builder (&book_created_event/2, &books_confirmed_event/3). The Multi.run
       step emits `opts[:event].(book, edition)`, so the map literal lives in the
       builder rather than in the emit call.
+      """
+    },
+    "stacks/gdpr/image_retention.ex" => %{
+      types: ~w(image.expired image.bytes_discarded),
+      call_path: """
+      Three sweeps build a list of event maps — `emit_expiry_events/2` for the
+      two that delete the record, `emit_discard_events/1` for the one that
+      deletes only the photograph — and pass it to `Events.emit_many/1` in ONE
+      call, so the `event_type` literal sits inside an `Enum.map` rather than in
+      the emit call's argument.
+
+      ⚠️ `image.bytes_discarded` is a SEPARATE type and not `image.expired` with
+      another reason, because the two facts differ in the way event_log exists
+      to record: `image.expired` means the image is gone, while this one means
+      the photograph was deleted and its row is still there. An erasure enquiry
+      reading the log has to be able to tell them apart.
+
+      The batch is not a style choice. `emit/1` costs two round-trips per event
+      (the event_log insert plus the subscriber enqueue), and measured on a
+      deployed stack that made 200 deletions into 400 sequential round-trips —
+      consuming the sweep's whole 30-second budget on a single batch, so one run
+      cleared 200 rows however large the backlog was. Production's 6,655 expired
+      rows were 34 nightly runs from being gone.
       """
     },
     "stacks/discovery.ex" => %{

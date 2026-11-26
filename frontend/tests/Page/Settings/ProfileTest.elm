@@ -17,6 +17,7 @@ import Page.Settings.Profile as Profile exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 import Types.User exposing (User)
 
@@ -111,7 +112,7 @@ by the save-dispatch and email-change paths that only fire with a token.
 -}
 applyWithToken : Msg -> Profile.Model -> Profile.Model
 applyWithToken msg model =
-    Profile.update msg model (Just "test-token") |> modelOf
+    Profile.update msg model (Just (TestHelpers.creds "test-token")) |> modelOf
 
 
 currentPasswordPlaceholder : Selector.Selector
@@ -181,21 +182,21 @@ suite =
                     |> apply (SaveProfileCompleted (Ok (savedAs "ada")))
                     |> Profile.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Profile saved." ]
+                    |> Query.has [ Selector.exactText "Profile saved." ]
         , test "a taken handle renders the taken copy under the field" <|
             \_ ->
                 initialModel
                     |> apply (SaveProfileCompleted (validationFailure [ ( "handle", [ "has already been taken" ] ) ]))
                     |> Profile.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "That handle is already taken." ]
+                    |> Query.has [ Selector.exactText "That handle is already taken." ]
         , test "a reserved handle renders the reserved copy under the field" <|
             \_ ->
                 initialModel
                     |> apply (SaveProfileCompleted (validationFailure [ ( "handle", [ "is reserved" ] ) ]))
                     |> Profile.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "That handle is reserved." ]
+                    |> Query.has [ Selector.exactText "That handle is reserved." ]
         , test "a malformed handle renders the format copy under the field" <|
             \_ ->
                 initialModel
@@ -207,7 +208,7 @@ suite =
                         )
                     |> Profile.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Handle must be 3–30 characters: lowercase letters, numbers, underscores." ]
+                    |> Query.has [ Selector.exactText "Handle must be 3–30 characters: lowercase letters, numbers, underscores." ]
         , test "a validation failure suppresses the generic section-level error banner" <|
             \_ ->
                 initialModel
@@ -221,14 +222,14 @@ suite =
                     |> apply (SaveProfileCompleted (Err (Api.ProfileRequestFailed (Http.BadStatus 503))))
                     |> Profile.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "The server is busy right now. Please try again in a moment." ]
+                    |> Query.has [ Selector.exactText "The server is busy right now. Please try again in a moment." ]
         , test "a non-503 request failure renders the generic save error" <|
             \_ ->
                 initialModel
                     |> apply (SaveProfileCompleted (Err (Api.ProfileRequestFailed Http.NetworkError)))
                     |> Profile.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Could not save profile. Please try again." ]
+                    |> Query.has [ Selector.exactText "Could not save profile. Please try again." ]
         , describe "email change (CG-1, )"
             [ test "an unchanged email omits both email and current_password from the payload" <|
                 \_ ->
@@ -273,7 +274,7 @@ suite =
                             blocked
                                 |> Profile.view
                                 |> Query.fromHtml
-                                |> Query.has [ Selector.text "Please enter your current password to change your email." ]
+                                |> Query.has [ Selector.exactText "Please enter your current password to change your email." ]
                         ]
                         ()
             , test "saving a changed email with a current password dispatches the save (Loading)" <|
@@ -290,7 +291,7 @@ suite =
                         |> apply (SaveProfileCompleted (Err (Api.ProfileRequestFailed (Http.BadStatus 422))))
                         |> Profile.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Current password is incorrect." ]
+                        |> Query.has [ Selector.exactText "Current password is incorrect." ]
             ]
         , describe "a change in flight"
             [ test "the email field snaps back to the address the account still answers on" <|
@@ -316,9 +317,9 @@ suite =
                         |> Profile.view
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "new@example.com" ]
+                            [ Query.has [ Selector.exactText "new@example.com" ]
                             , Query.has [ Selector.class "pending-email" ]
-                            , Query.has [ Selector.text "We sent a confirmation link there, and a link to undo this change to ada@example.com. Your account still uses ada@example.com until the new address confirms itself." ]
+                            , Query.has [ Selector.exactText "We sent a confirmation link there, and a link to undo this change to ada@example.com. Your account still uses ada@example.com until the new address confirms itself." ]
                             ]
             , test "the panel warns that ignoring both letters signs you out" <|
                 \_ ->
@@ -326,7 +327,7 @@ suite =
                         |> apply (SaveProfileCompleted (Ok pendingSave))
                         |> Profile.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "If neither is used within seven days, you'll be signed out until an address is confirmed — the undo link will still work." ]
+                        |> Query.has [ Selector.exactText "If neither is used within seven days, you'll be signed out until an address is confirmed — the undo link will still work." ]
             , test "no panel when nothing is pending" <|
                 \_ ->
                     initialModel
@@ -496,7 +497,7 @@ suite =
                             saved
                                 |> Profile.view
                                 |> Query.fromHtml
-                                |> Query.has [ Selector.text "Location saved." ]
+                                |> Query.has [ Selector.exactText "Location saved." ]
                         ]
                         ()
             , test "a failed location save renders the failure copy" <|
@@ -506,7 +507,7 @@ suite =
                         |> apply (SaveLocationCompleted (Err Http.NetworkError))
                         |> Profile.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Could not save location. Please try again." ]
+                        |> Query.has [ Selector.exactText "Could not save location. Please try again." ]
             ]
         , describe "the reader's own public profile"
             [ test "the handle hint links to it — the only route to your own profile in the app" <|
@@ -518,7 +519,7 @@ suite =
                         |> Query.has
                             [ Selector.tag "a"
                             , Selector.attribute (Attr.href "/u/ada")
-                            , Selector.text "/u/ada"
+                            , Selector.exactText "/u/ada"
                             ]
             , test "with no handle yet there is nothing to link to, so it stays guidance" <|
                 \_ ->
@@ -570,6 +571,6 @@ suite =
                     { initialModel | origin = "https://readinginthestacks.com", handle = "ada" }
                         |> Profile.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "readinginthestacks.com/u/ada" ]
+                        |> Query.has [ Selector.exactText "readinginthestacks.com/u/ada" ]
             ]
         ]

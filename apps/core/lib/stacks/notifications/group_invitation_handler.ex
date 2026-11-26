@@ -16,12 +16,27 @@ defmodule Stacks.Notifications.GroupInvitationHandler do
 
   @impl true
   @spec handle_event(map()) :: :ok | {:error, term()}
-  def handle_event(%{event_type: "group.invitation_sent", payload: payload}) do
-    invitee_id = Map.get(payload, "invitee_id") || Map.get(payload, :invitee_id)
-    inviter_name = Map.get(payload, "inviter_name") || Map.get(payload, :inviter_name, "A member")
-    group_name = Map.get(payload, "group_name") || Map.get(payload, :group_name, "a group")
+  # ⚠️ These keys are the ones the emitter ACTUALLY sets. They were not.
+  #
+  # `Social.invite_to_group/3` emits `%{invited_user_id:, invited_by_id:,
+  # invitation_id:}` with `aggregate_id: group_id`. This handler read
+  # `invitee_id`, `inviter_name`, `group_name` and `invitation_id` — of which
+  # only the last now exists. So `invitee_id` was always `nil`,
+  # `Accounts.get_user(nil)` always returned `nil`, and every invitation logged
+  # "invitee not found" and sent nothing. The group-invitation email has never
+  # been delivered.
+  #
+  # The two NAMES were never going to arrive: `event_log` payloads are
+  # UUID-only by contract, so a handler cannot read a display name out of one.
+  # They are resolved at delivery from the ids instead.
+  def handle_event(%{
+        event_type: "group.invitation_sent",
+        aggregate_id: group_id,
+        payload: payload
+      }) do
+    invitee_id = Map.get(payload, "invited_user_id") || Map.get(payload, :invited_user_id)
+    inviter_id = Map.get(payload, "invited_by_id") || Map.get(payload, :invited_by_id)
     invitation_id = Map.get(payload, "invitation_id") || Map.get(payload, :invitation_id)
-    accept_url = "/groups/invitations/#{invitation_id}/accept"
 
     case Accounts.get_user(invitee_id) do
       nil ->
@@ -30,7 +45,7 @@ defmodule Stacks.Notifications.GroupInvitationHandler do
 
       user ->
         if user.notify_group_invitations do
-          enqueue_email(user.id, inviter_name, group_name, accept_url)
+          enqueue_email(user.id, inviter_id, group_id, invitation_id)
         else
           :ok
         end
@@ -39,14 +54,19 @@ defmodule Stacks.Notifications.GroupInvitationHandler do
 
   def handle_event(_event), do: :ok
 
-  defp enqueue_email(user_id, inviter_name, group_name, accept_url) do
+  # ⚠️ Ids only. `inviter_name` is a THIRD PARTY's name — the job's `user_id`
+  # is the invitee, the inviter is someone else — and `oban_jobs.args` is a
+  # queryable table with no erasure path that now retains rows for seven days.
+  # A scrub keyed on `args->>'user_id'` could never reach a name belonging to a
+  # different person, so the only safe shape is not to put it there.
+  defp enqueue_email(user_id, inviter_id, group_id, invitation_id) do
     args = %{
       "template" => "group_invitation",
       "user_id" => user_id,
       "params" => %{
-        "inviter_name" => inviter_name,
-        "group_name" => group_name,
-        "accept_url" => accept_url
+        "inviter_id" => inviter_id,
+        "group_id" => group_id,
+        "invitation_id" => invitation_id
       }
     }
 

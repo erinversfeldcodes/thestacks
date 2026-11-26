@@ -6,6 +6,7 @@ import Navigation.Route exposing (Route(..))
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.Group exposing (Group, GroupInvitation)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -34,7 +35,7 @@ groupsInit : Groups.Model
 groupsInit =
     let
         ( m, _ ) =
-            Groups.init "user-1" "token-abc"
+            Groups.init "user-1" (TestHelpers.creds "token-abc")
     in
     m
 
@@ -43,7 +44,7 @@ detailInit : GroupsDetail.Model
 detailInit =
     let
         ( m, _ ) =
-            GroupsDetail.init "group-1" "user-1" "token-abc"
+            GroupsDetail.init "group-1" "user-1" (TestHelpers.creds "token-abc")
     in
     m
 

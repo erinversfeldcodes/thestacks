@@ -25,4 +25,26 @@ defmodule Stacks.Telemetry do
       fn -> {fun.(), full_metadata} end
     )
   end
+
+  @doc """
+      Like `phase/3`, but `fun` returns `{result, extra_metadata}` and the
+      extra map is merged into the span's STOP metadata. Exists for facts that
+      are only knowable once the work has run — the first consumer is the
+      warm/cold label on `identify_book`, which depends on whether the answer's
+      GPU dispatches woke a cold container.
+  """
+  @spec phase_with_meta(atom(), map(), (-> {result, map()})) :: result when result: var
+  def phase_with_meta(phase, metadata \\ %{}, fun)
+      when is_atom(phase) and is_map(metadata) and is_function(fun, 0) do
+    full_metadata = Map.put(metadata, :phase, phase)
+
+    :telemetry.span(
+      [:stacks, :upload, :phase],
+      full_metadata,
+      fn ->
+        {result, extra} = fun.()
+        {result, Map.merge(full_metadata, extra)}
+      end
+    )
+  end
 end

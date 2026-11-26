@@ -9,7 +9,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
       failure.
   """
 
-  use Oban.Worker, queue: :scraper, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :scraper, max_attempts: 3
 
   import Ecto.Query, only: [from: 2]
 

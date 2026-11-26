@@ -104,14 +104,14 @@ parchmentCardTests =
                 startLogin
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-card__tab"
-                        , Selector.text "Sign In"
+                        , Selector.exactText "Sign In"
                         ]
         , test "Register tab uses .login-card__tab class" <|
             \() ->
                 startLogin
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-card__tab"
-                        , Selector.text "Register"
+                        , Selector.exactText "Register"
                         ]
         , test "email input uses .login-card__input class" <|
             \() ->
@@ -124,7 +124,7 @@ parchmentCardTests =
                     |> ProgramTest.clickButton "Register"
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-card__field"
-                        , Selector.text "Display Name"
+                        , Selector.exactText "Display Name"
                         ]
         , test "submit button uses .login-card__submit class" <|
             \() ->
@@ -152,7 +152,8 @@ formValidationTests =
             \() ->
                 let
                     model =
-                        { email = "reader@stacks.dev"
+                        { proof = Nothing
+                        , email = "reader@stacks.dev"
                         , password = "secret123"
                         , passwordConfirm = "secret123"
                         , displayName = "Reader"
@@ -190,7 +191,8 @@ formValidationTests =
             \() ->
                 let
                     model =
-                        { email = "reader@stacks.dev"
+                        { proof = Nothing
+                        , email = "reader@stacks.dev"
                         , password = "secret123"
                         , passwordConfirm = ""
                         , displayName = ""
@@ -282,7 +284,7 @@ ariaTests =
             \() ->
                 let
                     model =
-                        Login.init Login.Fresh
+                        Login.init Nothing Login.Fresh
 
                     html =
                         Login.view model
@@ -299,7 +301,7 @@ ariaTests =
             \() ->
                 let
                     model =
-                        Login.init Login.Fresh
+                        Login.init Nothing Login.Fresh
 
                     html =
                         Login.view model

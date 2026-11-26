@@ -12,6 +12,8 @@ module Page.ThirdSpaces exposing
     )
 
 import Api
+import Api.Url
+import Effect
 import Html exposing (Html, a, button, div, h3, li, p, text, ul)
 import Html.Attributes exposing (class, href)
 import Html.Events exposing (onClick)
@@ -57,20 +59,23 @@ type OutMsg
     = NoOut
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     ( { spaces = Loading
       , selectedSpace = Nothing
       }
-    , Http.request
-        { method = spacesRequest.method
-        , headers = Api.authHeaders maybeToken
-        , url = spacesRequest.url
-        , body = Api.specHttpBody spacesRequest
-        , expect = Http.expectJson SpacesLoaded thirdSpacesResponseDecoder
-        , timeout = Api.standardTimeout
-        , tracker = Nothing
-        }
+    , -- ⛔ WAS A HAND-BUILT `Http.request`, and it was the last credential-bearing
+      -- one outside `Api.elm`. It was already same-origin by TYPE — it read
+      -- `Api.Url.toString spacesRequest.url` — but it spelled out the headers,
+      -- the timeout and the expect itself, which is the shape a future page
+      -- copies when it needs "a request like that one" and gets the credential
+      -- handling subtly wrong.
+      Effect.perform
+        (Effect.public spacesRequest
+            maybeToken
+            Nothing
+            (Api.resolveJson thirdSpacesResponseDecoder >> SpacesLoaded)
+        )
     )
 
 
@@ -79,8 +84,8 @@ init maybeToken =
 spacesRequest : Api.RequestSpec
 spacesRequest =
     { method = "GET"
-    , url = "/api/third-spaces"
-    , body = Nothing
+    , url = Api.Url.path [ "api", "third-spaces" ] []
+    , body = Api.NoBody
     }
 
 

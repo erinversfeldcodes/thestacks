@@ -174,3 +174,36 @@ core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError
 core_prom_ex_oban_job_exception_duration_milliseconds_bucket{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker",le="+Inf"} 2
 core_prom_ex_oban_job_exception_duration_milliseconds_sum{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker"} 150
 core_prom_ex_oban_job_exception_duration_milliseconds_count{error="RuntimeError",kind="error",name="Core.UploadWorker",queue="uploads",state="failure",worker="Core.UploadWorker"} 2
+
+# Responsiveness SLIs (ruled thresholds): identification time-to-answer via the
+# upload phase histogram (p50<=5000, p95<=35000) and the stream acknowledgement
+# (p95<=1000). Healthy shape: p50~2.7s, p95~7.1s, ack p95~90ms over 6 samples.
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="100"} 0
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="250"} 0
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="500"} 0
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="1000"} 1
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="2000"} 2
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="3000"} 4
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="5000"} 5
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="8000"} 6
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="15000"} 6
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="30000"} 6
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="60000"} 6
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="120000"} 6
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="300000"} 6
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="330000"} 6
+stacks_upload_phase_stop_duration_milliseconds_bucket{phase="identify_book",cold="false",le="+Inf"} 6
+stacks_upload_phase_stop_duration_milliseconds_sum{phase="identify_book",cold="false"} 16000
+stacks_upload_phase_stop_duration_milliseconds_count{phase="identify_book",cold="false"} 6
+stacks_upload_ack_duration_milliseconds_bucket{le="10"} 1
+stacks_upload_ack_duration_milliseconds_bucket{le="25"} 3
+stacks_upload_ack_duration_milliseconds_bucket{le="50"} 5
+stacks_upload_ack_duration_milliseconds_bucket{le="100"} 6
+stacks_upload_ack_duration_milliseconds_bucket{le="250"} 6
+stacks_upload_ack_duration_milliseconds_bucket{le="500"} 6
+stacks_upload_ack_duration_milliseconds_bucket{le="1000"} 6
+stacks_upload_ack_duration_milliseconds_bucket{le="2000"} 6
+stacks_upload_ack_duration_milliseconds_bucket{le="5000"} 6
+stacks_upload_ack_duration_milliseconds_bucket{le="+Inf"} 6
+stacks_upload_ack_duration_milliseconds_sum 280
+stacks_upload_ack_duration_milliseconds_count 6

@@ -19,7 +19,7 @@
 - Clicking a spine opens a modal overlay with book details.
 - Overlay has backdrop blur and click-to-dismiss.
 - Close button (X) in top-right corner.
-- All detail sections render: Hero, About, Reviews, Prices, Author, Writing, Shelf Actions.
+- All detail sections render: Hero, About, Reviews, Prices, Author, Writing, Shelf Actions. Writing shows the viewer's own posts about this book — title linking to the post, a date, or a `Draft` label — and an empty state otherwise. A signed-out reader sees no Writing section at all, because the server sends an empty list to anonymous callers and an empty list alone cannot distinguish "signed out" from "written nothing". There is no `Add Post` button: associations are created by an asynchronous worker when a post is published, so the page has no action to offer.
 - If user owns the book: Move to Shelf, Format toggles, and Remove actions are shown.
 - If authenticated but book not owned: "Add to Collection" action is shown.
 - If unauthenticated: "Sign In or Register" prompt is shown.
@@ -36,7 +36,7 @@
 5. The overlay renders immediately via `Page.BookDetail.overlayView model`.
 6. Backdrop with blur (`rgba(10, 8, 6, 0.75)`, `backdrop-filter: blur(4px)`) covers the shelf.
 7. Card renders centered with `max-width: 900px`, `width: 90vw`, `max-height: 90vh`, `overflow-y: auto`.
-8. On `BookLoaded (Ok response)`, the book detail content fills in: hero, about, reviews, prices, author, writing, shelf actions.
+8. On `BookLoaded (Ok response)`, the book detail content fills in: hero, about, reviews, prices, author, writing, shelf actions. `response.myWriting` reaches `viewWritingSection model`; drafts sort first, because `published_at DESC` is NULLS FIRST in Postgres.
 9. User dismisses by clicking X, clicking backdrop, or pressing Escape -> `CloseOverlay` msg -> `OutMsg RequestCloseOverlay`.
 
 ### Sad Paths
@@ -61,7 +61,23 @@
 - **Pipeline**: `:api` -> `:optional_auth`
 - **Controller**: `StacksWeb.BookController.show/2`
 - **Request body**: N/A
-- **Response (success)**: `{ book: { id, title, description, language, subjects, bisac_codes, visibility_tier, author: { id, name, bio, website }, editions: [...], edition_count, primary_edition: {...}, community_read_count }, placement: { id, book_id, bookshelf_name, formats, personal_rating, notes } | null, my_writing: [{ id, title, published_at }] }` -- HTTP 200
+- **Response (success)**: `{ book: { id, title, description, subjects, visibility_tier, author: { id, name, bio, website }, editions: [...], edition_count, primary_edition: {...}, community_read_count }, placement: { id, book_id, bookshelf_name, formats, personal_rating, notes } | null, my_writing: [{ id, title, published_at }] }` -- HTTP 200
+
+> ⚠️ **`language` and `bisac_codes` left this response on 2026-10-20**, and the response shape
+> above is narrower by two keys than it was. Both were serialised, decoded correctly by the
+> generated proto decoder, and then discarded by `Types.Book.fromProtoBook` — the SPA's
+> hand-written adapter builds its record field by field and never mentioned them — so no client
+> ever held either one and nothing rendered them.
+>
+> Each was removed on a measurement, not a preference: the only writer of `op.books.language` in
+> the tree is `seeds.exs`, so 169 of 169 local rows read "en" while 55 of 55 production rows are
+> NULL; and `bisac_codes` already reaches its only consumer through the insights endpoint, while
+> the reader-facing form of that information on a book page is `subjects`, which this response
+> still carries. `scripts/check-book-adapter-coverage.sh` now fails when a payload key has no
+> adapter field, so the next proto field added to `Book` cannot be lost the same way.
+>
+> `community_read_count` is still in the payload and still unread by the adapter — it is owned
+> separately and declared as the gate's one known exception.
 - **Response (error)**: `{ error: "not_found" }` -- HTTP 404; HTTP 403 for age-gated content
 - **FallbackController handling**: 404 for missing book or hidden visibility; 403 for age-gated books via `AgeGate.enforce/2`
 
@@ -115,14 +131,26 @@
 - **Schema module**: `Stacks.Shelving.Placement`
 
 ### Read: Community read count
-- **Table(s)**: `wh.mart_community_read_count`
-- **Query**: Raw SQL `SELECT read_count FROM wh.mart_community_read_count WHERE book_id = $1 LIMIT 1`
+- **Table(s)**: `marts.mart_community_read_count`
+- **Query**: Raw SQL `SELECT read_count FROM marts.mart_community_read_count WHERE book_id = $1 LIMIT 1`
 - **Schema module**: N/A (raw query)
 
 ### Read: User's writing linked to book
 - **Table(s)**: `op.blog_posts` (via `Blog.list_posts_for_book_by_user/2`)
-- **Query**: Posts associated with the book by the current user
+- **Query**: Posts associated with the book by the current user, drafts included
 - **Schema module**: `Stacks.Blog.Post`
+- **Status**: rendered as of 2026-10-16. The viewer's posts arrive as `my_writing`
+  (`{id, title, published_at}`), decode into `Api.MyWriting`, and render one entry each in the
+  book detail's writing section — title linking to `/blog/{id}`, a date, or a `Draft` label where
+  `published_at` is null. A signed-out reader sees no section at all, because the server sends `[]`
+  to anonymous callers and an empty list alone cannot tell "signed out" from "written nothing".
+  Until this landed the read was **pure overhead**: the controller serialised the field, the
+  `Decode.map4` decoder dropped it (its docstring said so — *"Proto includes myWriting
+  (dropped)"*), and `viewWritingSection` took no arguments, so three layers existed and the middle
+  one was missing. Every layer had a passing test; only the composition was broken, which is why
+  `frontend/tests/Page/BookDetailWritingTest.elm` drives a simulated HTTP response through the real
+  program instead of calling the view directly. The `db.query.count{table="op.blog_posts"}` metric
+  in section 15 counts the read.
 
 ---
 
@@ -173,7 +201,7 @@ N/A -- the detail view shows locally-stored data. Review summaries, prices, and 
 
 ## 11. dbt Model Dependencies
 
-- **Model**: `wh.mart_community_read_count`
+- **Model**: `marts.mart_community_read_count`
 - **Trigger**: Refreshed when `placement.created` or `placement.moved` events fire (via `DbtRefreshHandler`)
 - **Materialisation**: Likely view or incremental
 - **Consumer**: `BookController.show/2` reads `community_read_count` from this mart
@@ -231,8 +259,8 @@ N/A -- the detail view shows locally-stored data. Review summaries, prices, and 
 | `db.query.count{table="op.books", op="select"}` | Ecto.Telemetry | Counter | Increment per book detail query | 0 on cache hit, 1 on cache miss |
 | `db.query.duration{table="op.books", op="select"}` | Ecto.Telemetry | Histogram (ms) | Book detail query with author/edition preloads | p95 < 30ms |
 | `db.query.count{table="op.bookshelf_placements", op="select"}` | Ecto.Telemetry | Counter | Increment per user placement lookup | 1 per request (authenticated users only) |
-| `db.query.count{table="wh.mart_community_read_count", op="select"}` | Ecto.Telemetry | Counter | Increment per community read count lookup | 1 per request |
-| `db.query.duration{table="wh.mart_community_read_count", op="select"}` | Ecto.Telemetry | Histogram (ms) | Raw SQL query to dbt mart | p95 < 15ms |
+| `db.query.count{table="marts.mart_community_read_count", op="select"}` | Ecto.Telemetry | Counter | Increment per community read count lookup | 1 per request |
+| `db.query.duration{table="marts.mart_community_read_count", op="select"}` | Ecto.Telemetry | Histogram (ms) | Raw SQL query to dbt mart | p95 < 15ms |
 | `db.query.count{table="op.blog_posts", op="select"}` | Ecto.Telemetry | Counter | Increment per user writing lookup | 1 per request (authenticated users only) |
 | `cache.hit{cache="BookDetailCache"}` | BookDetailCache | Counter | Increment on cache hit for book detail | Informational |
 | `cache.miss{cache="BookDetailCache"}` | BookDetailCache | Counter | Increment on cache miss for book detail | Informational |
@@ -265,7 +293,7 @@ N/A -- the detail view shows locally-stored data. Review summaries, prices, and 
 |-------------|------|--------------|-------|
 | Fly.io compute (core) | CPU-ms per request | Number of book detail overlay opens | Multiple queries per request: book detail, placement lookup, community read count, user writing. Cache hits reduce DB load. |
 | Neon DB (PostgreSQL) | Compute Units (CU) per query | Cache misses on book detail lookups | On cache miss: book + author + editions preload query. On every request: placement lookup, community read count (raw SQL to dbt mart), blog posts query. Total 3-4 queries per request. |
-| Neon DB (PostgreSQL) | Compute Units (CU) per query | `wh.mart_community_read_count` reads | Raw SQL read from dbt mart on every book detail request. Lightweight indexed lookup. |
+| Neon DB (PostgreSQL) | Compute Units (CU) per query | `marts.mart_community_read_count` reads | Raw SQL read from dbt mart on every book detail request. Lightweight indexed lookup. |
 | R2 presigned URLs | Presigned URL generation | Cover image display | `edition.cover_image_url` is pre-stored; no runtime R2 presigned URL generation. However, if cover URLs point to R2, each browser fetch incurs R2 egress. |
 | BookDetailCache (ETS) | Memory (bytes) | Cached book entries x TTL (5 min) | In-process ETS cache. No external cost, but consumes Fly.io instance memory. |
 

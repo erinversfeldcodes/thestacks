@@ -10,12 +10,33 @@ defmodule Mix.Tasks.Proto.Sync do
 
   use Mix.Task
 
+  # ⛔ EMPTY ON PURPOSE, AND IT MEANS THIS TASK CAN RUN AGAINST STALE BEAMS.
+  #
+  # The default `["app.start"]` would compile first, and this task cannot ask
+  # for that: `core` does not compile until the Ecto schemas in `lib/stacks/gen`
+  # exist, and this is the task that writes them. Requiring a compile would make
+  # the generator unrunnable in exactly the situation it exists for.
+  #
+  # ⚠️ The cost lands on whoever CHANGES a generator. `mix proto.sync` loads
+  # whatever is already in `_build`, so editing a module under
+  # `lib/mix/tasks/proto_sync/` and re-running this task regenerates using the
+  # PREVIOUS version of that module, silently. MEASURED while extracting the
+  # shared field predicates: a deliberately broken `api_only?/2` produced a
+  # byte-identical generated tree, which read as "the refactor changed nothing"
+  # when it actually meant "the refactor had not been compiled". The same run
+  # after `mix compile --force` produced a different tree and four spurious
+  # migrations — the real behaviour, two steps later than it looked.
+  #
+  # So: `mix compile --force` before trusting any before/after comparison of
+  # this task's output. A green comparison without it is evidence about `_build`,
+  # not about the diff.
   @requirements []
 
   alias Mix.Tasks.ProtoSync.DbtGenerator
   alias Mix.Tasks.ProtoSync.Descriptor
   alias Mix.Tasks.ProtoSync.DriftChecker
   alias Mix.Tasks.ProtoSync.EctoGenerator
+  alias Mix.Tasks.ProtoSync.FieldOverrides
   alias Mix.Tasks.ProtoSync.Manifest
   alias Mix.Tasks.ProtoSync.MigrationGenerator
   alias Mix.Tasks.ProtoSync.ProtoJsonGenerator
@@ -155,11 +176,12 @@ defmodule Mix.Tasks.Proto.Sync do
 
   defp generate_delta_migration(table, fields, migrations_dir) do
     overrides = Map.get(table, :field_overrides, %{})
-    ts_fields = timestamp_field_names(table)
+    ts_fields = FieldOverrides.timestamp_field_names(table)
 
     db_fields =
       Enum.reject(fields, fn field ->
-        field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
+        field.name == "id" or field.name in ts_fields or
+          FieldOverrides.api_only?(field, overrides)
       end)
 
     existing = MigrationGenerator.existing_columns(migrations_dir, table.table_name)
@@ -189,17 +211,6 @@ defmodule Mix.Tasks.Proto.Sync do
       end)
     end
   end
-
-  defp api_only_field?(field, overrides) do
-    field_name = String.to_atom(field.name)
-    override = Map.get(overrides, field_name, %{})
-    Map.get(override, :api_only, false)
-  end
-
-  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
-  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
-  defp timestamp_field_names(%{timestamps: false}), do: []
-  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 
   defp run_check(manifest, descriptor, repo_root) do
     core_root = Path.join(repo_root, "apps/core")
@@ -282,12 +293,13 @@ defmodule Mix.Tasks.Proto.Sync do
 
   defp check_migration_drift(table, fields, migrations_dir) do
     overrides = Map.get(table, :field_overrides, %{})
-    ts_fields = timestamp_field_names(table)
+    ts_fields = FieldOverrides.timestamp_field_names(table)
     migration_exists = Map.get(table, :migration_exists, false)
 
     db_fields =
       Enum.reject(fields, fn field ->
-        field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
+        field.name == "id" or field.name in ts_fields or
+          FieldOverrides.api_only?(field, overrides)
       end)
 
     if migration_exists do

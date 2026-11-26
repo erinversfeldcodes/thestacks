@@ -56,7 +56,7 @@ defmodule Stacks.Books.CandidateScorer do
       raw_text_score(signals[:raw_text], candidate_text, w.raw_text) +
       author_score(signals[:author], candidate_meta[:author], w.author) +
       exact_title_score(signals[:title], candidate_meta[:title], w.exact_title) +
-      derivative_penalty(signal_title_tokens, title_tokens, w.derivative_penalty)
+      derivative_penalty(signal_title_tokens, candidate_tokens, w.derivative_penalty)
   end
 
   @doc """
@@ -65,8 +65,9 @@ defmodule Stacks.Books.CandidateScorer do
       `mix eval.resolver` — both must exercise identical pick logic. Sort is
       stable, so a score tie preserves the provider's own ranking (old
       first-doc-wins behaviour). Returns `:empty`, `{:ok, best, runner_up}`
-      (plausible: `score >= floor`, or author corroboration waives it), or
-      `{:floored, best, runner_up}` (treat as no match). Options: `:floor`
+      (plausible: `score >= floor`, or a corroboration waives it — author
+      surname agreement, or, for a raw-text-only read, full title agreement),
+      or `{:floored, best, runner_up}` (treat as no match). Options: `:floor`
       (default `#{@default_floor}`), `:weights`.
   """
   @spec pick_best([{String.t(), map()}], map(), keyword()) ::
@@ -87,11 +88,34 @@ defmodule Stacks.Books.CandidateScorer do
 
     runner_up = List.first(rest)
 
-    if best_score >= floor or author_match?(best_meta, signals) do
+    if best_score >= floor or author_match?(best_meta, signals) or
+         title_read_in_full?(best_meta, signals) do
       {:ok, best, runner_up}
     else
       {:floored, best, runner_up}
     end
+  end
+
+  # ⬛ THE BAG-OF-WORDS ACCEPTANCE. A raw-text-only read (no title line was
+  # picked out) can never reach the floor arithmetically: with nil title and
+  # nil author, `raw_text` is the only scoring component and its weight tops
+  # out below the floor — so without this waiver the bag-of-words path exists
+  # and is structurally dead. The waiver is "title agreement" in the cascade
+  # ruling's gate vocabulary, and deliberately the STRICT direction: every
+  # significant token of the candidate's OWN title must have been read off
+  # the cover (subset, not overlap), with at least two such tokens so a
+  # one-word title cannot ride in on a single shared word. It never fires
+  # when the signals carry a title — titled candidates answer to the floor
+  # and the author waiver exactly as before, which is why `mix eval.resolver`
+  # is unchanged on the recorded (always-titled) corpus.
+  defp title_read_in_full?(meta, signals) do
+    signals[:title] in [nil, ""] and
+      (
+        title_tokens = tokens(meta[:title])
+        read_tokens = MapSet.new(raw_text_tokens(signals[:raw_text]))
+
+        MapSet.size(title_tokens) >= 2 and MapSet.subset?(title_tokens, read_tokens)
+      )
   end
 
   @doc "The default plausibility floor used by `pick_best/3`."
@@ -179,6 +203,13 @@ defmodule Stacks.Books.CandidateScorer do
     end
   end
 
+  # ⚠️ Scans title AND subtitle tokens, because the subtitle is where a
+  # commentary hides: "Luminous Emptiness: a GUIDE TO the Tibetan Book of the
+  # Dead" outranked the actual Tibetan Book of the Dead on a clear-cover
+  # photograph (cascade run 4, 2026-11-20) — its subtitle earned the full
+  # overlap score while the penalty, scanning only the two-word title, never
+  # fired. A derivative that names its subject in the subtitle is the COMMON
+  # derivative shape, not the edge case.
   defp derivative_penalty(signal_title_tokens, candidate_title_tokens, weight) do
     candidate_derivative? =
       Enum.any?(@derivative_tokens, &MapSet.member?(candidate_title_tokens, &1))

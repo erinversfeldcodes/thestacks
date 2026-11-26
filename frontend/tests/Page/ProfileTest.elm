@@ -63,8 +63,8 @@ suite =
                     |> Profile.view
                     |> Query.fromHtml
                     |> Expect.all
-                        [ Query.has [ Selector.text "Ada Lovelace" ]
-                        , Query.has [ Selector.text "@adalovelace" ]
+                        [ Query.has [ Selector.exactText "Ada Lovelace" ]
+                        , Query.has [ Selector.exactText "@adalovelace" ]
                         ]
         , test "renders profile meta (location + website)" <|
             \_ ->
@@ -72,7 +72,7 @@ suite =
                     |> Profile.view
                     |> Query.fromHtml
                     |> Expect.all
-                        [ Query.has [ Selector.text "London, GB" ]
+                        [ Query.has [ Selector.exactText "London, GB" ]
                         , Query.has [ Selector.attribute (Attr.href "https://ada.example") ]
                         ]
         , test "renders one browse link per visible bookshelf, pointing at /u/:handle/:shelf" <|
@@ -91,14 +91,14 @@ suite =
                 received (Ok { sampleProfile | bookshelves = [] })
                     |> Profile.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "This reader hasn’t shared any bookshelves yet." ]
+                    |> Query.has [ Selector.exactText "This reader hasn’t shared any bookshelves yet." ]
         , test "a 404 renders the neutral not-found (ghost = absent)" <|
             \_ ->
                 received (Err (Http.BadStatus 404))
                     |> Profile.view
                     |> Query.fromHtml
                     |> Expect.all
-                        [ Query.has [ Selector.text "Reader not found" ]
+                        [ Query.has [ Selector.exactText "Reader not found" ]
                         , Query.hasNot [ Selector.text "Ada Lovelace" ]
                         ]
         , test "a 404 does NOT raise SessionExpired" <|
@@ -109,7 +109,7 @@ suite =
             \_ ->
                 outMsgFor (Err (Http.BadStatus 401))
                     |> Expect.equal SessionExpired
-        , -- Paired contract (#220): the Elixir serializer key-set assertions live in
+        , -- Paired contract: the Elixir serializer key-set assertions live in
           describe "publicProfileDecoder (redaction + null tolerance)"
             [ test "decodes a full payload" <|
                 \_ ->

@@ -342,6 +342,37 @@ defmodule Stacks.Books.CandidateScorerTest do
       assert_in_delta derivative, 3.5, 0.001
     end
 
+    test "a commentary hiding its marker in the SUBTITLE still ranks below the work" do
+      # Live case (cascade run 4, 2026-11-20): "Luminous Emptiness: a guide to
+      # the Tibetan Book of the Dead" outranked the actual Tibetan Book of the
+      # Dead on a clear-cover photo — the subtitle earned full overlap while
+      # the penalty, scanning only the two-word TITLE, never fired.
+      signals = %{title: "The Tibetan Book of the Dead", author: nil, raw_text: nil}
+
+      work =
+        {"9781855384125",
+         %{
+           title: "The Tibetan book of the dead",
+           subtitle: nil,
+           author: "Padma Sambhava",
+           subjects: []
+         }}
+
+      commentary =
+        {"9780834824782",
+         %{
+           title: "Luminous Emptiness",
+           subtitle: "A guide to the Tibetan Book of the Dead",
+           author: "Francesca Fremantle",
+           subjects: []
+         }}
+
+      assert {:ok, {_score, best_isbn, _meta}, _runner} =
+               CandidateScorer.pick_best([commentary, work], signals)
+
+      assert best_isbn == "9781855384125"
+    end
+
     test "no penalty when the SIGNAL title also carries the marker (user photographed an actual study guide)" do
       signals = %{
         title: "Study Guide: Klara and the Sun by Kazuo Ishiguro",

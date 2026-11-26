@@ -28,7 +28,7 @@ defmodule Stacks.FeedsTest do
 
   describe "fetch_feed/2" do
     test "returns {:ok, xml, etag} for a platform-visible bookshelf" do
-      user = insert(:user, display_name: "Erin")
+      user = insert(:user, display_name: "Erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       author = insert(:author, name: "Donna Tartt")
 
@@ -66,14 +66,14 @@ defmodule Stacks.FeedsTest do
     end
 
     test "returns {:error, :not_public} for group-visibility bookshelf" do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
 
       assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library", user)
     end
 
     test "serves a feed for a public-visibility bookshelf" do
-      user = insert(:user, display_name: "Ada")
+      user = insert(:user, display_name: "Ada", profile_visibility: "public")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
       author = insert(:author, name: "Donna Tartt")
 
@@ -94,7 +94,7 @@ defmodule Stacks.FeedsTest do
     end
 
     test "a PLATFORM bookshelf's feed is not served to an anonymous reader" do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       _placement = insert(:placement, bookshelf: bookshelf, book: insert(:book))
 
@@ -102,7 +102,7 @@ defmodule Stacks.FeedsTest do
     end
 
     test "a PUBLIC bookshelf's feed IS served to an anonymous reader" do
-      user = insert(:user, display_name: "Ada")
+      user = insert(:user, display_name: "Ada", profile_visibility: "public")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
@@ -114,7 +114,7 @@ defmodule Stacks.FeedsTest do
     end
 
     test "a signed-in reader may read a PLATFORM bookshelf's feed" do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       _placement = insert(:placement, bookshelf: bookshelf, book: insert(:book))
       viewer = insert(:user)
@@ -123,7 +123,7 @@ defmodule Stacks.FeedsTest do
     end
 
     test "returns valid XML with empty bookshelf" do
-      user = insert(:user, display_name: "Test User")
+      user = insert(:user, display_name: "Test User", profile_visibility: "platform")
       _bookshelf = insert(:bookshelf, user: user, name: "wishlist", visibility: "platform")
 
       assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "wishlist", user)
@@ -133,7 +133,7 @@ defmodule Stacks.FeedsTest do
     end
 
     test "escapes XML special characters in titles" do
-      user = insert(:user, display_name: "A & B <User>")
+      user = insert(:user, display_name: "A & B <User>", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book, title: "Tom & Jerry <Adventures>")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
@@ -148,7 +148,8 @@ defmodule Stacks.FeedsTest do
         insert(:user,
           email: "owner-secret@example.com",
           display_name: nil,
-          handle: ""
+          handle: "",
+          profile_visibility: "platform"
         )
 
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
@@ -167,7 +168,8 @@ defmodule Stacks.FeedsTest do
         insert(:user,
           email: "owner-secret@example.com",
           display_name: nil,
-          handle: "shadow_reader"
+          handle: "shadow_reader",
+          profile_visibility: "platform"
         )
 
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
@@ -186,7 +188,8 @@ defmodule Stacks.FeedsTest do
         insert(:user,
           email: "owner-secret@example.com",
           display_name: "Erin",
-          handle: "shadow_reader"
+          handle: "shadow_reader",
+          profile_visibility: "platform"
         )
 
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
@@ -201,7 +204,7 @@ defmodule Stacks.FeedsTest do
     end
 
     test "a cache-write failure still serves the fresh render (cache is an optimization)" do
-      user = insert(:user, display_name: "Erin")
+      user = insert(:user, display_name: "Erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
@@ -218,7 +221,7 @@ defmodule Stacks.FeedsTest do
 
   describe "regenerate/2" do
     test "returns {:ok, xml, etag} and upserts the cache row for a platform bookshelf" do
-      user = insert(:user, display_name: "Erin")
+      user = insert(:user, display_name: "Erin", profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
@@ -237,7 +240,8 @@ defmodule Stacks.FeedsTest do
         insert(:user,
           email: "owner-secret@example.com",
           display_name: nil,
-          handle: "shadow_reader"
+          handle: "shadow_reader",
+          profile_visibility: "platform"
         )
 
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
@@ -265,7 +269,7 @@ defmodule Stacks.FeedsTest do
     end
 
     test "surfaces {:error, {:cache_write_failed, changeset}} when the cache write fails" do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
 
       inject_failing_writer()
@@ -322,7 +326,7 @@ defmodule Stacks.FeedsTest do
 
   describe "entry content" do
     setup do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       library = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       %{user: user, library: library}
     end

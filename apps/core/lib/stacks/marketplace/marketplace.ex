@@ -23,6 +23,7 @@ defmodule Stacks.Marketplace do
   alias Ecto.Multi
   alias Stacks.Events
   alias Stacks.Marketplace.Listing
+  alias Stacks.Scope
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement}
 
@@ -50,6 +51,7 @@ defmodule Stacks.Marketplace do
       |> Map.merge(%{"seller_id" => seller_id, "status" => "draft"})
 
     Multi.new()
+    |> Scope.multi_step(seller_id)
     |> Multi.run(:placement, fn repo, _ ->
       case find_seller_placement_with_repo(repo, seller_id, book_id) do
         nil -> {:error, :no_placement}
@@ -190,6 +192,7 @@ defmodule Stacks.Marketplace do
       expires_at = DateTime.add(now, 30, :day)
 
       Multi.new()
+      |> Scope.multi_step(user_id)
       |> Multi.run(:locked_listing, fn repo, _ ->
         lock_and_validate_transition(repo, listing.id, "active")
       end)
@@ -231,6 +234,7 @@ defmodule Stacks.Marketplace do
   def deactivate_listing(%Listing{} = listing, user_id) do
     with :ok <- verify_ownership(listing, user_id) do
       Multi.new()
+      |> Scope.multi_step(user_id)
       |> Multi.run(:locked_listing, fn repo, _ ->
         lock_and_validate_transition(repo, listing.id, "removed")
       end)
@@ -270,6 +274,7 @@ defmodule Stacks.Marketplace do
       now = DateTime.utc_now()
 
       Multi.new()
+      |> Scope.multi_step(user_id)
       |> Multi.run(:locked_listing, fn repo, _ ->
         lock_and_validate_transition(repo, listing.id, "sold")
       end)
@@ -307,6 +312,7 @@ defmodule Stacks.Marketplace do
           {:ok, Listing.t()} | {:error, :invalid_transition | Ecto.Changeset.t()}
   def expire_listing(%Listing{} = listing) do
     Multi.new()
+    |> Scope.multi_step(listing.seller_id)
     |> Multi.run(:locked_listing, fn repo, _ ->
       lock_and_validate_transition(repo, listing.id, "expired")
     end)

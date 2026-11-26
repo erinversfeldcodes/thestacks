@@ -16,10 +16,12 @@ can be deactivated or marked as sold.
 -}
 
 import Api
+import Effect
 import Html exposing (Html, a, button, div, h1, h3, p, span, text)
 import Html.Attributes exposing (class, href)
 import Html.Events exposing (onClick)
 import Http
+import Json.Decode as Decode
 import Navigation.Route as Route
 import Types.Listing exposing (Listing, ListingStatus(..), ListingsResponse, conditionLabel, statusLabel)
 import Types.RemoteData exposing (RemoteData(..))
@@ -33,6 +35,7 @@ type alias Model =
 
 type Msg
     = ListingsReceived (Result Http.Error ListingsResponse)
+    | SessionExpiryDetected
     | ActivateListing String
     | DeactivateListing String
     | MarkSold String
@@ -44,12 +47,18 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     case maybeToken of
         Just token ->
             ( { listings = Loading, actionState = NotAsked }
-            , Api.getMyListings token ListingsReceived
+            , Effect.perform
+                (Effect.authed Api.myListingsRequest
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveJson Types.Listing.listingsResponseDecoder >> ListingsReceived
+                    }
+                )
             )
 
         Nothing ->
@@ -58,9 +67,12 @@ init maybeToken =
             )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         ListingsReceived result ->
             case result of
                 Ok response ->
@@ -77,7 +89,15 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | actionState = Loading }
-                    , Api.activateListing listingId token (ListingUpdated listingId)
+                    , Effect.perform
+                        (Effect.authed (Api.listingTransitionRequest listingId Api.ActivateListing)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "listing" Types.Listing.listingDecoder)
+                                    >> ListingUpdated listingId
+                            }
+                        )
                     , NoOut
                     )
 
@@ -88,7 +108,15 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | actionState = Loading }
-                    , Api.deactivateListing listingId token (ListingUpdated listingId)
+                    , Effect.perform
+                        (Effect.authed (Api.listingTransitionRequest listingId Api.DeactivateListing)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "listing" Types.Listing.listingDecoder)
+                                    >> ListingUpdated listingId
+                            }
+                        )
                     , NoOut
                     )
 
@@ -99,7 +127,15 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | actionState = Loading }
-                    , Api.soldListing listingId token (ListingUpdated listingId)
+                    , Effect.perform
+                        (Effect.authed (Api.listingTransitionRequest listingId Api.MarkListingSold)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "listing" Types.Listing.listingDecoder)
+                                    >> ListingUpdated listingId
+                            }
+                        )
                     , NoOut
                     )
 

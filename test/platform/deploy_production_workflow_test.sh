@@ -175,6 +175,46 @@ for s in "${REQUIRED_SECRETS[@]}"; do
     fi
 done
 
+# ── the production database URL's provenance ─────────────────────────────────
+#
+# A deleted comment here asserted that NEON_PROJECT_ID and NEON_API_KEY "should
+# not be referenced from this workflow" at all, because production never
+# consults Neon. That claim is now OBSOLETE rather than unmechanised: the
+# workflow legitimately uses both, in two places added after the comment was
+# written — capturing the pre-migrate write-ahead-log position so a rollback can
+# restore to a point in time, and handing that position to the rollback
+# composite. A gate asserting the old claim would fail against the correct
+# design, so it was not built.
+#
+# What SURVIVES of the comment is narrower and still worth holding: production's
+# DATABASE_URL is COMPOSED from its own secret components, never fetched from
+# Neon's API. That is the half with consequences — a URL obtained from Neon
+# would point at whichever branch that call happened to return, which on a
+# two-project architecture is how a production migration ends up running against
+# a staging branch.
+test_case "prod_database_url_is_composed_not_fetched" \
+    "production composes its DATABASE_URL from its own secrets rather than asking Neon for one"
+COMPOSE_STEP="$(awk '
+    /^      - name: Compose DATABASE_URL/ { in_step = 1; print; next }
+    in_step && /^      - name:/ { exit }
+    in_step { print }
+' "$WF")"
+
+if [[ -z "$COMPOSE_STEP" ]]; then
+    _record_fail "no step composes DATABASE_URL — production may now be obtaining it some other way, and this suite can no longer tell"
+else
+    for component in STACKS_PROD_DB_ROLE STACKS_PROD_DB_PASSWORD STACKS_PROD_DB_HOST STACKS_PROD_DB_NAME; do
+        assert_contains "$COMPOSE_STEP" "$component" \
+            "the composed URL still uses $component"
+    done
+
+    assert_not_contains "$COMPOSE_STEP" "console.neon.tech" \
+        "the compose step does not call Neon's API — a fetched URL points at whichever branch that call returns, which is how a production migration ends up running against staging"
+
+    assert_not_contains "$COMPOSE_STEP" "NEON_API_KEY" \
+        "the compose step does not take a Neon credential, so it cannot be fetching the URL"
+fi
+
 test_case "rollback_if_failure" "rollback step uses failure() (not just gate.conclusion)"
 ROLLBACK_BLOCK="$(python3 -c '
 import re, sys
@@ -211,7 +251,7 @@ sys.exit(0 if (has_run and has_target) else 1)
     else
         _record_fail "tag-main.yml missing workflow_run trigger targeting Deploy production"
     fi
-    if echo "$TAG_CONTENT" | grep -qE "workflow_run\.conclusion\s*==\s*'success'"; then
+    if grep -qE "workflow_run\.conclusion\s*==\s*'success'" <<< "$TAG_CONTENT"; then
         _record_pass "tag-main.yml gates on workflow_run.conclusion == 'success'"
     else
         _record_fail "tag-main.yml does not gate on workflow_run.conclusion == 'success'"
@@ -226,7 +266,7 @@ sys.exit(0 if re.search(r"permissions:\s*\n\s*contents:\s*write", txt) else 1)
         _record_fail "tag-main.yml missing contents: write permission"
     fi
     if [[ "$TAG_CONTENT" =~ main-\$\{short\} ]] \
-        || echo "$TAG_CONTENT" | grep -q 'main-'; then
+        || grep -q 'main-' <<< "$TAG_CONTENT"; then
         _record_pass "tag-main.yml creates main-* tags"
     else
         _record_fail "tag-main.yml does not create main-* tags"
@@ -236,7 +276,7 @@ else
 fi
 
 test_case "record_prev_state_uses_main_tag" "record-prev-state queries git tag --list 'main-*'"
-if echo "$WF_CONTENT" | grep -qE "git tag --list ['\"]main-\\*['\"]"; then
+if grep -qE "git tag --list ['\"]main-\\*['\"]" <<< "$WF_CONTENT"; then
     _record_pass "record-prev-state uses git tag --list 'main-*'"
 else
     _record_fail "record-prev-state does not query git tag --list 'main-*'"
@@ -256,12 +296,12 @@ sys.exit(0 if (has_push and has_dispatch and has_target_app and has_force_rollba
 else
     _record_fail "workflow missing push, workflow_dispatch, target_app, or force_rollback"
 fi
-if echo "$WF_CONTENT" | grep -qE 'inputs\.target_app'; then
+if grep -qE 'inputs\.target_app' <<< "$WF_CONTENT"; then
     _record_pass "job references \${{ inputs.target_app }}"
 else
     _record_fail "job does not reference inputs.target_app"
 fi
-if echo "$WF_CONTENT" | grep -qE 'inputs\.force_rollback'; then
+if grep -qE 'inputs\.force_rollback' <<< "$WF_CONTENT"; then
     _record_pass "job references \${{ inputs.force_rollback }}"
 else
     _record_fail "job does not reference inputs.force_rollback"
@@ -733,13 +773,14 @@ test_case "prober_secrets_wired" "deploy-production.yml uses STACKS_PROBER_* sec
 if [[ "$WF_CONTENT" == *"secrets.STACKS_PROBER_EMAIL"* ]]; then
     _record_pass "workflow references secrets.STACKS_PROBER_EMAIL"
 else
-    _record_fail "workflow must reference secrets.STACKS_PROBER_EMAIL (Phase 1 of #138)"
+    _record_fail "workflow must reference secrets.STACKS_PROBER_EMAIL"
 fi
 
 if [[ "$WF_CONTENT" == *"secrets.STACKS_PROBER_PASSWORD"* ]]; then
     _record_pass "workflow references secrets.STACKS_PROBER_PASSWORD"
 else
-    _record_fail "workflow must reference secrets.STACKS_PROBER_PASSWORD (Phase 1 of #138)"
+    _record_fail "workflow must reference secrets.STACKS_PROBER_PASSWORD — the prober signs in
+        as its own least-privilege account, never as the owner"
 fi
 
 PROBE_SEED_EMAIL_LINE="$(printf '%s\n' "$WF_CONTENT" | grep -E '^\s*PROBE_SEED_EMAIL:' | head -1 || true)"
@@ -750,7 +791,9 @@ if [[ -n "$PROBE_SEED_EMAIL_LINE" ]]; then
         _record_fail "PROBE_SEED_EMAIL must reference secrets.STACKS_PROBER_EMAIL (got: '$PROBE_SEED_EMAIL_LINE')"
     fi
     if [[ "$PROBE_SEED_EMAIL_LINE" == *"PROD_OWNER_EMAIL"* ]]; then
-        _record_fail "PROBE_SEED_EMAIL must NOT reference PROD_OWNER_EMAIL — owner password leak path closed by #138 Phase 1 (got: '$PROBE_SEED_EMAIL_LINE')"
+        _record_fail "PROBE_SEED_EMAIL must NOT reference PROD_OWNER_EMAIL — seeding the probe
+            with the owner identity puts the owner credential on the probe path (got:
+            '$PROBE_SEED_EMAIL_LINE')"
     else
         _record_pass "PROBE_SEED_EMAIL no longer references PROD_OWNER_EMAIL"
     fi
@@ -766,7 +809,9 @@ if [[ -n "$PROBE_SEED_PASSWORD_LINE" ]]; then
         _record_fail "PROBE_SEED_PASSWORD must reference secrets.STACKS_PROBER_PASSWORD (got: '$PROBE_SEED_PASSWORD_LINE')"
     fi
     if [[ "$PROBE_SEED_PASSWORD_LINE" == *"PROD_OWNER_PASSWORD"* ]]; then
-        _record_fail "PROBE_SEED_PASSWORD must NOT reference PROD_OWNER_PASSWORD — owner password leak path closed by #138 Phase 1 (got: '$PROBE_SEED_PASSWORD_LINE')"
+        _record_fail "PROBE_SEED_PASSWORD must NOT reference PROD_OWNER_PASSWORD — the probe
+            would then be authenticating with the owner credential (got:
+            '$PROBE_SEED_PASSWORD_LINE')"
     else
         _record_pass "PROBE_SEED_PASSWORD no longer references PROD_OWNER_PASSWORD"
     fi
@@ -784,7 +829,7 @@ elif [[ -f "$DEPLOY_STACK_SCRIPT_PHASE1" ]] \
 fi
 case "$SEED_PROBER_FOUND" in
     yes-*) _record_pass "seed_prober is invoked in the deploy chain ($SEED_PROBER_FOUND)" ;;
-    no)    _record_fail "seed_prober must be invoked alongside seed_prod (in deploy-production.yml or scripts/deploy-stack.sh) — Phase 1 of #138" ;;
+    no)    _record_fail "seed_prober must be invoked alongside seed_prod (in deploy-production.yml or scripts/deploy-stack.sh) — without it the prober account does not exist and the probe falls back to owner credentials" ;;
 esac
 
 test_case "actionlint_clean_phase4" "actionlint passes on deploy-production.yml when available"

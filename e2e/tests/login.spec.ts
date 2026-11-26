@@ -1,5 +1,5 @@
-import { test, expect } from "@playwright/test";
-import { registerViaApi, uniqueEmail } from "./helpers";
+import { test, expect } from "./fixtures";
+import { hasSessionCookie, registerViaApi, uniqueEmail } from "./helpers";
 
 const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
@@ -131,10 +131,10 @@ test.describe("Unconfirmed-email login", () => {
     await expect(error).not.toContainText("The door remains shut");
 
     await expect(page).toHaveURL(/\/login/);
-    const stored = await page.evaluate(() =>
-      localStorage.getItem("stacks-auth")
-    );
-    expect(stored).toBeFalsy();
+    expect(
+      await hasSessionCookie(page),
+      "a refused sign-in must leave no session behind"
+    ).toBe(false);
   });
 });
 

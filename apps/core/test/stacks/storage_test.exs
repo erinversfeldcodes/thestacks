@@ -52,17 +52,6 @@ defmodule Stacks.StorageTest do
     end
   end
 
-  describe "store_cover/3" do
-    test "stores cover with isbn-based key" do
-      isbn = "9780743273565"
-      data = "cover image bytes"
-
-      assert {:ok, key} = Storage.store_cover(isbn, data)
-      assert key == "covers/#{isbn}-cover.jpg"
-      assert Mock.get(key) == data
-    end
-  end
-
   describe "list_objects/1" do
     test "returns only the keys under the prefix" do
       Mock.seed("exports/alice/1-a.json", "{}")

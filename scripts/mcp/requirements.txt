@@ -1,1 +1,15 @@
-mcp>=1.26.0
+# ⛔ UPPER BOUND, BECAUSE THE CODE USES THE 1.x API. `mcp` 2.x renamed
+# `FastMCP` to `MCPServer` and moved `mcp.server.fastmcp` to
+# `mcp.server.mcpserver`; `project_tools.py` imports the old path, so an
+# unbounded `mcp>=1.26.0` installs a version this code cannot run against.
+#
+# ⚠️ It broke in CI and not locally, and that asymmetry is the point: the
+# local venv was created when 1.26.0 was current and still holds it, while CI
+# resolves the range fresh on every run. A requirement with no ceiling is a
+# promise that every future major release stays compatible — which is exactly
+# what a major release is allowed to break.
+#
+# ⚖️ Pinned rather than migrated: moving to the 2.x API is a real change to
+# `project_tools.py` with its own testing, not a CI unblock. Raise the ceiling
+# deliberately, with that migration, rather than by deleting this line.
+mcp>=1.26.0,<2

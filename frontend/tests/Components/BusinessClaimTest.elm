@@ -95,7 +95,7 @@ suite =
                         |> Query.find [ claim ]
                         |> Expect.all
                             [ Query.has [ Selector.attribute (Attr.href "/listing-removal") ]
-                            , Query.has [ Selector.text "Is this your business?" ]
+                            , Query.has [ Selector.exactText "Is this your business?" ]
                             ]
             ]
         , describe "where prices name a shop"
@@ -103,7 +103,7 @@ suite =
                 \() ->
                     renderPrices (Success pricedAtOneStore)
                         |> Expect.all
-                            [ Query.has [ Selector.text "Exclusive Books" ]
+                            [ Query.has [ Selector.exactText "Exclusive Books" ]
                             , Query.has [ claim ]
                             ]
             , test "no editions means no shop was named, so no opt-out is offered" <|

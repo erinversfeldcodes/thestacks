@@ -30,9 +30,9 @@ suite =
         ]
 
 
-token : String
+token : Api.Credentials
 token =
-    "test-token"
+    TestHelpers.creds "test-token"
 
 
 start : ProgramTest.ProgramTest Privacy.Model Privacy.Msg (SimulatedEffect Privacy.Msg)
@@ -76,7 +76,7 @@ showsExportButton =
         \() ->
             start
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Export My Data" ]
+                    [ Selector.exactText "Export My Data" ]
 
 
 showsLoadingOnClick : Test
@@ -86,7 +86,7 @@ showsLoadingOnClick =
             start
                 |> ProgramTest.clickButton "Export My Data"
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Preparing your export…" ]
+                    [ Selector.exactText "Preparing your export…" ]
 
 
 showsQueuedOnSuccess : Test
@@ -112,4 +112,4 @@ showsErrorOnFailure =
                     "/api/gdpr/export"
                     Http.NetworkError_
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We couldn't queue your export. Please try again." ]
+                    [ Selector.exactText "We couldn't queue your export. Please try again." ]

@@ -1,4 +1,4 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page } from "./fixtures";
 import { suiteAuthFile, assertSeedOrSkip } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("editions") });
@@ -36,10 +36,7 @@ async function openBookOverlayFromCatalogue(page: Page, bookId: string): Promise
 async function findPlacedBookId(page: Page): Promise<string | null> {
   await page.goto("/library");
   return page.evaluate(async () => {
-    const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-    const resp = await fetch("/api/bookshelves/library", {
-      headers: { Authorization: `Bearer ${auth.token}` },
-    });
+    const resp = await fetch("/api/bookshelves/library");
     if (!resp.ok) return null;
     const data = await resp.json();
     const allPlacements = (data.shelves ?? []).flatMap((s: any) => s.placements ?? []);
@@ -197,10 +194,7 @@ test.describe("Book Detail — Formats on My Shelf", () => {
   test("formats section NOT visible for unplaced books", async ({ page }) => {
     await page.goto("/catalogue");
     const unplacedBookId = await page.evaluate(async () => {
-      const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      const placementsResp = await fetch("/api/placements/mine", {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
+      const placementsResp = await fetch("/api/placements/mine");
       const placementsData = placementsResp.ok
         ? await placementsResp.json()
         : { placements: [] };

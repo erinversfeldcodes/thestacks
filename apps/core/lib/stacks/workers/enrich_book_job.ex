@@ -9,7 +9,7 @@ defmodule Stacks.Workers.EnrichBookJob do
       in place. Emits `book.enriched` so caches invalidate.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 5
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 5
 
   require Logger
 

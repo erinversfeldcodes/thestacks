@@ -26,7 +26,7 @@ import Types.Shelf exposing (Shelf)
 -}
 browse : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 browse =
-    ProgramTest.start () (profileShelfProgram (Just "viewer-token") "alice" "library")
+    ProgramTest.start () (profileShelfProgram (Just (TestHelpers.creds "viewer-token")) "alice" "library")
 
 
 browseAnon : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
@@ -145,11 +145,11 @@ lookOnlySpineClick =
                 ( model, _ ) =
                     Bookshelf.init
                         (Bookshelf.profileConfig "alice" "library")
-                        (Just "viewer-token")
+                        (Just (TestHelpers.creds "viewer-token"))
                         "viewer-user-id"
 
                 ( _, _, outMsg ) =
-                    Bookshelf.update (Bookshelf.BookClicked testBook) model
+                    Bookshelf.update (Bookshelf.BookClicked testBook) model (Just (TestHelpers.creds "viewer-token"))
             in
             Expect.equal outMsg Bookshelf.NoOut
 
@@ -229,7 +229,7 @@ ownerMutationIsObservable : Test
 ownerMutationIsObservable =
     test "owner_mutation_is_observable: the SAME harness in owner mode DOES issue a shelf POST — so the assertion below can fail" <|
         \() ->
-            ProgramTest.start () (libraryProgram (Just "owner-token"))
+            ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "owner-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/bookshelves/library"
                     (simulateBookshelfResponse [ testPlacement ])
@@ -309,7 +309,7 @@ driveOrganiser : Bookshelf.Config -> List ShelfOrganiser.Msg -> ( Bookshelf.Mode
 driveOrganiser config drive =
     let
         ( initial, _ ) =
-            Bookshelf.init config (Just "viewer-token") "viewer-user-id"
+            Bookshelf.init config (Just (TestHelpers.creds "viewer-token")) "viewer-user-id"
 
         ( loaded, _, _ ) =
             Bookshelf.update
@@ -317,11 +317,12 @@ driveOrganiser config drive =
                     (Ok { shelves = twoShelves, visibility = "owner" })
                 )
                 initial
+                (Just (TestHelpers.creds "viewer-token"))
 
         step subMsg ( model, _ ) =
             let
                 ( next, cmd, _ ) =
-                    Bookshelf.update (Bookshelf.OrganiserMsg subMsg) model
+                    Bookshelf.update (Bookshelf.OrganiserMsg subMsg) model (Just (TestHelpers.creds "viewer-token"))
             in
             ( next, cmd )
     in

@@ -76,6 +76,29 @@ defmodule Stacks.Enrichment do
     :stale_after
   ]
 
+  # ⛔ The sanctioned-source policy, enforced where the
+  # write is — not in a fetcher, because a policy enforced only in the fetcher
+  # lasts until the next fetcher, exactly as the ISBN hard gate lives in the
+  # write (`Books.merge_edition/2`) rather than its callers. A source is
+  # sanctioned only when we hold a standing, checkable right: open data, an
+  # official API within its terms, consent, or a syndication feed. The proto
+  # `ReviewSource` enum still names GOODREADS and STORYGRAPH (field numbers are
+  # forever), but no sanctioned write may produce them — this is why.
+  @sanctioned_sources ~w(open_library reddit partner author_rss)
+
+  # Sources with a FIXED origin are pinned to their host(s); a snapshot cannot
+  # claim one of these while linking elsewhere. `partner` and `author_rss` carry
+  # variable hosts (their right comes from consent/syndication, not one domain),
+  # so they are validated only for a well-formed http(s) URL.
+  @source_hosts %{
+    "open_library" => ["openlibrary.org"],
+    "reddit" => ["reddit.com", "redd.it"]
+  }
+
+  @doc "The review sources we hold a standing, checkable right to."
+  @spec sanctioned_sources() :: [String.t()]
+  def sanctioned_sources, do: @sanctioned_sources
+
   @doc "Changeset for creating or updating a review snapshot."
   @spec review_snapshot_changeset(ReviewSnapshot.t(), map()) :: Ecto.Changeset.t()
   def review_snapshot_changeset(snapshot, attrs) do
@@ -83,8 +106,120 @@ defmodule Stacks.Enrichment do
     |> cast(attrs, @review_snapshot_required_fields ++ @review_snapshot_optional_fields)
     |> validate_required(@review_snapshot_required_fields)
     |> validate_length(:summary, max: 500)
+    |> validate_inclusion(:source, @sanctioned_sources,
+      message: "is not a sanctioned review source"
+    )
+    |> validate_source_url_host()
     |> foreign_key_constraint(:book_id)
   end
+
+  defp validate_source_url_host(changeset) do
+    source = get_field(changeset, :source)
+    url = get_field(changeset, :source_url)
+
+    cond do
+      is_nil(source) or is_nil(url) ->
+        # required-field validation already reports the missing value.
+        changeset
+
+      not Map.has_key?(@source_hosts, source) ->
+        # variable-host sanctioned source (partner / author_rss): require a
+        # parseable http(s) URL, but do not pin a domain it may legitimately vary.
+        if parseable_http_url?(url),
+          do: changeset,
+          else: add_error(changeset, :source_url, "is not a valid http(s) URL")
+
+      host_allowed?(url, Map.fetch!(@source_hosts, source)) ->
+        changeset
+
+      true ->
+        add_error(
+          changeset,
+          :source_url,
+          "host does not belong to the #{source} source — a snapshot may not claim a sanctioned source while linking elsewhere"
+        )
+    end
+  end
+
+  defp parseable_http_url?(url) do
+    case URI.parse(url) do
+      %URI{scheme: s, host: h} when s in ["http", "https"] and is_binary(h) and h != "" -> true
+      _ -> false
+    end
+  end
+
+  defp host_allowed?(url, allowed) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) ->
+        host = String.downcase(host)
+        Enum.any?(allowed, fn a -> host == a or String.ends_with?(host, "." <> a) end)
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
+  The latest review snapshot per source for a book, newest first.
+
+  ⛔ Filters to `sanctioned_sources/0` at READ time as well as write time, so a
+  source that is DE-sanctioned (removed from the list) stops being displayed
+  without a data migration — "a source list that can only grow is not a policy"
+  A snapshot written while its source was sanctioned, whose source
+  later leaves the list, simply stops appearing.
+  """
+  @spec list_sanctioned_reviews(binary()) :: [ReviewSnapshot.t()]
+  def list_sanctioned_reviews(book_id) when is_binary(book_id) do
+    from(r in ReviewSnapshot,
+      where: r.book_id == ^book_id and r.source in ^@sanctioned_sources,
+      order_by: [desc: r.scraped_at]
+    )
+    |> Repo.all()
+    |> Enum.uniq_by(& &1.source)
+  end
+
+  @open_library_works_url "https://openlibrary.org/works"
+
+  @doc """
+  Fetch Open Library ratings for a book's OL work and store them as the
+  `open_library` review snapshot (the preferred first sanctioned source). Open Library returns an average rating and a count and no
+  sentiment text, so the snapshot carries a rating and a count and nothing it
+  would have to summarise. The write goes through `review_snapshot_changeset/2`,
+  so the sanctioned-source gate applies to this path like any other.
+  """
+  @spec fetch_open_library_reviews(binary(), binary()) ::
+          {:ok, ReviewSnapshot.t()} | {:error, term()}
+  def fetch_open_library_reviews(book_id, work_id)
+      when is_binary(book_id) and is_binary(work_id) do
+    url = "#{@open_library_works_url}/#{work_id}/ratings.json"
+
+    case review_http_client().get(url) do
+      {:ok, %{"summary" => %{"count" => count} = summary}}
+      when is_integer(count) and count > 0 ->
+        %ReviewSnapshot{}
+        |> review_snapshot_changeset(%{
+          book_id: book_id,
+          source: "open_library",
+          source_url: "#{@open_library_works_url}/#{work_id}",
+          rating: summary["average"],
+          rating_count: count,
+          scraped_at: DateTime.utc_now()
+        })
+        |> Repo.insert(
+          on_conflict: {:replace, [:rating, :rating_count, :source_url, :scraped_at]},
+          conflict_target: [:book_id, :source]
+        )
+
+      {:ok, _} ->
+        {:error, :no_ratings}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp review_http_client,
+    do: Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient)
 
   @price_snapshot_required_fields [
     :book_edition_id,

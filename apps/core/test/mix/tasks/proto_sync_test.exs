@@ -606,6 +606,40 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert slug =~ ~r/_and_\d+_more_to_users$/
     end
 
+    test "keeps a whole name, and still fits, at the longest column Postgres allows" do
+      # The invariant the implementation states: keep whole names only, and
+      # always keep at least ONE, so the slug can never degenerate to
+      # `add__and_1_more_to_x` — a filename and a module name with nothing in
+      # them saying what the migration does.
+      #
+      # The capping test above proves a name survives for a 29-column input. It
+      # cannot reach the case where the FIRST name alone exceeds the budget,
+      # which is the input that would produce the empty slug.
+      #
+      # 63 bytes is the real ceiling, not an arbitrary large number: a column
+      # name is a Postgres identifier and `max_identifier_length` is 63, so no
+      # longer name can reach this function from a migration. (The longest in
+      # the schema today is 28.) Past that ceiling the two invariants genuinely
+      # conflict — keeping a 300-byte name whole produces a 343-byte filename
+      # the filesystem will not take — and the implementation prefers the whole
+      # name. That is the right preference and it is unreachable, so this test
+      # pins the boundary rather than the impossible case.
+      longest_possible_column = String.duplicate("a", 63)
+
+      slug = MigrationGenerator.add_columns_slug(fields_named([longest_possible_column]), "users")
+
+      refute slug =~ ~r/^add__/,
+             "the slug lost its only column name and says nothing about the migration: " <>
+               inspect(slug)
+
+      assert String.starts_with?(slug, "add_a")
+
+      filename = "20260728000000_#{slug}.exs"
+      assert byte_size(filename) < 255, "the filename is unusable at #{byte_size(filename)} bytes"
+
+      assert byte_size("Elixir.Core.Repo.Migrations." <> Macro.camelize(slug)) < 255
+    end
+
     test "is deterministic for the same field set" do
       names = Enum.map(1..40, &"some_reasonably_long_column_name_#{&1}")
       fields = fields_named(names)
@@ -649,15 +683,22 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :metadata, :map"
 
       assert output =~
-               ~s|add :occurred_at, :utc_datetime_usec, null: false, default: fragment("NOW()")|
+               ~s|add :occurred_at, :timestamptz, null: false, default: fragment("NOW()")|
 
-      assert output =~ "add :published_at, :utc_datetime_usec"
+      assert output =~ "add :published_at, :timestamptz"
       refute output =~ "timestamps("
       assert output =~ "idx_event_log_type_agg"
-      assert output =~ "concurrently: true"
       assert output =~ "desc: :occurred_at"
-      assert output =~ "@disable_ddl_transaction true"
-      assert output =~ "@disable_migration_lock true"
+
+      # A create-table migration runs in a transaction, which means its indexes
+      # cannot be CONCURRENTLY — and must not be. See the generator's own note:
+      # the table is brand new, so there is no concurrent reader for a
+      # concurrent build to spare, and opting out of the transaction to get one
+      # is what turned a mid-migration failure into a half-created table with no
+      # `schema_migrations` row.
+      refute output =~ "concurrently: true"
+      refute output =~ "@disable_ddl_transaction"
+      refute output =~ "@disable_migration_lock"
       refute output =~ "CREATE INDEX idx_event_log"
       assert output =~ "DO NOT EDIT MANUALLY"
       assert output =~ "def down"
@@ -678,7 +719,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :source_name, :text, null: false"
       assert output =~ "add :consecutive_failures, :integer, null: false, default: 0"
       assert output =~ ~s|add :status, :text, null: false, default: "healthy"|
-      assert output =~ "timestamps(type: :utc_datetime_usec)"
+      assert output =~ "timestamps(type: :timestamptz)"
       assert output =~ "unique_index(:source_health_checks"
       assert output =~ "GRANT SELECT ON op.source_health_checks TO stacks_dbt"
     end
@@ -791,7 +832,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
         def change do
           create table(:test_timestamps, prefix: "op") do
             add :name, :text
-            timestamps(type: :utc_datetime_usec)
+            timestamps(type: :timestamptz)
           end
         end
       end
@@ -1390,9 +1431,15 @@ defmodule Mix.Tasks.Proto.SyncTest do
           "      - name: id\n" <>
           "        description: PK."
 
+      # `stg_new_table` is a synthetic name fed to the merge function, not a
+      # reference to a model on disk — marked so the dbt drift gate's
+      # Elixir-reference check can tell an invented fixture from a name left
+      # behind by a deletion.
+      # NO SUCH DBT MODEL
       merged = SchemaYmlGenerator.merge(existing, %{"stg_new_table" => new_block})
 
       assert merged =~ "stg_books"
+      # NO SUCH DBT MODEL
       assert merged =~ "stg_new_table"
     end
   end
@@ -1581,6 +1628,259 @@ defmodule Mix.Tasks.Proto.SyncTest do
       refute output =~ "edition_count: struct.edition_count"
 
       refute output =~ "password_hash: struct.password_hash"
+    end
+  end
+
+  describe "no_index on a foreign key" do
+    # ⚠️ This affordance cannot be proven by `mix proto.sync --check`, and that
+    # is the whole reason it was needed.
+    #
+    # `--check` diffs GENERATED output against the files it would generate. A
+    # create-table migration that already exists is not regenerated, so a
+    # single-column FK index deleted from it by hand is invisible: the manifest
+    # says "index", the database says none, and the next regeneration silently
+    # reinstates it. The only thing that can see the flag is a test that calls
+    # the generator.
+    defp table_with(overrides, indexes \\ []) do
+      %{
+        table_name: "widgets",
+        schema_prefix: "op",
+        proto_file: "test.proto",
+        proto_message: "Widget",
+        field_overrides: overrides,
+        indexes: indexes,
+        timestamps: false
+      }
+    end
+
+    defp fk(extra \\ %{}) do
+      Map.merge(%{references_table: :gadgets, on_delete: :delete_all}, extra)
+    end
+
+    test "an FK gets its own index by default" do
+      sql =
+        MigrationGenerator.generate_create_table(
+          table_with(%{gadget_id: fk()}),
+          [%{name: "gadget_id", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      assert sql =~ "create index(:widgets, [:gadget_id]",
+             "the default must stay index-on-FK — an unindexed foreign key is a slow cascade"
+    end
+
+    test "no_index: true suppresses it" do
+      sql =
+        MigrationGenerator.generate_create_table(
+          table_with(%{gadget_id: fk(%{no_index: true})}),
+          [%{name: "gadget_id", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      refute sql =~ "create index(:widgets, [:gadget_id]",
+             "no_index: true must suppress the generated single-column FK index"
+    end
+
+    test "no_index does not suppress an explicitly declared index on the same column" do
+      # The flag says "do not GENERATE one", not "this column may not be
+      # indexed" — a composite leading with it is the usual reason to set it.
+      sql =
+        MigrationGenerator.generate_create_table(
+          table_with(
+            %{gadget_id: fk(%{no_index: true})},
+            [%{name: "widgets_gadget_id_kind_index", columns: [:gadget_id, :kind]}]
+          ),
+          [%{name: "gadget_id", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      assert sql =~ "widgets_gadget_id_kind_index",
+             "an explicitly declared index must still be emitted"
+    end
+  end
+
+  describe "timestamp columns are timestamptz" do
+    # ⚠️ The project standard is "all tables UUID PKs + TIMESTAMPTZ", and it was
+    # unreachable through this generator: Ecto maps `:utc_datetime_usec` to a
+    # bare `timestamp`, so every generated table violated it by construction.
+    # Measured on the deployed database before the fix: 149 `timestamp without
+    # time zone` columns across 56 tables, against exactly one `timestamptz`.
+    test "the timestamps() pair is timestamptz, not utc_datetime_usec" do
+      sql =
+        MigrationGenerator.generate_create_table(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{},
+            indexes: [],
+            timestamps: :standard
+          },
+          [],
+          "20260101000000"
+        )
+
+      assert sql =~ "timestamps(type: :timestamptz)"
+
+      refute sql =~ ":utc_datetime_usec",
+             "the migration must not emit the Ecto type — that is what produced a bare " <>
+               "`timestamp` column for every table in the schema"
+    end
+
+    test "a standalone datetime column is timestamptz too" do
+      # The `timestamps()` pair is not the only route: a proto
+      # `google.protobuf.Timestamp` field becomes its own column via
+      # `format_migration_type/1`, and that path had the same defect.
+      sql =
+        MigrationGenerator.generate_create_table(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{},
+            indexes: [],
+            timestamps: false
+          },
+          [
+            %{
+              name: "expires_at",
+              type: "TYPE_MESSAGE",
+              type_name: ".google.protobuf.Timestamp",
+              label: "LABEL_OPTIONAL"
+            }
+          ],
+          "20260101000000"
+        )
+
+      assert sql =~ "add :expires_at, :timestamptz"
+    end
+  end
+
+  describe "generated migrations carry a timeout preamble" do
+    # scripts/security-squawk.sh stopped excluding squawk's
+    # `require-timeout-settings` rule, so a migration that does not set a
+    # lock_timeout fails the gate. Codegen has to emit the preamble or every
+    # generated migration lands red — and more importantly, a migration without
+    # one queues every later query behind its own lock wait, turning a catalog
+    # update into an outage.
+    #
+    # Both generated shapes run inside Ecto's migration transaction, so both
+    # use `SET LOCAL` — and `SET LOCAL` is the form that must be pinned, not
+    # merely preferred. A session `SET` here would survive the migration and
+    # leak a 5s `lock_timeout` into whatever the connection does next.
+    #
+    # This test previously pinned the OPPOSITE, because the create-table shape
+    # opted out of the transaction so its indexes could build CONCURRENTLY.
+    # That bought nothing — the table is created in the same migration, so
+    # there is no concurrent session to spare — and cost atomicity: a failure
+    # partway through left the table created with no `schema_migrations` row,
+    # and the retry died on `relation already exists`.
+    test "the create-table migration uses SET LOCAL, matching its transaction" do
+      sql =
+        MigrationGenerator.generate_create_table(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{},
+            indexes: [],
+            timestamps: :standard
+          },
+          [],
+          "20260101000000"
+        )
+
+      refute sql =~ "@disable_ddl_transaction",
+             "this shape runs inside Ecto's migration transaction, so a failure " <>
+               "partway through rolls the new table back instead of stranding it"
+
+      assert sql =~ ~s|execute("SET LOCAL lock_timeout = '5s'")|
+
+      # Bounded, now that nothing here builds concurrently. An index on a table
+      # created moments earlier has no rows to scan.
+      assert sql =~ ~s|execute("SET LOCAL statement_timeout = '30s'")|
+
+      # Matched on the executable form, not the bare string: the generated file
+      # also carries a comment explaining the choice, and a refute over the
+      # whole text would be satisfied by that prose.
+      refute sql =~ ~s|execute("SET lock_timeout|,
+             "a session SET outlives the migration and leaks the timeout into " <>
+               "whatever the connection does next"
+
+      # `down` drops the table, which also takes ACCESS EXCLUSIVE. A preamble on
+      # `up` alone leaves the rollback path unguarded, which is the path taken
+      # when something has already gone wrong.
+      [_, down] = String.split(sql, "def down do")
+      assert down =~ ~s|execute("SET LOCAL lock_timeout = '5s'")|
+    end
+
+    test "the add-column migration uses SET LOCAL, matching its transaction" do
+      sql =
+        MigrationGenerator.generate_add_columns(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{}
+          },
+          [%{name: "note", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      refute sql =~ "@disable_ddl_transaction",
+             "this shape runs inside Ecto's migration transaction"
+
+      assert sql =~ ~s|execute("SET LOCAL lock_timeout = '5s'")|
+      assert sql =~ ~s|execute("SET LOCAL statement_timeout = '30s'")|
+
+      [_, down] = String.split(sql, "def down do")
+      assert down =~ ~s|execute("SET LOCAL lock_timeout = '5s'")|
+    end
+
+    # The assertions above pin the strings. This one pins the thing we actually
+    # care about: that the gate accepts what codegen produces. Asserting the
+    # text alone would keep passing if squawk changed what it accepts, or if the
+    # SQL extractor stopped putting the preamble first — both of which have
+    # already happened once each.
+    @tag :tmp_dir
+    test "a generated create-table migration passes the real migration gate", %{
+      tmp_dir: tmp_dir
+    } do
+      sql =
+        MigrationGenerator.generate_create_table(
+          %{
+            table_name: "widgets",
+            schema_prefix: "op",
+            proto_file: "test.proto",
+            proto_message: "Widget",
+            field_overrides: %{},
+            indexes: [%{name: "widgets_owner_id_index", columns: [:owner_id]}],
+            timestamps: :standard
+          },
+          [%{name: "owner_id", type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}],
+          "20260101000000"
+        )
+
+      path = Path.join(tmp_dir, "20260101000000_create_widgets.exs")
+      File.write!(path, sql)
+
+      repo_root = Path.expand("../../../../..", __DIR__)
+      wrapper = Path.join(repo_root, "scripts/security-squawk-test-wrapper.sh")
+
+      {output, status} = System.cmd("bash", [wrapper, path], stderr_to_stdout: true)
+
+      if String.contains?(output, "SKIP: squawk not installed") do
+        # Recorded rather than silently passing: this test asserts nothing when
+        # the binary is absent, and saying so beats a green tick.
+        IO.puts("squawk not installed — gate acceptance not asserted")
+      else
+        assert status == 0,
+               "the generated migration was rejected by the migration gate:\n#{output}"
+      end
     end
   end
 end

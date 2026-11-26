@@ -242,7 +242,18 @@ install_tool() {
     "$TOOLS_PIP" install --quiet "$package"
 }
 
-install_tool "dbt-postgres" "dbt"
+# dbt is pinned in dbt/requirements.txt rather than floating like the tools
+# below it, because the nightly refresh workflow installs from that same file to
+# build the production warehouse. An unpinned install here meant the version the
+# models were developed against was whatever pip resolved on the day, and the
+# divergence would have surfaced as rows in production rather than as an error
+# locally.
+if [[ -x "$TOOLS_VENV/bin/dbt" ]] && "$TOOLS_VENV/bin/dbt" --version &>/dev/null; then
+    success "dbt already in venv"
+else
+    info "Installing dbt from dbt/requirements.txt into .venv-tools/..."
+    "$TOOLS_PIP" install --quiet -r "$REPO_ROOT/dbt/requirements.txt"
+fi
 install_tool "sqlfluff" "sqlfluff"
 if ! "$TOOLS_PIP" show sqlfluff-templater-dbt &>/dev/null; then
     info "Installing sqlfluff-templater-dbt into .venv-tools/..."
@@ -317,8 +328,14 @@ if [[ "$SKIP_DB" == "true" ]]; then
 else
     step "PostgreSQL"
 
+    # Captured once outside the loop: `brew services list | grep -q` would be
+    # four pipelines whose status can come back 141 instead of an answer, and a
+    # false "not started" here silently leaves a competing Postgres running on
+    # 5432 — which presents later as connection failures against the wrong
+    # server, not as a setup error.
+    _brew_services="$(brew services list 2>/dev/null || true)"
     for other in 14 15 17 18; do
-        if brew services list 2>/dev/null | grep -qE "^postgresql@${other}\s+started"; then
+        if grep -qE "^postgresql@${other}[[:space:]]+started" <<< "$_brew_services"; then
             warn "Stopping postgresql@${other} (aligning local on the canonical postgresql@16)..."
             brew services stop "postgresql@${other}" >/dev/null 2>&1 || true
         fi

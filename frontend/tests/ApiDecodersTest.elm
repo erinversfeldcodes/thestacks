@@ -1,0 +1,272 @@
+module ApiDecodersTest exposing (suite)
+
+{-| The hand-written decoders in `Api`, against the shapes their servers
+actually send.
+
+Why these needed tests at all: the project's GENERATED decoders are
+null-tolerant by construction (`oneOf [ field, succeed "" ]`), and these
+hand-written ones dropped that tolerance without checking the server honours
+it. One of them already cost a surface — a single Goodreads row with four NULL
+columns made the entire import report permanently unloadable, because a list
+decode fails whole. The same shape was latent in the import summary itself:
+`op.library_imports.filename` is a nullable column, and `filename` sits in the
+`{"import": …}` envelope, so one null would have failed the whole import page
+rather than one cell. Both sides are tolerant of it now.
+
+Each decoder gets three kinds of case: the populated shape, the server's
+nullable or absent fields, and a field that must stay strict. The strict cases
+are the point — a decoder with no required field tolerates a response that is
+not the response at all.
+
+-}
+
+import Api
+import Expect
+import Json.Decode as Decode
+import Test exposing (Test, describe, test)
+
+
+expectDecodes : Decode.Decoder a -> String -> (a -> Expect.Expectation) -> Expect.Expectation
+expectDecodes decoder json check =
+    case Decode.decodeString decoder json of
+        Ok value ->
+            check value
+
+        Err err ->
+            Expect.fail (Decode.errorToString err)
+
+
+expectFails : Decode.Decoder a -> String -> String -> Expect.Expectation
+expectFails decoder json why =
+    case Decode.decodeString decoder json of
+        Ok _ ->
+            Expect.fail why
+
+        Err _ ->
+            Expect.pass
+
+
+suite : Test
+suite =
+    describe "hand-written Api decoders"
+        [ describe "authorEventDecoder"
+            [ test "decodes a dated event at a named store" <|
+                \_ ->
+                    expectDecodes Api.authorEventDecoder
+                        """
+                        { "id": "e1", "title": "An evening with the author",
+                          "event_date": "2026-11-02T18:30:00Z",
+                          "location": "Upstairs", "url": "https://shop.test/e1",
+                          "store_name": "The Corner Shop" }
+                        """
+                        (\e -> Expect.equal (Just "The Corner Shop") e.storeName)
+            , test "a dateless event still decodes — the shop's page has the details" <|
+                \_ ->
+                    -- `op.bookstore_events.event_date` is nullable by design: a
+                    -- dateless event is listed last rather than dropped, so a
+                    -- decoder that rejected one would drop the whole list.
+                    expectDecodes Api.authorEventDecoder
+                        """
+                        { "id": "e2", "title": "Signing, date to be confirmed",
+                          "event_date": null, "location": null, "url": null,
+                          "store_name": null }
+                        """
+                        (\e -> Expect.equal Nothing e.eventDate)
+            , test "an event with no title is a decode failure" <|
+                \_ ->
+                    -- The column is NOT NULL and the title is the whole render.
+                    expectFails Api.authorEventDecoder
+                        """{ "id": "e3", "event_date": null, "location": null,
+                             "url": null, "store_name": null }"""
+                        "title must stay required — an untitled event renders as nothing"
+            ]
+        , describe "libraryImportDecoder"
+            [ test "decodes a finished import with its counts" <|
+                \_ ->
+                    expectDecodes Api.libraryImportDecoder
+                        """
+                        { "id": "i1", "status": "complete", "filename": "goodreads.csv",
+                          "row_count": 10, "processed_count": 10, "shelved_count": 7,
+                          "duplicate_count": 2, "unverified_count": 1,
+                          "unreadable_count": 0 }
+                        """
+                        (\i -> Expect.equal ( "complete", 7 ) ( i.status, i.shelvedCount ))
+            , test "a blank filename decodes — the column is nullable and the server coalesces" <|
+                \_ ->
+                    expectDecodes Api.libraryImportDecoder
+                        """
+                        { "id": "i2", "status": "enqueued", "filename": "",
+                          "row_count": 0, "processed_count": 0, "shelved_count": 0,
+                          "duplicate_count": 0, "unverified_count": 0,
+                          "unreadable_count": 0 }
+                        """
+                        (\i -> Expect.equal "" i.filename)
+            , test "a null filename decodes as blank — neither side has to remember" <|
+                \_ ->
+                    -- This test used to assert the opposite, pinning the
+                    -- strictness in place as correct and leaving the whole
+                    -- guarantee resting on one `|| ""` in one serialiser. The
+                    -- blast radius made that the wrong call: `filename` is in
+                    -- the `{"import": …}` envelope, so a null fails the entire
+                    -- import page rather than one cell. Both sides are tolerant
+                    -- now, and the server still coalesces.
+                    expectDecodes Api.libraryImportDecoder
+                        """
+                        { "id": "i3", "status": "enqueued", "filename": null,
+                          "row_count": 0, "processed_count": 0, "shelved_count": 0,
+                          "duplicate_count": 0, "unverified_count": 0,
+                          "unreadable_count": 0 }
+                        """
+                        (\i -> Expect.equal "" i.filename)
+            , test "an absent filename decodes as blank too" <|
+                \_ ->
+                    expectDecodes Api.libraryImportDecoder
+                        """
+                        { "id": "i4", "status": "enqueued",
+                          "row_count": 0, "processed_count": 0, "shelved_count": 0,
+                          "duplicate_count": 0, "unverified_count": 0,
+                          "unreadable_count": 0 }
+                        """
+                        (\i -> Expect.equal "" i.filename)
+            , test "a missing count is a decode failure" <|
+                \_ ->
+                    expectFails Api.libraryImportDecoder
+                        """{ "id": "i5", "status": "complete", "filename": "x.csv",
+                             "row_count": 1 }"""
+                        "every count must be present — a missing one would render as a wrong total"
+            ]
+        , describe "inviteStatusDecoder"
+            [ test "decodes a code bound to an address, without naming it" <|
+                \_ ->
+                    expectDecodes Api.inviteStatusDecoder
+                        """{ "expires_at": "2026-11-13T00:00:00Z", "email_bound": true }"""
+                        (\s -> Expect.equal True s.emailBound)
+            , test "a never-expiring code decodes with no expiry" <|
+                \_ ->
+                    -- A null `expires_at` means the invitation never expires,
+                    -- which is a real state the admin API can create.
+                    expectDecodes Api.inviteStatusDecoder
+                        """{ "expires_at": null, "email_bound": false }"""
+                        (\s -> Expect.equal Nothing s.expiresAt)
+            , test "a missing email_bound is a decode failure" <|
+                \_ ->
+                    -- The form's copy depends on it: defaulting it to false
+                    -- would promise any address can use a code reserved for one.
+                    expectFails Api.inviteStatusDecoder
+                        """{ "expires_at": null }"""
+                        "email_bound must stay required — a default would mislead the reader"
+            ]
+        , describe "syndicationDecoder"
+            [ test "decodes a syndication whose backlink has been recorded" <|
+                \_ ->
+                    expectDecodes Api.syndicationDecoder
+                        """
+                        { "id": "s1", "target": "substack", "method": "export",
+                          "canonical_url": "https://stacks.test/blog/p1",
+                          "syndicated_url": "https://writer.substack.com/p/post",
+                          "created_at": "2026-08-18T09:30:00Z" }
+                        """
+                        (\s -> Expect.notEqual Nothing s.syndicatedUrl)
+            , test "a syndication with no backlink yet decodes — that is the normal state" <|
+                \_ ->
+                    -- The input to record a backlink only appears against a
+                    -- syndication that has none, so rejecting this shape would
+                    -- hide the field that closes the loop.
+                    expectDecodes Api.syndicationDecoder
+                        """
+                        { "id": "s2", "target": "substack", "method": "rss",
+                          "canonical_url": "https://stacks.test/blog/p2",
+                          "syndicated_url": null,
+                          "created_at": "2026-08-18T09:30:00Z" }
+                        """
+                        (\s -> Expect.equal Nothing s.syndicatedUrl)
+            , test "a syndication with no canonical url is a decode failure" <|
+                \_ ->
+                    -- The canonical url is the entire point of the record: it is
+                    -- stored rather than derived so a host change cannot rewrite
+                    -- what the third-party copy says.
+                    expectFails Api.syndicationDecoder
+                        """{ "id": "s3", "target": "substack", "method": "rss",
+                             "syndicated_url": null,
+                             "created_at": "2026-08-18T09:30:00Z" }"""
+                        "canonical_url must stay required"
+            ]
+        , describe "adminInviteDecoder"
+            [ test "decodes a redeemed invitation with its redeemer's handle" <|
+                \_ ->
+                    expectDecodes Api.adminInviteDecoder
+                        """
+                        { "id": "v1", "code_prefix": "STK-HJMQ", "note": "Mara from the group",
+                          "invited_email": "mara@example.test", "max_uses": 1, "use_count": 1,
+                          "expires_at": "2026-11-13T00:00:00Z", "revoked_at": null,
+                          "redeemed_at": "2026-10-01T10:00:00Z",
+                          "redeemed_by_handle": "mara" }
+                        """
+                        (\i -> Expect.equal (Just "mara") i.redeemedByHandle)
+            , test "a fresh unbound invitation decodes with every optional field null" <|
+                \_ ->
+                    expectDecodes Api.adminInviteDecoder
+                        """
+                        { "id": "v2", "code_prefix": "STK-ZZZZ", "note": null,
+                          "invited_email": null, "max_uses": 5, "use_count": 0,
+                          "expires_at": null, "revoked_at": null, "redeemed_at": null,
+                          "redeemed_by_handle": null }
+                        """
+                        (\i -> Expect.equal ( 5, 0 ) ( i.maxUses, i.useCount ))
+            , test "a missing use_count is a decode failure" <|
+                \_ ->
+                    -- `use_count` against `max_uses` is how the list says a code
+                    -- is spent; a default of zero would show a spent code as live.
+                    expectFails Api.adminInviteDecoder
+                        """
+                        { "id": "v3", "code_prefix": "STK-ZZZZ", "note": null,
+                          "invited_email": null, "max_uses": 5, "expires_at": null,
+                          "revoked_at": null, "redeemed_at": null,
+                          "redeemed_by_handle": null }
+                        """
+                        "use_count must stay required — a default would show a spent code as live"
+            ]
+        , describe "importRefusal — the four refusals that share one status"
+            [ test "a wrong-format refusal carries through the headers the server found" <|
+                \_ ->
+                    Api.importRefusal
+                        """
+                        { "error": "unrecognised_format",
+                          "found_headers": ["Book Id", "Shelf", "Rating"] }
+                        """
+                        |> Expect.equal
+                            (Api.ImportUnrecognisedFormat [ "Book Id", "Shelf", "Rating" ])
+            , test "an empty export is its own refusal, not a format complaint" <|
+                \_ ->
+                    Api.importRefusal """{ "error": "no_rows" }"""
+                        |> Expect.equal Api.ImportNoRows
+            , test "a missing multipart part makes no claim about the reader's file" <|
+                \_ ->
+                    Api.importRefusal
+                        """
+                        { "error": "missing_file",
+                          "detail": "attach the CSV as multipart field \\"file\\"" }
+                        """
+                        |> Expect.equal Api.ImportUploadIncomplete
+            , test "an unreadable upload lands there too, by its prefixed token" <|
+                \_ ->
+                    -- The server interpolates the reason, so this token is
+                    -- `unreadable_upload: enoent` — never an exact match. The
+                    -- catch-all has to carry it, which is why the default is the
+                    -- claim-nothing branch rather than the format one.
+                    Api.importRefusal """{ "error": "unreadable_upload: enoent" }"""
+                        |> Expect.equal Api.ImportUploadIncomplete
+            , test "a body that is not JSON at all does not become a format complaint" <|
+                \_ ->
+                    -- A proxy's HTML error page reaching this branch must not
+                    -- tell the reader their Goodreads export is malformed.
+                    Api.importRefusal "<html>502 Bad Gateway</html>"
+                        |> Expect.equal Api.ImportUploadIncomplete
+            , test "a recognised-format refusal with no headers key still decodes" <|
+                \_ ->
+                    -- `found_headers` is read separately from `error`, so a
+                    -- missing one must not take the whole refusal with it.
+                    Api.importRefusal """{ "error": "unrecognised_format" }"""
+                        |> Expect.equal (Api.ImportUnrecognisedFormat [])
+            ]
+        ]

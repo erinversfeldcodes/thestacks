@@ -1,10 +1,11 @@
 defmodule Core.PromEx.AuthSecurityDriftTest do
   @moduledoc """
-      Drift guard for the auth & session-security dashboard-as-code (237,; grafana/auth_security.json):
-      panels may only query metric families registered by
-      `Core.PromEx.Plugins.Stacks`, and every registered 237 auth-security family must have
-      a panel. Either direction of drift — a renamed metric silently blanking
-      a panel, or a new family shipping invisible — fails CI.
+      Drift guard for the auth & session-security dashboard-as-code
+      (`grafana/auth_security.json`): panels may only query metric families
+      registered by `Core.PromEx.Plugins.Stacks`, and every registered
+      auth-security family must have a panel. Either direction of drift — a
+      renamed metric silently blanking a panel, or a new family shipping
+      invisible — fails CI.
   """
 
   use ExUnit.Case, async: true
@@ -109,7 +110,7 @@ defmodule Core.PromEx.AuthSecurityDriftTest do
           |> MapSet.difference(referenced)
 
         assert MapSet.size(missing) == 0,
-               "these new #237 auth-security families have no dashboard panel " <>
+               "these auth-security families have no dashboard panel " <>
                  "(invisible metric): " <> inspect(MapSet.to_list(missing))
       end
     end

@@ -37,7 +37,7 @@ type alias BookDetailTest =
 
 start : BookDetailTest
 start =
-    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
 
 
 formatsEndpoint : String
@@ -163,14 +163,14 @@ errorSaysItRolledBack =
                 |> ProgramTest.clickButton "Physical"
                 |> ProgramTest.simulateHttpResponse "PUT" formatsEndpoint serverError
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We couldn't save your formats, so we've put them back as they were." ]
+                    [ Selector.exactText "We couldn't save your formats, so we've put them back as they were." ]
 
 
 noPlacementSendsNothing : Test
 noPlacementSendsNothing =
     test "no_placement: a reader without a placement has no picker and sends nothing" <|
         \() ->
-            ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+            ProgramTest.start () (bookDetailProgram "book-test-001" (Just (TestHelpers.creds "test-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (TestHelpers.simulateBookDetailResponse "book-test-001" testBook)

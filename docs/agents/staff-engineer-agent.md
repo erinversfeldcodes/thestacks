@@ -1414,6 +1414,26 @@ the settings pages" is not. This is where the walkthrough-first ordering pays.
   the wrong hand. Either **serialise all probing** (readers report probe *candidates*; you probe
   them yourself, one at a time), or give probing agents **their own worktrees**. Read-only
   surveying parallelises freely — it's only the edits that collide.
+- ⚠️ **The scratchpad is SHARED, and probe scripts collide there under guessable names.** Every
+  agent in a session writes to the same scratchpad directory, so `probe.sh`, `probe2.sh`,
+  `check.sh` and `run.sh` are all names two agents will pick independently. This is not
+  hypothetical: a reviewer running sandboxed probes appended to a `probe2.sh` another agent had
+  already created, and **the existing prefix ran first** — a script that mutated the repository,
+  under a name the second agent believed it had just created. The collision is silent in both
+  directions, and the symptom shows up as an unexplained working-tree change neither agent
+  attributes to itself.
+
+  Two habits, both cheap:
+  - **Name every scratchpad file for its author and its subject** — `platform-reviewer-ports-probe.sh`,
+    not `probe2.sh`. A collision then requires two agents to pick the same long name, which does
+    not happen by accident.
+  - **Open any script that mutates the repository with a banner naming what it changes and how it
+    reverts**, so a reader who finds it half-run knows what state the tree is in. A probe script
+    with no banner is indistinguishable from a leftover, and the safe response to a leftover —
+    deleting it — is the wrong response to a probe mid-revert.
+
+  Writing a scratchpad file with `>>` is the specific hazard. Prefer `>`, or a fresh `mktemp`
+  path, so an unexpected existing file is overwritten rather than extended.
 - **Worktrees lose `notes/`** (it's gitignored). So a worktree-isolated agent can probe safely but
   cannot do Goal Grounding. Keep goal-checked work — simplification, Mode C intent findings — in
   the main tree.

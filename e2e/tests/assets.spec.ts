@@ -9,7 +9,7 @@
  * Threshold: real textures are 700KB–2MB. Stubs are 132 bytes. 10KB is a
  * conservative minimum that a 1×1 stub can never reach.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 const TEXTURE_MIN_BYTES = 10_000;
 

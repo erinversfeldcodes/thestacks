@@ -63,6 +63,42 @@ defmodule Stacks.UploadInboxTest do
       assert item.rejection_reason == nil
     end
 
+    test "an item whose photograph is still there says the retry can work", %{user: user} do
+      book = insert(:book)
+      resolved_upload(user, [book.id])
+
+      assert [%{retryable: true}] = Uploads.list_awaiting_attention(user.id)
+    end
+
+    test "an item whose photograph has been discarded says the retry CANNOT work",
+         %{user: user} do
+      # ⛔ THE RECORD OUTLIVES THE PHOTOGRAPH BY DESIGN. The row keeps its
+      # 30-day expiry; `cleanup_finished_image_bytes/1` deletes the image a day
+      # after identification goes terminal and NULLs the path. So for most of an
+      # item's life "No, try again" is an action the data cannot support, and
+      # the client has to learn that from the payload rather than from a 410
+      # after the reader has already pressed it.
+      book = insert(:book)
+      resolved_upload(user, [book.id], storage_path: nil)
+
+      assert [%{retryable: false}] = Uploads.list_awaiting_attention(user.id)
+    end
+
+    test "a FAILED item carries the same answer — a rejection can be retried too",
+         %{user: user} do
+      # ⚠️ Both inbox kinds reach the same `Verifying` screen through
+      # `Page.Upload.replayFrame`, so a flag on one kind and not the other would
+      # leave the button ungoverned on half the paths into it.
+      insert(:uploaded_image,
+        user_id: user.id,
+        status: "rejected",
+        rejection_reason: "no_isbn_found",
+        storage_path: nil
+      )
+
+      assert [%{kind: "failed", retryable: false}] = Uploads.list_awaiting_attention(user.id)
+    end
+
     test "an older row that only set book_id (no book_ids array) still carries its candidate",
          %{user: user} do
       book = insert(:book)

@@ -31,7 +31,7 @@ defmodule StacksWeb.GroupController do
     user = Guardian.Plug.current_resource(conn)
 
     case Social.get_group(group_id, user.id) do
-      nil -> conn |> put_status(:not_found) |> json(%{error: "not found"})
+      nil -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
       group -> json(conn, %{group: ProtoJSON.group(group)})
     end
   end

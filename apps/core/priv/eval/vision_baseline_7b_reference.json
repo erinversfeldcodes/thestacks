@@ -1,0 +1,53 @@
+{
+  "passed": 86,
+  "total": 122,
+  "strata": {
+    "clean_barcode": {
+      "passed": 18,
+      "total": 19
+    },
+    "negative": {
+      "passed": 20,
+      "total": 20
+    },
+    "hostile_orientation": {
+      "passed": 11,
+      "total": 12
+    },
+    "occlusion": {
+      "passed": 0,
+      "total": 1
+    },
+    "text_clutter": {
+      "passed": 1,
+      "total": 1
+    },
+    "book_adjacent": {
+      "passed": 6,
+      "total": 12
+    },
+    "clear_cover": {
+      "passed": 20,
+      "total": 22
+    },
+    "hostile_barcode": {
+      "passed": 3,
+      "total": 20
+    },
+    "illegible": {
+      "passed": 5,
+      "total": 10
+    },
+    "multiple_books": {
+      "passed": 0,
+      "total": 1
+    },
+    "hostile_typography": {
+      "passed": 2,
+      "total": 4
+    }
+  },
+  "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+  "modal_app": "https://erinversfeldcodes--thestacks-vision-refactor-vision-rede-df1ee4.us-east.modal.run",
+  "recorded_at": "2026-11-13T16:29:43.931453Z"
+}

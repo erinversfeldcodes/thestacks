@@ -96,7 +96,7 @@ parser =
         , Parser.map SettingsProfile (s "settings" </> s "profile")
         , Parser.map SettingsPassword (s "settings" </> s "password")
         , Parser.map SettingsNotifications (s "settings" </> s "notifications")
-        , -- Consent folded into Privacy (#318 TR-4): the legacy path resolves
+        , -- Consent folded into Privacy: the legacy path resolves
           Parser.map SettingsPrivacy (s "settings" </> s "consent")
         , Parser.map SettingsAuditLog (s "settings" </> s "audit-log")
         , Parser.map Insights (s "me" </> s "insights")

@@ -8,9 +8,19 @@ defmodule StacksWeb.MeInferenceController do
       resource is always `Guardian.Plug.current_resource/1`. The `:authenticated`
       pipeline returns 401 for unauthenticated requests.
 
-      The sensitive `risk_inferences` section is consent-gated: it is included only
-      when the request carries `?reveal_risk=true`, so the "show me what could be
-      inferred" action is enforced server-side.
+      The sensitive `risk_inferences` section is included only when the request
+      carries `?reveal_risk=true`, so the "show me what could be inferred"
+      action is enforced server-side rather than by the client choosing not to
+      render it.
+
+      ⚠️ **That is a deliberate-request gate, NOT `ConsentCheck`.** This
+      docstring used to call it "consent-gated", which reads as a consent record
+      being checked — `Stacks.GDPR.Consent` is feature-parameterised and
+      `risk_inferences` is not one of its features. Nothing is wrong with the
+      behaviour: this is the subject's own data, shown to them, only when they
+      ask. But a reader who believed a consent record stood behind it would be
+      wrong, and would build the next sensitive section on a gate that does not
+      exist.
   """
 
   use CoreWeb, :controller

@@ -30,7 +30,7 @@ import TestHelpers
 
 startLibrary : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startLibrary =
-    ProgramTest.start () (libraryProgram (Just "test-token"))
+    ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
 
 
 suite : Test
@@ -73,7 +73,7 @@ shelfLabelRendered =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "shelf-label" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Library" ]
+                    [ Selector.exactText "Library" ]
 
 
 {-| Books from the API must render inside a.bookcase structure.
@@ -153,4 +153,4 @@ forbiddenTriggersAgeGate =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "age-gate" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Age Verification Required" ]
+                    [ Selector.exactText "Age Verification Required" ]

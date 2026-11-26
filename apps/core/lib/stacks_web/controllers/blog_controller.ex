@@ -23,6 +23,14 @@ defmodule StacksWeb.BlogController do
   The bare call used to be a 422 demanding `user_id`, which left the platform
   with no answer to "what is written here" for a reader who does not already
   know whose blog they want. It now answers with what that reader may read.
+
+  The discovery branch is paginated by an opaque `after` cursor and returns
+  `next_cursor`, null at the end of the corpus. A page may be SHORT of the window
+  without being the last one — the visibility filter runs after the window is
+  read — so `next_cursor`, not the post count, is what says whether to ask again.
+
+  The author branch (`user_id`) is one author's archive and is not paginated, so
+  it carries no cursor.
   """
   @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def index(conn, %{"user_id" => user_id}) do
@@ -31,10 +39,23 @@ defmodule StacksWeb.BlogController do
     json(conn, %{posts: Enum.map(posts, &ProtoJSON.blog_post/1)})
   end
 
-  def index(conn, _params) do
+  def index(conn, params) do
     viewer = build_viewer(conn)
-    posts = Blog.list_public_posts(viewer)
-    json(conn, %{posts: Enum.map(posts, &ProtoJSON.blog_post/1)})
+
+    case Blog.page_public_posts(viewer, after: params["after"]) do
+      {:ok, %{posts: posts, next_cursor: next_cursor}} ->
+        json(conn, %{
+          posts: Enum.map(posts, &ProtoJSON.blog_post/1),
+          next_cursor: next_cursor
+        })
+
+      # Not a silent restart from the top: a client looping on a cursor it cannot
+      # form would page the first window forever and look like a slow feed.
+      {:error, :invalid_cursor} ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: "invalid cursor"})
+    end
   end
 
   @doc "GET /api/blog/posts/:id — show a single post."
@@ -56,7 +77,36 @@ defmodule StacksWeb.BlogController do
           |> Enum.filter(fn a -> is_owner || a.visible end)
           |> Enum.map(&ProtoJSON.blog_association(&1, is_owner))
 
-        json(conn, %{post: ProtoJSON.blog_post(post), associations: associations})
+        # ⚖️ The outcome is told to the OWNER only. A reader looking at someone
+        # else's post has no use for "we could not link books to this post",
+        # and it would disclose that the author ran the assistant at all.
+        outcome = if is_owner, do: Blog.latest_association_outcome(post.id)
+
+        body = %{
+          post: ProtoJSON.blog_post(post),
+          associations: associations
+        }
+
+        # ⛔ THE KEY IS OMITTED, NOT SENT AS `null`. `null` is not one of the
+        # six values the enum declares, and sending it worked only by accident
+        # of composition: the generated `decodeAssociationOutcome` opens with
+        # `D.string`, which FAILS on `null`, and the client's `oneOf` absorbed
+        # that failure into UNSPECIFIED. So every non-owner's view of every post
+        # depended on a decode error being swallowed — and the contract told a
+        # client to expect UNSPECIFIED, which is not what the wire carried.
+        #
+        # ⚖️ Omitting it is the canonical proto3 JSON shape for a zero value,
+        # and it makes the client's fallback correct BY DESIGN: absent really is
+        # what this endpoint produces when there is nothing to say. A
+        # hand-written or non-Elm client built from the `.proto` now sees the
+        # shape the `.proto` describes.
+        #
+        # ⬛ Both cases that reach here are genuinely "nothing to say": a
+        # non-owner, who is not told; and an owner whose post has no finished
+        # pass, which is not the same fact as a pass that found nothing.
+        body = if outcome, do: Map.put(body, :association_outcome, outcome), else: body
+
+        json(conn, body)
     end
   end
 
@@ -149,6 +199,30 @@ defmodule StacksWeb.BlogController do
       conn
       |> put_status(201)
       |> json(%{syndication: format_syndication(syndication)})
+    end
+  end
+
+  @doc """
+      GET /api/blog/posts/:id/syndications — what has already been syndicated.
+
+      Without this the POSSE loop only half closed: `record/2` persisted a row and
+      `set_syndicated_url/2` filled in the backlink, but nothing could read either
+      back, so the panel showed the recorded URL until the page was reloaded and then
+      forgot it permanently — and the field for entering one disappeared with it. The
+      writer's only way back was to export again, writing a duplicate row.
+
+      `Syndication.list_syndications/1` had existed since the feature shipped, with a
+      `@spec` and no callers at all.
+  """
+  @spec list_syndications(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def list_syndications(conn, %{"id" => id}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    with {:ok, post} <- fetch_post(id),
+         :ok <- check_ownership(post, user) do
+      json(conn, %{
+        syndications: Enum.map(Syndication.list_syndications(post), &format_syndication/1)
+      })
     end
   end
 

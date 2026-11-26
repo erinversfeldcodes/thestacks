@@ -9,7 +9,7 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
       then attempts to discover an RSS feed at the discovered URL.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

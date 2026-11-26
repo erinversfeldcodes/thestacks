@@ -56,7 +56,7 @@ Ground every finding in these — cite the file:line the change must touch, not 
 - **Warehouse / dbt** — personal free-text must NOT enter the `wh`/staging models: exclude it from
   the `stg_*` model and mark the column, but still declare it on the source (`retrieval_log.query`
   is the pattern). `wh`-schema models must be anonymised.
-- **Retention** — 30-day image retention (`ImageRetention`); consent timestamps recorded.
+- **Retention** — `ImageRetention` keeps TWO deadlines: the photograph is deleted ~24h after identification reaches a terminal state (`cleanup_finished_image_bytes/1`, row kept, `image.bytes_discarded`), the record at 30 days (`cleanup_expired_images/1`, `image.expired`). A change that conflates them, or that adds a new reader of the image BYTES past the retry window, is a finding. Consent timestamps recorded.
 - **Partner boundary** — partner→platform is one-directional; partners never see user data.
 
 ## The review — per changed data surface

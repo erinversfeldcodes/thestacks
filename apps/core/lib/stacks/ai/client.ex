@@ -14,16 +14,22 @@ defmodule Stacks.AI.Client do
       fault.
   """
 
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
   alias Stacks.AI.ClientBehaviour
+  alias Stacks.AI.GpuWindow
   alias Stacks.AI.VisionError
-  alias Stacks.Proto.Vision.AssociateRequest
-  alias Stacks.Proto.Vision.ExtractRequest
+  alias Stacks.Costs
+  alias Stacks.Proto.Enums.AnalysisTier
 
   @behaviour ClientBehaviour
 
   @fuse_name :vision_fuse
-  @default_modal_cost_per_call_cents 1
+
+  # The tiers this build knows; a label outside this set collapses to "other".
+  # Sourced from the proto enum (its single owner) rather than hand-copied, so a
+  # new AnalysisTier value widens `bounded_tier/1` automatically and there is no
+  # second list to drift from the first.
+  @known_tiers AnalysisTier.values()
 
   @modal_function_timeout_ms 300_000
 
@@ -63,7 +69,7 @@ defmodule Stacks.AI.Client do
   end
 
   defp do_call_vision(endpoint, payload) do
-    case BudgetTracker.check_budget(:modal) do
+    case Budget.check_budget(:modal) do
       :ok ->
         case :fuse.ask(@fuse_name, :sync) do
           :ok -> make_vision_request(endpoint, payload)
@@ -75,44 +81,6 @@ defmodule Stacks.AI.Client do
     end
   end
 
-  @doc """
-      POST /associate — asks the vision service to associate a known ISBN with a cover image.
-      Returns {:ok, job_id} on success, {:error, reason} on failure.
-
-      Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
-      Request/response shape: `AssociateRequest` / `AssociateResponse` in vision.proto.
-      The result arrives later via the InternalController callback (`AssociateCallback`).
-  """
-  @spec associate_isbn(String.t(), String.t(), String.t(), String.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  def associate_isbn(isbn, book_id, edition_id, cover_image_url) do
-    payload = %AssociateRequest{
-      isbn: isbn,
-      book_id: book_id,
-      edition_id: edition_id,
-      cover_image_url: cover_image_url
-    }
-
-    case call_vision("associate", payload) do
-      {:ok, %{"job_id" => job_id}} -> {:ok, job_id}
-      {:ok, other} -> {:error, {:unexpected_response, other}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @doc """
-      POST /extract — extract ISBNs from a book cover image at a URL.
-      Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
-  """
-  @spec extract_from_url(String.t()) :: {:ok, map()} | {:error, term()}
-  def extract_from_url(image_url) do
-    case call_vision("extract_isbn", %ExtractRequest{image_url: image_url}) do
-      {:ok, %{"books" => _} = resp} -> {:ok, resp}
-      {:ok, other} -> {:error, {:unexpected_response, other}}
-      {:error, _} = err -> err
-    end
-  end
-
   defp auth_token(method, path) do
     ts = System.os_time(:second) |> Integer.to_string()
     secret = Application.fetch_env!(:core, :vision_hmac_secret)
@@ -121,10 +89,25 @@ defmodule Stacks.AI.Client do
     "#{ts}.#{sig}"
   end
 
-  defp endpoint_path("is_book"), do: "classify"
-  defp endpoint_path("extract_isbn"), do: "extract"
+  # `/analyze` is the ONE endpoint the sidecar serves. Two caller-facing
+  # operation names still resolve to it, which is deliberate: the name says what
+  # the caller is asking, the path says who answers.
+  #
+  # ⚠️ "is_book" mapped to `/classify` until 2026-10-15. That endpoint is gone,
+  # so the mapping had become a route to a 404. ⚠️ The 404 was not what made it
+  # harmless, and saying so would understate it: the single production caller is
+  # `blow_all_fuses/1`, which sets `vision_service_url` to `http://localhost:1`
+  # BEFORE calling, so the probe never reaches a server and the resolved path
+  # never mattered. Pointing it at `/analyze` keeps the question askable and
+  # stops the table describing a service that no longer exists.
+  #
+  # ⚠️ Do NOT collapse this to a single `endpoint_path(_), do: "analyze"`. The
+  # catch-all raise below is load-bearing: an unrecognised operation must fail at
+  # the call site rather than silently reach a real endpoint, and a test pins it.
+  defp endpoint_path("is_book"), do: "analyze"
   defp endpoint_path("analyze"), do: "analyze"
-  defp endpoint_path("associate"), do: "associate"
+  defp endpoint_path("embed"), do: "embed"
+  defp endpoint_path("extract_document"), do: "extract-document"
 
   defp endpoint_path(other) do
     raise ArgumentError, "unknown vision endpoint: #{inspect(other)}"
@@ -162,17 +145,40 @@ defmodule Stacks.AI.Client do
         request_timeout: @receive_timeout_ms
       )
 
+    # ⛔ CHARGED UNCONDITIONALLY AND THEN ADJUSTED, rather than charged after
+    # the parse — because a request that errored STILL COST GPU TIME. The
+    # container ran; only the answer was lost. Charging only on success would
+    # make a failing model free, which is the direction that under-counts, and
+    # a test pins that behaviour deliberately.
+    #
+    # ⚖️ So the baseline is taken here and the tier-specific difference is
+    # settled below once the response says which tier answered. A call whose
+    # tier we never learn keeps the baseline, which is the honest reading: we
+    # know it cost something and not what.
     record_vision_call_cost()
 
     case result do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
         duration = System.monotonic_time() - start_time
+        tier = extract_tier(resp_body)
 
+        # ⛔ TAGGED BY TIER, because without it this histogram blends a 7ms
+        # barcode decode with a ~22s GPU inference into one curve — and the
+        # p95 everybody would quote is then a MIXTURE whose shape moves with
+        # the barcode hit rate rather than with either tier's own behaviour.
+        # Observed live: 7ms versus 21,903ms, a factor of ~3,100. A single
+        # percentile over both is not a slow number or a fast one, it is an
+        # arithmetic artefact of how many covers happened to carry a barcode.
+        #
+        # ⚖️ The label is bounded by the same `bounded_tier/1` the counter
+        # uses, so a sidecar ahead of this build cannot widen the series.
         :telemetry.execute(
           [:stacks, :vision, :request, :stop],
           %{duration: duration},
-          %{endpoint: endpoint, status: 200}
+          %{endpoint: endpoint, status: 200, tier: bounded_tier(tier)}
         )
+
+        charge_and_report_tier(resp_body, tier)
 
         decode_success_body(resp_body)
 
@@ -182,8 +188,14 @@ defmodule Stacks.AI.Client do
         :telemetry.execute(
           [:stacks, :vision, :request, :stop],
           %{duration: duration},
-          %{endpoint: endpoint, status: status}
+          # ⚖️ "none" rather than "unspecified": a non-200 means no tier
+          # answered at all, which is a different fact from a tier the
+          # sidecar declined to name. Collapsing them would hide failures
+          # inside the unspecified bucket.
+          %{endpoint: endpoint, status: status, tier: "none"}
         )
+
+        maybe_record_errored_gpu_dispatch(status)
 
         error = VisionError.from_http_error(status, resp_body)
         maybe_melt(error)
@@ -246,12 +258,294 @@ defmodule Stacks.AI.Client do
     end
   end
 
+  # ⛔ CONVERTED, BECAUSE THE LEDGER'S UNIT CHANGED UNDER THIS CALLER AND NOTHING
+  # HERE NOTICED.
+  #
+  # `Budget.record_cost/2` moved from cents to MICRO-cents when the spend
+  # ledger was re-denominated — token pricing is quoted per million, and a cent
+  # cannot express the cost of a short completion. This call site kept passing a
+  # cents-denominated config value, so **every Modal call charged 1 micro-cent
+  # instead of 1 cent and the daily 500¢ ceiling needed 50,000,000 calls to
+  # trip. The Modal budget was effectively unenforced.**
+  #
+  # ⚠️ The config key is named `_cents` and stays that way: a price a person
+  # sets should be written in the unit a person thinks in. The conversion
+  # belongs here, at the boundary between that decision and the ledger's
+  # precision — not in the key's name.
   defp record_vision_call_cost do
-    cost_cents =
-      Application.get_env(:core, :modal_cost_per_call_cents, @default_modal_cost_per_call_cents)
+    # ⛔ READ FROM `Costs`, WHICH OWNS THE PRICE. This used to default to its
+    # own `@default_modal_cost_per_call_cents 1` while `Costs` billed the
+    # public page at 3 — and nothing configured the override, so the budget
+    # guard charged a third of what the page claimed. The config key is still
+    # honoured for an operator who needs to override, but its default is now
+    # the one number rather than a second opinion about it.
+    micro_cents =
+      Application.get_env(
+        :core,
+        :modal_budget_base_micro_cents_per_call,
+        Costs.modal_budget_base_micro_cents_per_call()
+      )
 
-    BudgetTracker.record_cost(:modal, cost_cents)
+    Budget.record_cost(:modal, micro_cents)
   end
+
+  # ⛔ THE TIER IS READ FROM THE RESPONSE, NOT ASSUMED. Charging a flat rate
+  # per call made a CPU barcode decode and a 7B VLM inference indistinguishable
+  # in the ledger — which is the figure the vision redesign's cost case is
+  # argued from.
+  #
+  # ⚖️ Parsed leniently and on purpose: a sidecar that has not been redeployed
+  # yet sends no `tier`, and the honest response to that is the baseline
+  # charge plus an `unspecified` label — not a crash, and not a guessed
+  # surcharge.
+  # ⚖️ One parse, read twice. The tier reaches the latency histogram and the
+  # ledger, and parsing the body separately for each would let them disagree
+  # about what the same response said — a pair of metrics that can contradict
+  # each other is worse than either alone, because it makes both unusable
+  # without knowing which to trust.
+  defp extract_tier(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, %{"tier" => tier}} when is_binary(tier) and tier != "" -> tier
+      _ -> "ANALYSIS_TIER_UNSPECIFIED"
+    end
+  end
+
+  defp charge_and_report_tier(resp_body, tier) do
+    surcharge = tier_surcharge_micro_cents(tier)
+
+    if surcharge > 0 do
+      Budget.record_cost(:modal, surcharge)
+    end
+
+    # ⛔ THE IDLE TAIL IS A PER-CONTAINER COST AND WAS BEING CHARGED TO NOBODY.
+    # Modal bills a woken GPU for its whole scaledown window — measured at
+    # 9.18c against 0.198c of actual inference — so a lone identification after
+    # a quiet period costs 56x what one in a busy run costs. The flat per-call
+    # rate could not express that: it was 13.9x too high on sustained traffic
+    # and 0.6x too LOW on the lone cold call, which is the case a ceiling
+    # exists to catch.
+    #
+    # ⚖️ The cold flag was already on the wire and already parsed — for the
+    # telemetry label two lines below, and ignored by the ledger. Charging it
+    # here is what makes the ledger track the invoice instead of a guess.
+    case cold_gpu_containers(resp_body) do
+      0 ->
+        :ok
+
+      n ->
+        Budget.record_cost(:modal, n * Costs.modal_budget_cold_start_micro_cents())
+    end
+
+    # ⚠️ The label is bounded HERE, at the emit site, against the tiers this
+    # build knows. A sidecar ahead of this deployment could send a tier name
+    # nothing here declares, and `tier` is a string off the wire — an
+    # unbounded label on a metric is a cardinality commitment to the store that
+    # whoever deploys the sidecar never agreed to make.
+    :telemetry.execute(
+      [:stacks, :vision, :tier],
+      %{count: 1},
+      %{tier: bounded_tier(tier), cold: cold_label(resp_body)}
+    )
+
+    maybe_record_gpu_cold_start(resp_body)
+    record_gpu_active_time(resp_body)
+  end
+
+  # ⛔ THE ACTIVE GPU SECONDS, SO THE INFERENCE LINE CAN STOP GUESSING.
+  #
+  # That line charged a flat 3 cents per inference, and measurement shows that
+  # is **18.9x** the warm active cost (0.159c for 5.2s) and 4.1x the cold one.
+  # It was never an active rate: ~3c is almost exactly the ALL-IN cost at three
+  # inferences per container, which is how it looked right for years — and
+  # which means that once idle is charged on its own line, the flat rate
+  # DOUBLE-COUNTS the tail.
+  #
+  # ⚖️ Summing the model's own stage timings replaces one wrong constant with a
+  # measurement, and leaves `Costs.a10g_micro_cents_per_second/0` as the single
+  # price in the system rather than two that disagree.
+  #
+  # ⚠️ A PROXY, AND NAMED AS ONE: these are wall-clock around each Modal
+  # dispatch, so they include whatever queueing happened inside Modal and are
+  # an upper bound on billed GPU time. Upper-bounding is the safe direction for
+  # a cost figure — the previous constant erred the same way by 19x with
+  # nothing to check it against.
+  defp record_gpu_active_time(resp_body) do
+    with {:ok, %{"timings_ms" => timings}} when is_map(timings) <- Jason.decode(resp_body),
+         ms when ms > 0 <- gpu_stage_ms(timings) do
+      :telemetry.execute([:stacks, :vision, :gpu_active], %{milliseconds: ms}, %{})
+    else
+      _ -> :ok
+    end
+  end
+
+  # ⚖️ Only the stages that run ON the GPU. `download` is the sidecar fetching
+  # bytes and `barcode` is a CPU decode in the sidecar — charging either to the
+  # GPU would inflate the figure with work no A10G did.
+  defp gpu_stage_ms(timings) do
+    ["classify", "extract"]
+    |> Enum.map(&Map.get(timings, &1))
+    |> Enum.filter(&is_integer/1)
+    |> Enum.sum()
+  end
+
+  # ⛔ ONE EVENT PER GPU CONTAINER LIFETIME, which is what makes idle time
+  # costable at all. `gpu_cold` is true for exactly the first inference on a
+  # container, so counting it counts containers — and the idle tail Modal bills
+  # after a container's last request is a per-container cost, not a per-request
+  # one.
+  #
+  # ⚖️ A counter rather than the container id as a label. The id is the right
+  # key for the exact model in `Stacks.AI.GpuWindow`, but a new id per cold
+  # start is unbounded cardinality, and a metrics store is the wrong place to
+  # put a key that grows without limit. So the id stays out of the store and
+  # the store holds the one number the cost line needs.
+  defp maybe_record_gpu_cold_start(resp_body) do
+    with {:ok, %{"gpu_dispatches" => dispatches}} when is_list(dispatches) <-
+           Jason.decode(resp_body),
+         count when count > 0 <- GpuWindow.cold_container_count(dispatches) do
+      # ⛔ THE MEASUREMENT IS THE COUNT, NOT A FLAG. This matched a single
+      # `"gpu_cold" => true` on the response, which described only the CLASSIFY
+      # dispatch — so a request whose extract woke a cold container recorded
+      # nothing, and billed container lifetimes were under-counted by up to
+      # half, in the direction that makes the GPU look cheap.
+      #
+      # ⛔ ONE EVENT PER CONTAINER, AND THE OPPOSITE ARGUMENT SHIPPED BROKEN.
+      # This emitted ONE event carrying `%{count: count}`, reasoning that N
+      # events would make the event count and the container count diverge. It
+      # is the other way round: `telemetry_metrics`' `counter/2` documents that
+      # "the value of the counter is always incremented by one, regardless of
+      # the value of the measurement", so a request waking two containers moved
+      # the series by ONE. The measurement was discarded, the series counted
+      # requests-that-woke-something, and the under-count this function exists
+      # to remove was still there at up to half.
+      #
+      # ⚖️ With one event per container the two coincide by construction, the
+      # family's `_count_total` name stays true, and the plugin's "one per
+      # container lifetime" description stays true.
+      Enum.each(1..count, fn _ ->
+        :telemetry.execute([:stacks, :vision, :gpu_cold_start], %{count: 1}, %{})
+      end)
+    else
+      _ -> :ok
+    end
+
+    maybe_report_telemetry_gap(resp_body)
+  end
+
+  # ⛔ A GAP MUST BE VISIBLE, NOT MERELY DETECTABLE. A VLM tier answered means
+  # the model ran, so an empty dispatch list beside one is provably a sidecar
+  # or GPU image older than this telemetry — and it is indistinguishable from
+  # an honest barcode answer in the cold-start count, which would silently
+  # report zero idle dollars for real GPU work.
+  #
+  # ⚖️ Emitted rather than logged, because the figure it undermines is on a
+  # dashboard: a reader comparing the cold-start count against this series can
+  # tell a quiet period from a deployment that stopped reporting.
+  defp maybe_report_telemetry_gap(resp_body) do
+    with {:ok, %{"gpu_dispatches" => dispatches} = body} when is_list(dispatches) <-
+           Jason.decode(resp_body),
+         true <- GpuWindow.telemetry_gap?(Map.get(body, "tier"), dispatches) do
+      :telemetry.execute([:stacks, :vision, :gpu_telemetry_gap], %{count: 1}, %{})
+    else
+      _ -> :ok
+    end
+  end
+
+  # ⛔ A GPU DISPATCH THAT ERRORED IS STILL A BILLED DISPATCH, AND IT USED TO
+  # VANISH. The sidecar raises 504 (timeout) or 502 (failure) ONLY after it has
+  # dispatched the request to a GPU container, so a container whose every
+  # inference raises returns no response body, emits no cold-start count through
+  # `maybe_record_gpu_cold_start/1`, and its cold start and entire billed
+  # lifetime were invisible — under-counting in precisely the flattering
+  # direction the cost model exists to correct.
+  #
+  # ⚖️ A SEPARATE SERIES, NOT folded into the cold-start count. On an error no
+  # `_container` reading comes back, so whether this dispatch was cold is
+  # unknown — counting it as a cold start would fabricate the one fact we do not
+  # have. This is the "explicit zero-with-reason": the errored dispatch is
+  # visible and flagged (by status), so an all-raising container reads as a
+  # non-zero here rather than a silent zero everywhere.
+  #
+  # ⚖️ 502/504 ONLY. A transport error never reaches a status (it is the
+  # `{:error, reason}` arm, where no GPU was dispatched), and a 4xx is a request
+  # the sidecar refused before dispatching — neither billed a container.
+  defp maybe_record_errored_gpu_dispatch(status) when status in [502, 504] do
+    :telemetry.execute([:stacks, :vision, :gpu_dispatch_errored], %{count: 1}, %{status: status})
+  end
+
+  defp maybe_record_errored_gpu_dispatch(_status), do: :ok
+
+  # ⚖️ Anything undeclared collapses to "other" rather than reaching the store,
+  # and the visible under-labelling is the signal to come and declare it —
+  # the same rule every other bounded label in this app follows.
+  # ⛔ PUBLIC SO THE BOUND CAN BE TESTED AT ITS OWN LAYER. It was private, and
+  # the consequence was that the only test of it emitted telemetry directly
+  # and so bypassed it entirely — the assertion held with the bound REMOVED.
+  # A guard whose test cannot fail is not a guard, and this one protects the
+  # metrics store's cardinality against a string from a separately deployed
+  # service, which is not a risk worth leaving unprovable to keep a `defp`.
+  @doc false
+  def bounded_tier(tier) when tier in @known_tiers, do: tier
+  def bounded_tier(_), do: "other"
+
+  # ⛔ `gpu_dispatches`, NOT `sidecar_cold`. The latter says the CPU front door
+  # was cold, which owes no GPU tail at all — charging the A10G's scaledown
+  # window for it would bill a warm GPU because a FastAPI container restarted.
+  #
+  # ⚠️ COUNTED, not a boolean. A single request can wake two GPU containers —
+  # classify on one and extract on another — and the contract made this field
+  # `repeated` for exactly that reason, after a flat flag was found
+  # "under-counting billed container lifetimes by up to half, in the direction
+  # that flatters the GPU". A boolean here would reintroduce that halving in
+  # the ledger instead of the metric.
+  defp cold_gpu_containers(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, %{"gpu_dispatches" => dispatches}} when is_list(dispatches) ->
+        Enum.count(dispatches, &(Map.get(&1, "cold") == true))
+
+      _ ->
+        0
+    end
+  end
+
+  defp cold_label(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, %{"sidecar_cold" => true}} -> "cold"
+      {:ok, %{"sidecar_cold" => false}} -> "warm"
+      _ -> "unknown"
+    end
+  end
+
+  @doc false
+  @spec tier_surcharge_micro_cents(String.t() | nil) :: non_neg_integer()
+  def tier_surcharge_micro_cents(tier)
+
+  # ⛔ THE BARCODE TIER DID NOT RUN THE GPU, SO IT MUST NOT BE BILLED AS IF IT
+  # HAD — and until the response carried a tier, every call was charged the
+  # same flat rate regardless.
+  #
+  # ⚖️ A SURCHARGE on top of the baseline, not a replacement for it. The
+  # baseline is already recorded before the parse, so this adds only the
+  # difference a GPU inference costs beyond a CPU barcode decode. That keeps
+  # the "a failed call still charges" guarantee intact while making a barcode
+  # hit cost what a barcode hit costs.
+  #
+  # ⚠️ Zero for a tier this build has not been taught. Guessing a surcharge for
+  # an unknown tier would bill for work we cannot describe; under-charging a
+  # new tier is visible as a ledger that lags the invoice, which is the
+  # direction someone notices.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_OCR — OCR is not a GPU
+  #   tier, so it bears no surcharge: it falls to the `_unknown -> 0` clause
+  #   below, like every non-VLM tier. (@known_tiers is now sourced from the proto
+  #   and no longer enumerates each tier in a literal, so this is declared here.)
+  def tier_surcharge_micro_cents("ANALYSIS_TIER_BARCODE"), do: 0
+
+  def tier_surcharge_micro_cents(tier)
+      when tier in ["ANALYSIS_TIER_VLM_CLASSIFY", "ANALYSIS_TIER_VLM_EXTRACT"] do
+    Costs.modal_budget_gpu_active_micro_cents()
+  end
+
+  def tier_surcharge_micro_cents(_unknown), do: 0
 
   defp configured_client do
     Application.get_env(:core, :vision_client, __MODULE__)

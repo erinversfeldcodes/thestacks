@@ -10,21 +10,99 @@ A first slice of policies — bookshelves, bookshelf_placements, user_blocks, an
 
 ### Execution model
 
-All API requests arrive through the Phoenix application. Before executing any query the connection pool sets a session variable carrying the authenticated user's UUID:
+⛔ **This section described a mechanism that was never built, and the description is why
+nobody noticed.** It said the connection pool sets a session variable carrying the authenticated
+user's UUID before executing any query. It does not: `app.current_user_id` appears **zero times**
+under `apps/core/lib`. The seven activated policies therefore short-circuit on their NULL guard and
+permit every row — on every environment, including production. Verified 2026-10-20.
 
-```sql
-SET LOCAL app.current_user_id = '<uuid>';
-```
+⚠️ **The NULL guard is also non-deterministic, not merely inert.** `current_setting('app.current_user_id', true)`
+returns NULL on a connection where the variable has never been set — the guard fires and the policy
+permits everything — but the **empty string** on a connection where any transaction has set it, even
+one that rolled back, because `SET LOCAL` reverts to the variable's default. On that connection the
+guard does not fire, the `::uuid` cast receives `''`, and the query raises. So on a pooled connection
+the same unscoped query either grants every row or 500s, decided by which connection serves it.
 
-Policies read this variable via `current_setting('app.current_user_id', true)` with a NULL guard so that sessions without the variable set (migrations, test sandbox) are not blocked. The cast to `uuid` happens only after the NULL check. The expression is inlined in every policy (no wrapper function) so each policy is self-contained and auditable.
+The intended execution model — `SET LOCAL` inside an explicit transaction established at each
+context boundary, a role-level default making the unscoped case raise deterministically, and the
+exemptions for `stacks_dbt` / `stacks_readonly` — is decided in
+[ADR 023](decisions/023-per-request-rls-scoping.md). Read that before changing a policy.
+
+⚠️ **One design statement below is reversed by that ADR.** This document previously recorded that
+the scope expression is "inlined in every policy (no wrapper function) so each policy is
+self-contained and auditable". ADR 023 replaces the inlined expression with a single
+`op.current_scope()` function, because the rule needs one place to raise a named error from, and
+because the measurement that matters constrains the shape: a policy calling a function **with the
+row's `user_id`** sequentially scans the table, while one comparing `user_id` to a parameterless
+function's return value uses the index. Self-containment lost that trade.
 
 ### Database roles
 
-Per [`20260305000020_create_db_roles.exs`](../apps/core/priv/repo/migrations/20260305000020_create_db_roles.exs) (and the login fix in `20260310000001_fix_db_role_login.exs`), three least-privilege roles exist:
+⚠️ **These roles exist on local and CI databases only. Verified 2026-10-16
+against the deployed database: none of them exists there.** This section used to
+describe the list below as the production posture, and it is not.
 
-- `stacks_app` — CRUD on `op`, SELECT on `wh`, INSERT-only on `audit`. The Phoenix app connects as this role in production. RLS policies are evaluated against it.
-- `stacks_dbt` — SELECT on `op` + `audit`, CRUD on `wh`. Used by dbt transforms.
-- `stacks_readonly` — SELECT on `op` + `wh`. Used for analytics/debugging.
+The mechanism:
+[`20260305000020_create_db_roles.exs`](../apps/core/priv/repo/migrations/20260305000020_create_db_roles.exs)
+creates `stacks_app` and `stacks_dbt` **only when `STACKS_APP_DB_PASSWORD` /
+`STACKS_DBT_DB_PASSWORD` are present in the environment**, and the deploy sets
+neither. Every grant in that migration — and in the warehouse-schema migration
+that followed it — is wrapped in `IF EXISTS (SELECT FROM pg_roles …)`, so the
+migrations ran, granted nothing, and reported success. Deployed, the application
+and the nightly dbt refresh both connect as `neondb_owner`, which owns the
+database.
+
+**Resolved 2026-10-17: realise the design.** The roles now exist on deployed
+stacks, the nightly refresh connects as `stacks_dbt`, and the application has a
+connection it can switch to. Two things remain operator actions, deliberately —
+each is a secret away, and each is reversible by removing that secret.
+
+### Switching the application to `stacks_app`
+
+`config/runtime.exs` reads **two** URLs:
+
+| Variable | Role | Used by |
+|---|---|---|
+| `DATABASE_URL` | the **owner** | migrations and every `Stacks.Release` task (DDL needs ownership) |
+| `APP_DATABASE_URL` | `stacks_app` | the runtime pools, `Core.Repo` and `Core.ObanRepo` |
+
+`APP_DATABASE_URL` **falls back to `DATABASE_URL` when unset**, so the split is
+inert until the secret exists and reverting is removing it. `Stacks.Release`
+pins every task to the owner through `owner_repo_opts/0`, and
+`Core.DatabaseRoleSplitTest` sweeps every `with_repo` call to keep it that way —
+without that pin, setting the secret would leave the app serving happily and
+break the *next* deploy's migration step on `permission denied`.
+
+Before setting it, run the `:deployed_only` role suite against the target stack.
+Verified on the development database: all 49 `op` base tables grant `stacks_app`
+SELECT/INSERT/UPDATE/DELETE, `ALTER DEFAULT PRIVILEGES` covers future tables,
+and there are zero sequences needing USAGE — so grants are not the blocker.
+
+### ⚠️ The policies below are active and permit everything
+
+Worth stating plainly, because the table list reads as protection that is in
+force. `FORCE ROW LEVEL SECURITY` is applied and the policies *are* evaluated on
+every deployed query — but every `ALL`-command policy begins
+`current_setting('app.current_user_id', true) IS NULL OR …`, and **nothing in
+`apps/core/lib` ever sets that GUC**. So each one evaluates true for every row.
+
+Switching the connection role does not change that; the GUC does. That is
+tracked as **#487**, which carries the measured trade-off between the three
+candidate mechanisms — the cheap one leaks across requests on a pooled
+connection, and the safe one changes request semantics.
+
+- `stacks_app` — CRUD on `op`, SELECT on `marts`, INSERT-only on `audit`. RLS policies are evaluated against it.
+- `stacks_dbt` — SELECT on `op` + `audit`, CREATE + CRUD in `staging` / `intermediate` / `marts`. Used by dbt transforms.
+- `stacks_readonly` — SELECT on `op` + `marts`. Used for analytics/debugging.
+
+⚠️ `wh` is **not** the warehouse schema and these grants no longer name it. dbt
+materialises into `staging`, `intermediate` and `marts` per
+`dbt/dbt_project.yml`; `wh` is `profiles.yml`'s default target schema and is
+deliberately kept empty, so that a model filed outside the three layer
+directories shows up as rows in a schema nothing reads rather than as an error
+someone fixes by creating a schema. The original grants all targeted `wh` — the
+one schema dbt never writes to — which is why `stacks_dbt` could not have
+materialised a relation even where the role did exist.
 
 There is intentionally no `stacks_owner` role — schema migrations run as the hosting provider's owner account (`neondb_owner` on Neon, `postgres` locally).
 
@@ -40,8 +118,8 @@ The following tables have RLS policies enabled today (migration `20260319000008`
 
 | Table | Policies |
 |-------|----------|
-| `op.bookshelves` | `bookshelves_owner` (USING + WITH CHECK on `user_id`), `bookshelves_platform_select` (SELECT where `visibility = 'platform'`) |
-| `op.bookshelf_placements` | `bookshelf_placements_owner` (USING + WITH CHECK via parent bookshelf ownership), `bookshelf_placements_platform_select` (SELECT where both placement and parent bookshelf are `'platform'`) |
+| `op.bookshelves` | `bookshelves_owner` (USING + WITH CHECK on `user_id`), `bookshelves_audience_select` (SELECT where `visibility = 'public'`, or `'platform'` for a signed-in reader) |
+| `op.bookshelf_placements` | `bookshelf_placements_owner` (USING + WITH CHECK via parent bookshelf ownership), `bookshelf_placements_audience_select` (SELECT where both placement and parent bookshelf are visible to that viewer — `'public'` to anyone, `'platform'` to a signed-in reader) |
 | `op.user_blocks` | `user_blocks_owner` (USING + WITH CHECK on `blocker_id`) |
 | `op.visibility_grants` | `visibility_grants_granter` (USING + WITH CHECK on `granted_by_id`), `visibility_grants_grantee_select` (SELECT where `granted_to_id` matches) |
 
@@ -95,10 +173,13 @@ CREATE POLICY bookshelves_owner ON op.bookshelves
   USING (user_id = current_setting('app.current_user_id')::uuid)
   WITH CHECK (user_id = current_setting('app.current_user_id')::uuid);
 
--- Others: can SELECT platform-visibility bookshelves
-CREATE POLICY bookshelves_platform_select ON op.bookshelves
+-- Others: public to anyone, platform only to a signed-in reader
+CREATE POLICY bookshelves_audience_select ON op.bookshelves
   FOR SELECT
-  USING (visibility = 'platform');
+  USING (
+    visibility = 'public'
+    OR (visibility = 'platform' AND op.current_scope() IS NOT NULL)
+  );
 ```
 
 ---
@@ -107,7 +188,7 @@ CREATE POLICY bookshelves_platform_select ON op.bookshelves
 
 **Access rules:**
 - Owner of the parent bookshelf can CRUD placements on their own shelves.
-- Others can SELECT placements where both the placement's `visibility` and the parent bookshelf's `visibility` are `'platform'`.
+- Others can SELECT a placement only when both the placement and its parent bookshelf are visible to that viewer: `'public'` to anyone, `'platform'` only to a signed-in reader.
 
 ```sql
 -- Enable RLS
@@ -129,13 +210,20 @@ CREATE POLICY bookshelf_placements_owner ON op.bookshelf_placements
     )
   );
 
--- Others: can SELECT platform-visible placements on platform-visible bookshelves
-CREATE POLICY bookshelf_placements_platform_select ON op.bookshelf_placements
+-- Others: a placement is only as visible as the shelf it sits on, and both
+-- halves are asked for the same viewer.
+CREATE POLICY bookshelf_placements_audience_select ON op.bookshelf_placements
   FOR SELECT
   USING (
-    visibility = 'platform'
+    (
+      visibility = 'public'
+      OR (visibility = 'platform' AND op.current_scope() IS NOT NULL)
+    )
     AND bookshelf_id IN (
-      SELECT id FROM op.bookshelves WHERE visibility = 'platform'
+      SELECT b.id
+      FROM op.bookshelves b
+      WHERE b.visibility = 'public'
+         OR (b.visibility = 'platform' AND op.current_scope() IS NOT NULL)
     )
   );
 ```

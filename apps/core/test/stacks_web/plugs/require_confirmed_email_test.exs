@@ -19,7 +19,7 @@ defmodule StacksWeb.Plugs.RequireConfirmedEmailTest do
       user = insert(:user, email_confirmed: false)
 
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> Guardian.Plug.put_current_resource(user)
         |> RequireConfirmedEmail.call(RequireConfirmedEmail.init([]))
 
@@ -31,7 +31,7 @@ defmodule StacksWeb.Plugs.RequireConfirmedEmailTest do
       user = insert(:user, email_confirmed: true)
 
       conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> Guardian.Plug.put_current_resource(user)
         |> RequireConfirmedEmail.call(RequireConfirmedEmail.init([]))
 

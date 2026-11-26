@@ -28,10 +28,25 @@ defmodule Stacks.Accounts do
   alias Stacks.Email
   alias Stacks.Events
   alias Stacks.GDPR.Deletion
-  alias Stacks.Social.UserBlock
+  alias Stacks.Scope
   alias Stacks.Workers.VisibilityRecapJob
 
   @unverified_account_ttl_seconds 24 * 60 * 60
+
+  # ⚠️ A BOUND on the reap, because its caller runs a full GDPR erasure per id it
+  # returns, on a machine configured to scale to zero.
+  #
+  # This is the same shape that let the image-retention sweep fail for 151 days:
+  # load every candidate, do expensive per-row work, and never finish before the
+  # machine suspends. Here the per-row work is `Phoenix.Token.verify/4` plus
+  # `delete_user_data/2` — heavier than a storage delete, not lighter.
+  #
+  # The bound is on CANDIDATES EXAMINED per run, not on ids returned: the live-link
+  # filter below runs after the query, so a run can examine 200 and return none.
+  # That is the right place for it — the cost this protects against is the
+  # examination and the erasures, and a daily schedule drains any backlog that a
+  # tiny signup population could build.
+  @reap_batch_size 200
 
   @unverified_account_max_lifetime_seconds 7 * 24 * 60 * 60
 
@@ -73,7 +88,9 @@ defmodule Stacks.Accounts do
       :consent_analytics,
       :consent_analytics_at,
       :consent_writing_assistant,
-      :consent_writing_assistant_at
+      :consent_writing_assistant_at,
+      :consent_search_indexing,
+      :consent_search_indexing_at
     ])
   end
 
@@ -436,9 +453,10 @@ defmodule Stacks.Accounts do
       and they have no email change in flight. An abandoned signup satisfies both;
       a degraded account satisfies neither.
   """
-  @spec expired_unverified_ids(DateTime.t()) :: [binary()]
-  def expired_unverified_ids(now \\ DateTime.utc_now()) do
+  @spec expired_unverified_ids(DateTime.t(), keyword()) :: [binary()]
+  def expired_unverified_ids(now \\ DateTime.utc_now(), opts \\ []) do
     cutoff = DateTime.add(now, -@unverified_account_ttl_seconds, :second)
+    limit = Keyword.get(opts, :limit, @reap_batch_size)
 
     candidates =
       Repo.all(
@@ -446,10 +464,48 @@ defmodule Stacks.Accounts do
           where:
             u.email_confirmed == false and u.created_at < ^cutoff and
               not is_nil(u.email_confirmation_token) and is_nil(u.pending_email),
+          order_by: [asc: u.created_at],
+          limit: ^limit,
           select: {u.id, u.email_confirmation_token}
       )
 
     for {id, token} <- candidates, not confirmation_link_live?(token), do: id
+  end
+
+  @doc """
+      How many abandoned signups are still waiting, with NO batch ceiling.
+
+      ⛔ Separate from `expired_unverified_ids/2` on purpose, and the reason is
+      the whole value of the number. The sweep is budgeted — it takes at most a
+      batch per run — so "how much did this run do" and "how much is left" are
+      different facts. Reusing the bounded query to answer the second one makes
+      the answer unable to exceed the batch size, which is precisely the
+      blindness the remaining-count was introduced to end: a nightly success
+      over a growing backlog.
+
+      ⚠️ It shares the SQL prefilter and the link check with the sweep, so it
+      cannot drift into disagreeing about WHICH accounts count — it differs only
+      in refusing to stop counting. Sharing the whole query would have shared
+      the ceiling, which is the mistake this replaces.
+
+      ⚠️ Unbounded by design, and that is affordable here: the prefilter is
+      indexed and the link check runs only over rows it returns. If this ever
+      becomes expensive, the fix is a cheaper exact count, never a ceiling —
+      a capped backlog figure is worse than none, because it reads as a real
+      measurement.
+  """
+  @spec pending_unverified_count(DateTime.t()) :: non_neg_integer()
+  def pending_unverified_count(now \\ DateTime.utc_now()) do
+    cutoff = DateTime.add(now, -@unverified_account_ttl_seconds, :second)
+
+    Repo.all(
+      from u in User,
+        where:
+          u.email_confirmed == false and u.created_at < ^cutoff and
+            not is_nil(u.email_confirmation_token) and is_nil(u.pending_email),
+        select: u.email_confirmation_token
+    )
+    |> Enum.count(&(not confirmation_link_live?(&1)))
   end
 
   @doc """
@@ -700,11 +756,18 @@ defmodule Stacks.Accounts do
           {:ok, restored} ->
             revoke_all_user_sessions(restored.id)
 
+            # `initiated_by: "operator"` is what separates this from a reader
+            # undoing their own email change, which emits the same event type.
+            # Without it a consumer counting reader-initiated reverts included
+            # operator interventions, and the only attribution lived in an audit
+            # row no event consumer reads. The value names the PATH, never the
+            # operator, so no personal data enters event_log.
             Events.emit_safe(%{
               event_type: "user.email_change_reverted",
               aggregate_type: "user",
               aggregate_id: restored.id,
-              payload: %{}
+              payload: %{initiated_by: "operator"},
+              schema_version: 2
             })
 
             {:ok, restored}
@@ -746,9 +809,18 @@ defmodule Stacks.Accounts do
           limit: ^@search_limit
         )
 
-      query
-      |> exclude_blocked(viewer_id)
-      |> Repo.all()
+      # ⚠️ Scoped to the viewer around the read. The query itself touches only
+      # `op.users`, which carries no policy — but `exclude_blocked/2` puts
+      # `op.blocked_pair/2` in the WHERE clause, and that function refuses a
+      # question about two users when a scope is set and neither is the scoped
+      # user. Stating the viewer here means the guard sees the viewer it is
+      # being asked on behalf of, rather than whatever scope happened to be
+      # left behind by an earlier call on the same connection.
+      Scope.for_viewer(viewer_id, fn ->
+        query
+        |> exclude_blocked(viewer_id)
+        |> Repo.all()
+      end)
     end
   end
 
@@ -756,16 +828,23 @@ defmodule Stacks.Accounts do
 
   defp exclude_blocked(query, nil), do: query
 
+  # ⛔ Asked through `op.blocked_pair/2` rather than as a subquery over
+  # `op.user_blocks`, and the reason is row-level security.
+  #
+  # The predicate is SYMMETRIC — a candidate is excluded if either party blocked
+  # the other — while the `user_blocks` policy shows a scoped connection only
+  # its OWN block rows. A subquery written here would therefore see the viewer's
+  # blocks and not the candidate's, so somebody who had blocked the viewer would
+  # reappear in their search results. Silently, and in the direction that
+  # matters: blocking is a safety feature, and half of it working is the half
+  # that does not protect the person who asked for it.
+  #
+  # ⚠️ One function call per candidate row, which a `SECURITY DEFINER` function
+  # cannot avoid — it is not inlinable. Acceptable here because the candidate
+  # set is already a filtered search result, not a table scan.
   defp exclude_blocked(query, viewer_id) do
     from(u in query,
-      where:
-        not exists(
-          from(b in UserBlock,
-            where:
-              (b.blocker_id == ^viewer_id and b.blocked_id == parent_as(:candidate).id) or
-                (b.blocker_id == parent_as(:candidate).id and b.blocked_id == ^viewer_id)
-          )
-        )
+      where: not fragment("op.blocked_pair(?, ?)", ^viewer_id, u.id)
     )
   end
 
@@ -906,7 +985,7 @@ defmodule Stacks.Accounts do
     |> Repo.transaction()
     |> case do
       {:ok, %{set_confirmation: user}} ->
-        enqueue_confirmation_email(user)
+        maybe_enqueue_confirmation_email(user, opts)
         {:ok, user}
 
       {:error, :user, changeset, _} ->
@@ -926,6 +1005,16 @@ defmodule Stacks.Accounts do
   # through the generic event fan-out put a whole dispatch chain (and its
   # backlog) in front of it. A failed enqueue must not fail the registration —
   # the reader still has the resend affordance.
+  # A caller that confirms the user itself (the e2e mint helper) passes
+  # `skip_confirmation_email: true`: the token this email links to is nulled on
+  # confirmation, so the job would run tokenless and die in `build_email/3` — a
+  # guaranteed-dead enqueue on every mint.
+  defp maybe_enqueue_confirmation_email(user, opts) do
+    unless Keyword.get(opts, :skip_confirmation_email, false) do
+      enqueue_confirmation_email(user)
+    end
+  end
+
   defp enqueue_confirmation_email(user) do
     case Email.send_registration_confirmation(user) do
       {:ok, _user} ->
@@ -1184,7 +1273,11 @@ defmodule Stacks.Accounts do
   """
   @spec update_profile(User.t(), map()) ::
           {:ok, User.t()}
-          | {:error, Ecto.Changeset.t() | :invalid_password | :argon2_busy | :rate_limited}
+          | {:error,
+             Ecto.Changeset.t()
+             | :invalid_password
+             | :argon2_busy
+             | {:rate_limited, :per_user | :global}}
   def update_profile(%User{} = user, attrs) do
     if email_change?(user, attrs) do
       update_profile_with_email(user, attrs)
@@ -1405,13 +1498,31 @@ defmodule Stacks.Accounts do
           {:ok, User.t()} | {:error, :invalid_step}
   def complete_onboarding_step(user_id, step) when is_binary(step) do
     if step in @valid_onboarding_steps do
-      user = get_user!(user_id)
-      current = normalize_steps(user.onboarding_steps)
-      updated = Map.put(current, step, true)
+      # ⛔ ATOMIC MERGE, not read-modify-write. Completing two steps at once —
+      # which Skip does, recording every step in one go — raced here: each call
+      # read the same `{}`, added its own key, and wrote the whole map back, so
+      # the second write erased the first and onboarding never reached complete.
+      # A `jsonb ||` merge in one statement sets exactly the one key and keeps
+      # whatever the other concurrent write set.
+      {count, _} =
+        from(u in User,
+          where: u.id == ^user_id,
+          update: [
+            set: [
+              onboarding_steps:
+                fragment(
+                  "COALESCE(?, '{}'::jsonb) || jsonb_build_object(?::text, true)",
+                  u.onboarding_steps,
+                  ^step
+                )
+            ]
+          ]
+        )
+        |> Repo.update_all([])
 
-      case user |> onboarding_steps_changeset(%{onboarding_steps: updated}) |> Repo.update() do
-        {:ok, saved} -> {:ok, Repo.reload!(saved)}
-        error -> error
+      case count do
+        1 -> {:ok, get_user!(user_id)}
+        _ -> {:error, :invalid_step}
       end
     else
       {:error, :invalid_step}

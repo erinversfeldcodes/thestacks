@@ -18,7 +18,7 @@ defmodule Stacks.Notifications.OfferNotificationHandler do
   @spec handle_event(map()) :: :ok | {:error, term()}
   def handle_event(%{event_type: "offer.opened", payload: payload}) do
     listing_id = Map.get(payload, "listing_id") || Map.get(payload, :listing_id)
-    buyer_name = Map.get(payload, "buyer_name") || Map.get(payload, :buyer_name, "A buyer")
+    buyer_id = Map.get(payload, "buyer_id") || Map.get(payload, :buyer_id)
     offer_amount_zar = Map.get(payload, "offer_amount_zar") || Map.get(payload, :offer_amount_zar)
     offer_id = Map.get(payload, "offer_id") || Map.get(payload, :offer_id)
     offer_url = "/marketplace/offers/#{offer_id}"
@@ -26,7 +26,7 @@ defmodule Stacks.Notifications.OfferNotificationHandler do
     do_notify(
       Marketplace.get_listing(listing_id),
       listing_id,
-      buyer_name,
+      buyer_id,
       offer_amount_zar,
       offer_url
     )
@@ -34,13 +34,13 @@ defmodule Stacks.Notifications.OfferNotificationHandler do
 
   def handle_event(_event), do: :ok
 
-  defp do_notify(nil, listing_id, _buyer_name, _amount, _offer_url) do
+  defp do_notify(nil, listing_id, _buyer_id, _amount, _offer_url) do
     Logger.warning("OfferNotificationHandler: listing #{listing_id} not found, skipping")
     :ok
   end
 
-  defp do_notify(listing, listing_id, buyer_name, offer_amount_zar, offer_url) do
-    do_notify_seller(listing.seller, listing, listing_id, buyer_name, offer_amount_zar, offer_url)
+  defp do_notify(listing, listing_id, buyer_id, offer_amount_zar, offer_url) do
+    do_notify_seller(listing.seller, listing, listing_id, buyer_id, offer_amount_zar, offer_url)
   end
 
   defp do_notify_seller(nil, _listing, listing_id, _buyer_name, _amount, _offer_url) do
@@ -51,22 +51,34 @@ defmodule Stacks.Notifications.OfferNotificationHandler do
     :ok
   end
 
-  defp do_notify_seller(seller, listing, _listing_id, buyer_name, offer_amount_zar, offer_url) do
+  defp do_notify_seller(seller, listing, _listing_id, buyer_id, offer_amount_zar, offer_url) do
     if seller.notify_marketplace do
-      listing_title = (listing.book && listing.book.title) || "your listing"
-      enqueue_email(seller.id, buyer_name, listing_title, offer_amount_zar, offer_url)
+      enqueue_email(seller.id, listing.id, buyer_id, offer_amount_zar, offer_url)
     else
       :ok
     end
   end
 
-  defp enqueue_email(user_id, buyer_name, listing_title, offer_amount_zar, offer_url) do
+  # ⚠️ Ids only, and `listing_id` rather than `book_id` deliberately.
+  #
+  # `buyer_name` is a THIRD PARTY's name — the job's `user_id` is the seller —
+  # and `oban_jobs.args` is a queryable table with no erasure path that retains
+  # rows for seven days. A scrub keyed on `args->>'user_id'` could never reach
+  # a name belonging to someone else, so the only safe shape is not to put it
+  # there. The worker walks `listing.book.title` at delivery.
+  #
+  # NOT `book_id`: `wishlist_availability_handler` declares
+  # `unique: [keys: [:book_id, :user_id]]` and Oban compares args by JSONB
+  # CONTAINMENT, so any job whose args contain both keys collides with a
+  # wishlist notification and one of the two is silently dropped. Carrying the
+  # listing id keeps this job out of that key space entirely.
+  defp enqueue_email(user_id, listing_id, buyer_id, offer_amount_zar, offer_url) do
     args = %{
       "template" => "new_offer",
       "user_id" => user_id,
       "params" => %{
-        "buyer_name" => buyer_name,
-        "listing_title" => listing_title,
+        "listing_id" => listing_id,
+        "buyer_id" => buyer_id,
         "offer_amount_zar" => offer_amount_zar,
         "offer_url" => offer_url
       }

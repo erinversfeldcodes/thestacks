@@ -131,4 +131,47 @@ message Listing {
 
   // The seller (embedded User struct via Jason.Encoder if preloaded).
   string seller_id = 17 [json_name = "seller_id"];
+
+  // ⛔ DECLARED because it was already being emitted and was not. The payload
+  // carried a `seller` object that appeared in no message here and in no client
+  // decoder — emitted, undeclared, read by nobody — and in that state it served
+  // a seller's ACCOUNT EMAIL, consent flag, age-verification state and role to
+  // unauthenticated callers on an enumerable public index. Measured through the
+  // controller, including for a seller whose profile visibility was `owner`.
+  //
+  // ⚠️ "Nothing consumes it" is why it drifted, not why it was harmless. A
+  // field nobody reads is not harmless when the payload is public — that is the
+  // mirror of the completeness gate's concern, which is about a field a client
+  // needs and does not get.
+  //
+  // ⛔ AND THIS DECLARATION IS NOT THE GUARD. Adding a field to this message is
+  // an ADDITIVE proto change, so `buf breaking` passes if someone puts `email`
+  // back. What the contract buys is codegen, inventory and a visible diff; what
+  // keeps personal data out is the boundary test asserting the anonymous
+  // payload's exact key set. Do not read the declaration as the policy.
+  ListingSeller seller = 18 [json_name = "seller"];
+}
+
+// ListingSeller is the deliberately narrow projection of a user that a PUBLIC
+// listing carries. `/api/listings` and `/api/listings/:id` are anonymous reads,
+// so every field here is published to unauthenticated callers.
+//
+// ⚠️ Not `User`. Reusing the fuller shape is precisely the mistake that caused
+// the exposure: the serializer's take-list inherited the one built for the
+// caller's OWN record, where `email` is correct. A seller on someone else's
+// listing is not the caller.
+//
+// ⛔ Widening this is a disclosure decision. `contact_info` on the listing
+// itself is the deliberate channel for reaching a seller.
+message ListingSeller {
+  // UUID of the selling user.
+  string id = 1 [json_name = "id"];
+
+  // The seller's chosen display name.
+  //
+  // ⚠️ MAY BE EMPTY, and must stay that way. `display_name` is nullable, and
+  // this project's usual fix for a null name on the wire is to fall back to the
+  // user's handle — which would publish the handle to anonymous callers, and an
+  // e2e test exists specifically to forbid that. A blank name here is correct.
+  string display_name = 2 [json_name = "display_name"];
 }

@@ -13,6 +13,7 @@ that renders nothing at all.
 
 -}
 
+import Api
 import Expect
 import Http
 import Page.Login as Login
@@ -37,7 +38,7 @@ resetWithShortPassword =
             in
             newModel
     in
-    ResetPassword.init "tok-123"
+    ResetPassword.init Nothing "tok-123"
         |> step (ResetPassword.SetPassword "short")
         |> step (ResetPassword.SetConfirmPassword "short")
 
@@ -54,11 +55,11 @@ resetRejected =
             in
             newModel
     in
-    ResetPassword.init "tok-123"
+    ResetPassword.init Nothing "tok-123"
         |> step (ResetPassword.SetPassword "long-enough-password")
         |> step (ResetPassword.SetConfirmPassword "long-enough-password")
         |> step ResetPassword.Submit
-        |> step (ResetPassword.Completed (Err (Http.BadStatus 422)))
+        |> step (ResetPassword.Completed (Err (Api.RequestFailed (Http.BadStatus 422))))
 
 
 settingsWithShortPassword : SettingsPassword.Model
@@ -121,20 +122,20 @@ suite =
                     resetWithShortPassword
                         |> ResetPassword.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text PasswordRule.tooShort ]
+                        |> Query.has [ Selector.exactText PasswordRule.tooShort ]
             , test "the reset page's 422 message" <|
                 \_ ->
                     resetRejected
                         |> ResetPassword.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text PasswordRule.tooShort ]
+                        |> Query.has [ Selector.exactText PasswordRule.tooShort ]
             , test "the settings form's inline validation" <|
                 \_ ->
                     settingsWithShortPassword
                         |> SettingsPassword.view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text (PasswordRule.tooShortFor "New password") ]
+                            [ Selector.exactText (PasswordRule.tooShortFor "New password") ]
             ]
         , describe "the wordings that used to disagree are gone"
             [ test "the register card no longer spells the number as a word" <|

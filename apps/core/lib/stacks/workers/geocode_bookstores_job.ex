@@ -13,7 +13,7 @@ defmodule Stacks.Workers.GeocodeBookstoresJob do
       guarantee is gone. Failures leave coordinates nil for the next run.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

@@ -17,6 +17,7 @@ import Page.Settings.Password as Password exposing (Msg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -34,7 +35,7 @@ with a token; the non-dispatch branches ignore it).
 -}
 applyWithToken : Msg -> Password.Model -> Password.Model
 applyWithToken msg model =
-    Password.update msg model (Just "test-token") |> modelOf
+    Password.update msg model (Just (TestHelpers.creds "test-token")) |> modelOf
 
 
 {-| A model with valid, matching input ready to save.
@@ -104,7 +105,7 @@ suite =
                         , \m ->
                             Password.view m
                                 |> Query.fromHtml
-                                |> Query.has [ Selector.text "New password must be at least 8 characters." ]
+                                |> Query.has [ Selector.exactText "New password must be at least 8 characters." ]
                         ]
                         blocked
             , test "a mismatched confirmation renders the mismatch error and stays idle" <|
@@ -122,7 +123,7 @@ suite =
                         , \m ->
                             Password.view m
                                 |> Query.fromHtml
-                                |> Query.has [ Selector.text "New password and confirmation do not match." ]
+                                |> Query.has [ Selector.exactText "New password and confirmation do not match." ]
                         ]
                         blocked
             , test "an empty current password renders its error and stays idle" <|
@@ -139,7 +140,7 @@ suite =
                         , \m ->
                             Password.view m
                                 |> Query.fromHtml
-                                |> Query.has [ Selector.text "Please enter your current password." ]
+                                |> Query.has [ Selector.exactText "Please enter your current password." ]
                         ]
                         blocked
             ]
@@ -180,7 +181,7 @@ suite =
                         |> applyWithToken (SaveCompleted (Ok ()))
                         |> Password.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Password changed successfully." ]
+                        |> Query.has [ Selector.exactText "Password changed successfully." ]
             , test "a 422 renders the wrong-current-password copy" <|
                 \_ ->
                     validInput
@@ -188,7 +189,7 @@ suite =
                         |> applyWithToken (SaveCompleted (Err (Http.BadStatus 422)))
                         |> Password.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Current password is incorrect." ]
+                        |> Query.has [ Selector.exactText "Current password is incorrect." ]
             , test "a non-422 failure renders the generic error copy" <|
                 \_ ->
                     validInput
@@ -196,6 +197,6 @@ suite =
                         |> applyWithToken (SaveCompleted (Err Http.NetworkError))
                         |> Password.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Could not change password. Please try again." ]
+                        |> Query.has [ Selector.exactText "Could not change password. Please try again." ]
             ]
         ]

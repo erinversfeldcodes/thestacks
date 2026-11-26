@@ -12,9 +12,38 @@ defmodule StacksWeb.FeedbackAdminController do
 
   alias Stacks.Feedback
 
-  @doc "GET /api/admin/feedback"
-  def index(conn, _params) do
-    json(conn, %{feedback: Enum.map(Feedback.list_entries(), &entry_json/1)})
+  @doc """
+      GET /api/admin/feedback — `?limit=` and `?offset=` page the queue.
+
+      `total` is returned because this is the only interface that reads feedback and
+      it reads one page at a time: without it, a full page and a truncated queue look
+      identical, and the entries that fall off the end are the oldest.
+  """
+  def index(conn, params) do
+    opts =
+      [limit: int_param(params, "limit"), offset: int_param(params, "offset")]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+    json(conn, %{
+      feedback: Enum.map(Feedback.list_entries(opts), &entry_json/1),
+      total: Feedback.count_entries()
+    })
+  end
+
+  # An unparseable value falls back to the default rather than 400ing: this is an
+  # operator surface reached by hand, and a typo should show the first page, not an
+  # error. `list_entries/1` clamps whatever arrives.
+  defp int_param(params, key) do
+    case params[key] do
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {n, ""} -> n
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
   end
 
   defp entry_json(entry) do

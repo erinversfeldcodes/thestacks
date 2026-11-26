@@ -11,12 +11,15 @@ defmodule Stacks.GDPR.DeletionTest do
   use Core.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
   import Stacks.Factory
 
   alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.Guardian
+  alias Stacks.Accounts.InviteCode
+  alias Stacks.Accounts.Invites
   alias Stacks.Admin.SessionContext
   alias Stacks.AdminSession
   alias Stacks.Audit
@@ -240,6 +243,47 @@ defmodule Stacks.GDPR.DeletionTest do
       assert Enum.all?(rows, &(&1.metadata == %{}))
     end
 
+    test "a self-redeemed invitation is counted once, not once per role" do
+      # ⚠️ This count is CORRECT BY ORDERING, and nothing said so until now.
+      #
+      # `scrub_invites/3` sums two `update_all` results: rows naming the user as
+      # REDEEMER (or by invited address) and rows naming them as ISSUER. One row
+      # can be both — you redeemed your own invitation — and the naive reading
+      # is that it is counted twice.
+      #
+      # It is not, because the subject update runs FIRST and nulls `note` and
+      # `invited_email`, so the author update's `not is_nil(note) or not
+      # is_nil(invited_email)` no longer matches that row. Swap the two blocks
+      # and the author update runs while `redeemed_by_id` is still set, the
+      # subject update then matches, and the sum becomes 2 for one row.
+      #
+      # So the correctness is real and fragile, and depends on an ordering no
+      # comment required. Measured at 1 before this test was written; this is
+      # what keeps it there.
+      user = insert(:user, email: "self-invite-counted-once@stacks.test")
+
+      {:ok, _invite} =
+        %Stacks.Accounts.InviteCode{}
+        |> Ecto.Changeset.change(%{
+          code_hash: "hash-#{System.unique_integer([:positive])}",
+          code_prefix: "SELF",
+          issued_by_id: user.id,
+          redeemed_by_id: user.id,
+          invited_email: "self-invite-counted-once@stacks.test",
+          note: "mine as issuer and as redeemer",
+          max_uses: 1
+        })
+        |> Core.Repo.insert()
+
+      assert {:ok, %{settle_invites_naming_user: %{scrubbed: scrubbed}}} =
+               Deletion.delete_user_data(user.id)
+
+      assert scrubbed == 1,
+             "one invitation row was touched, so the count must be 1. A 2 means the two " <>
+               "update_all results are being summed over the same row — reorder the blocks " <>
+               "and that is exactly what happens."
+    end
+
     test "scrubs PII from the erased user's own event_log rows but preserves the rows" do
       user = insert(:user)
       other_id = Ecto.UUID.generate()
@@ -442,6 +486,114 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
+  describe "delete_user_data/1 invitation erasure" do
+    # The schema guard below allows `invite_codes` to nilify its user FK on the
+    # written justification that "note/invited_email scrubbed by
+    # :settle_invites_naming_user step". Nothing tested that the justification was
+    # TRUE — and for an issuer it was not: the scrub matched `redeemed_by_id` and
+    # `invited_email` but never `issued_by_id`, so erasing the person who WROTE the
+    # note nulled the FK and left the note and a third party's email in the row.
+    # These tests exist so the justification has to stay true.
+    test "erasing the ISSUER scrubs the note they wrote and the email they invited" do
+      issuer = insert(:user)
+
+      {:ok, %{invite: invite}} =
+        Invites.issue(issuer, %{
+          "note" => "Mara from the book club",
+          "invited_email" => "mara@example.test"
+        })
+
+      assert {:ok, _} = Deletion.delete_user_data(issuer.id)
+
+      row = Repo.get(InviteCode, invite.id)
+
+      assert row, "the row should survive — beta history is kept deliberately"
+      assert is_nil(row.note), "the issuer's own free text must not outlive them"
+      assert is_nil(row.invited_email), "the invitee's address must not outlive the issuer"
+    end
+
+    test "erasing the INVITEE scrubs the invitation naming them" do
+      issuer = insert(:user)
+      invitee = insert(:user)
+
+      {:ok, %{invite: invite}} =
+        Invites.issue(issuer, %{
+          "note" => "a friend of a friend",
+          "invited_email" => invitee.email
+        })
+
+      assert {:ok, _} = Deletion.delete_user_data(invitee.id)
+
+      row = Repo.get(InviteCode, invite.id)
+
+      assert row
+      assert is_nil(row.invited_email)
+      assert is_nil(row.note)
+    end
+
+    test "erasing the ISSUER leaves a third party's redemption on the record" do
+      # The issuer's free text and the address they typed are theirs to lose.
+      # WHO REDEEMED is not: that is the redeemer's own record, it is what their
+      # data export reads to tell them which invitation let them in
+      # (`export.ex` matches on `redeemed_by_id`), and nulling it reopens the
+      # first-redemption branch so a later redeemer on a multi-use code
+      # overwrites it.
+      #
+      # The bug this pins: widening the scrub's WHERE to cover the issuer
+      # without narrowing its SET, so one `update_all` applied a redeemer-shaped
+      # `set` to rows that matched for an issuer-shaped reason.
+      issuer = insert(:user)
+      redeemer = insert(:user)
+
+      {:ok, %{invite: invite}} =
+        Invites.issue(issuer, %{
+          "note" => "Mara from the book club",
+          "invited_email" => "mara@example.test",
+          "max_uses" => 2
+        })
+
+      invite
+      |> Ecto.Changeset.change(
+        redeemed_by_id: redeemer.id,
+        redeemed_at: DateTime.utc_now(),
+        use_count: 1
+      )
+      |> Repo.update!()
+
+      assert {:ok, _} = Deletion.delete_user_data(issuer.id)
+
+      row = Repo.get(InviteCode, invite.id)
+
+      assert is_nil(row.note), "the issuer's own free text must not outlive them"
+      assert is_nil(row.invited_email), "the third party's address goes with the issuer"
+
+      assert row.redeemed_by_id == redeemer.id,
+             "the redeemer's own record must survive someone else's erasure — their data " <>
+               "export reads this column to tell them which invitation admitted them"
+
+      refute is_nil(row.redeemed_at),
+             "a redemption with a redeemer but no timestamp is an incoherent row"
+    end
+
+    test "an unrelated user's erasure leaves the invitation alone" do
+      issuer = insert(:user)
+      bystander = insert(:user)
+
+      {:ok, %{invite: invite}} =
+        Invites.issue(issuer, %{
+          "note" => "Mara from the book club",
+          "invited_email" => "mara@example.test"
+        })
+
+      assert {:ok, _} = Deletion.delete_user_data(bystander.id)
+
+      row = Repo.get(InviteCode, invite.id)
+
+      assert row.note == "Mara from the book club", "the scrub must stay scoped, not sweep"
+      assert row.invited_email == "mara@example.test"
+    end
+  end
+
   describe "delete_user_data/1 feed cache erasure" do
     test "erasing a user removes their feed_cache rows and preview reports the count" do
       user = insert(:user, profile_visibility: "platform")
@@ -556,6 +708,43 @@ defmodule Stacks.GDPR.DeletionTest do
       refute_received {:storage_delete, _other}
     end
 
+    test "a storage failure is REPORTED, not counted as a deletion" do
+      # ⛔ THE STEP USED TO REPORT `length(rows)` — what it attempted. So during
+      # a storage outage an erasure reported five objects deleted having deleted
+      # none, then removed the rows, leaving objects no row points at. A
+      # production characterisation found 4,234 of those, and the expensive part
+      # was that nothing recorded WHICH objects leaked at the moment they did:
+      # once the rows are gone, nothing links them to this user or to any user.
+      Application.put_env(:core, :storage, Stacks.GDPR.DeletionTest.FailingStorage)
+      user = insert(:user)
+
+      Repo.insert!(%UploadedImage{
+        user_id: user.id,
+        storage_path: "uploads/doomed-erasure",
+        status: "resolved",
+        uploaded_at: DateTime.utc_now(),
+        expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+      })
+
+      log =
+        capture_log(fn ->
+          assert {:ok, result} = Deletion.delete_user_data(user.id)
+
+          assert result.delete_image_objects == 0,
+                 "the count must be what WENT, not what was attempted"
+        end)
+
+      assert log =~ "survived erasure"
+
+      assert log =~ "uploads/doomed-erasure",
+             "the key must be written down while something still knows it"
+
+      # ⚖️ And the policy is unchanged: the row still goes. A surviving row that
+      # points a reader at their image is the leak this step exists to prevent,
+      # and it is worse than a leaked object.
+      assert Repo.aggregate(from(i in UploadedImage, where: i.user_id == ^user.id), :count) == 0
+    end
+
     test "deletes any outstanding data-export object for the user" do
       user = insert(:user)
       key = "exports/#{user.id}/#{DateTime.to_unix(DateTime.utc_now())}-abc.json"
@@ -573,6 +762,64 @@ defmodule Stacks.GDPR.DeletionTest do
       assert {:ok, _} = Deletion.delete_user_data(user.id)
 
       refute Repo.get(Stacks.Accounts.User, user.id)
+    end
+  end
+
+  describe "financial-record retention across erasure" do
+    test "a seller's transaction survives their erasure, de-linked, keeping its financial facts" do
+      seller = insert(:user)
+      listing = insert(:listing, seller: seller)
+
+      txn =
+        insert(:transaction,
+          listing: listing,
+          seller: seller,
+          seller_id: seller.id,
+          amount_cents: 4200,
+          currency: "ZAR"
+        )
+
+      assert {:ok, _} = Deletion.delete_user_data(seller.id)
+
+      # The listing — which carries free text — is erased with the user.
+      refute Repo.get(Stacks.Marketplace.Listing, listing.id)
+
+      # The transaction is RETAINED for financial/legal audit, with every
+      # reference to the person nulled: the retention the two existing SET NULLs
+      # promised and the listing_id CASCADE used to defeat.
+      kept = Repo.get(Stacks.Marketplace.Transaction, txn.id)
+      assert kept, "the financial record must survive the seller's erasure"
+      assert kept.seller_id == nil, "the seller reference must be nulled"
+      assert kept.listing_id == nil, "the listing reference must be nulled (the listing is gone)"
+      assert kept.amount_cents == 4200, "the retained record keeps its financial facts"
+    end
+  end
+
+  describe "warehouse privilege boundary" do
+    # The erasure claim "personal data is kept out of the warehouse" must rest on
+    # a privilege, not on the absence of a dbt model. `op`'s default privileges
+    # once granted stacks_dbt SELECT on every FUTURE op table, so a new personal
+    # table became warehouse-readable the moment it was created and nothing
+    # failed. The grant is revoked; this guard keeps it revoked, so a reader for
+    # the warehouse is a deliberate per-table grant a reviewer can see.
+    test "stacks_dbt holds no default privilege on future op tables" do
+      {:ok, %{rows: rows}} =
+        Repo.query("""
+        SELECT acl.privilege_type
+        FROM pg_default_acl d
+        JOIN pg_namespace n ON n.oid = d.defaclnamespace
+        CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
+        WHERE n.nspname = 'op'
+          AND d.defaclobjtype = 'r'
+          AND acl.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'stacks_dbt')
+        """)
+
+      assert rows == [],
+             "stacks_dbt has a default privilege on new op tables (#{inspect(rows)}), so every " <>
+               "future op table — a personal-data one included — is warehouse-readable the " <>
+               "moment it is created, and 'kept out of the warehouse' is a convention rather " <>
+               "than a privilege boundary. Revoke ALTER DEFAULT PRIVILEGES … GRANT … TO " <>
+               "stacks_dbt; a table the warehouse legitimately sources is granted explicitly."
     end
   end
 
@@ -601,6 +848,98 @@ defmodule Stacks.GDPR.DeletionTest do
           "ip digest — through the GUC, which is the only path permitted to mutate this table"
     }
 
+    # Every JSONB/JSON column in a schema this application owns, with what it
+    # may hold and how erasure reaches it.
+    #
+    # ⚠️ THIS LIST EXISTS BECAUSE THE FK GRAPH CANNOT SEE INSIDE A BLOB.
+    # `public.oban_jobs.args` held live auth tokens and third-party names for
+    # months — `inviter_name`, `buyer_name`, `seller_name`, where the job's own
+    # `user_id` is the RECIPIENT and the name belongs to someone else — and both
+    # tests above were green throughout, twice over: the queries were scoped to
+    # `op`/`audit`, and a reference inside JSONB carries no foreign key for them
+    # to inspect even when it is in scope.
+    #
+    # That second point defeats the obvious fix as well: a scrub keyed on
+    # `args->>'user_id'` would not have reached `inviter_name`, because the
+    # subject of the data is not the subject of the row.
+    #
+    # So the mechanism here is declaration, not detection. A new JSONB column
+    # fails this test until someone writes down what it can hold — which is the
+    # moment to notice that it holds a name.
+    @jsonb_column_declarations %{
+      "cache.isbn_resolver_cache.metadata" =>
+        "external bibliographic data from Open Library / Google Books, keyed by ISBN. No " <>
+          "platform user appears in it; the rows are a TTL'd cache of third-party facts about " <>
+          "books.",
+      "cache.title_search_cache.metadata" =>
+        "as above, keyed by search title rather than ISBN. The QUERY STRING is the reader's " <>
+          "input, but it is the cache key rather than a column here, and the table is TTL'd.",
+      "op.discovered_sources.config_generated" =>
+        "generated scraper configuration for a bookshop site — selectors and URLs. The subject " <>
+          "is a business, not a person.",
+      "op.event_log.payload" =>
+        "UUID-only by contract (CLAUDE.md, technical-architecture §21): no names, emails or " <>
+          "free text. Erasure scrubs the user's rows to `{}` via the `:scrub_event_log` step, " <>
+          "which matches both the user-aggregate rows and cross-aggregate rows by payload " <>
+          "`user_id`/`author_id`/`seller_id`. Rows are never deleted — the log is immutable.",
+      "op.event_log.metadata" =>
+        "emitter-side context (source, correlation ids). Same UUID-only contract and the same " <>
+          "scrub step as `payload`.",
+      "op.guardian_tokens.claims" =>
+        "JWT claims, whose `sub` is the user's own id. Reached TWICE on erasure: the table " <>
+          "carries a CASCADE FK on `user_id`, and `Deletion` additionally deletes by `sub` " <>
+          "(deletion.ex:112). Belt and braces because guardian_db owns the schema and could " <>
+          "stop populating `user_id` without this application noticing.",
+      "op.users.onboarding_steps" =>
+        "booleans about the user's own onboarding progress. Lives on the user row, so it goes " <>
+          "with `repo.delete(user)`.",
+      "public.oban_jobs.args" =>
+        "job arguments. ⚠️ THE HISTORICAL OFFENDER, now closed: five enqueue sites carried live " <>
+          "auth tokens and three carried third-party names; every one of them resolves from ids " <>
+          "at DELIVERY instead. Erasure does not reach this table and is not expected to — the " <>
+          "invariant is that args hold ids and never the person. A job that outlives its " <>
+          "subject resolves nothing and no-ops.",
+      "public.oban_jobs.meta" =>
+        "Oban's own bookkeeping (recorded uniqueness key, cron hints). Library-owned; this " <>
+          "application never writes it.",
+      "public.oban_jobs.errors" =>
+        "job error history (a jsonb[] array). ⚠️ THE HISTORICAL OFFENDER, now closed: a worker " <>
+          "that raised with a %Stacks.Accounts.User{} argument had the Argon2 hash, the email and " <>
+          "the one-time tokens inspected into here and retained outside erasure. The redacting " <>
+          "Inspect impl on the user struct closes it at the source — a failure recorded now " <>
+          "carries ids and `**redacted**`, never the person — and a one-off scrub emptied the " <>
+          "rows that already held it. Erasure does not reach this table and is not expected to: " <>
+          "the invariant, as for args, is that it holds ids and never the subject."
+    }
+
+    # The schemas whose JSONB columns the declaration test governs. `staging`,
+    # `intermediate` and `marts` are deliberately absent: they are dbt output,
+    # rebuilt in full from the operational tables on every refresh, so they hold
+    # no copy erasure needs to reach. Verified 2026-10-16 on a deployed database
+    # — 48 of 50 relations are VIEWS, and the only two materialised ones carry
+    # book-level aggregates with no identifier in them.
+    @jsonb_governed_schemas ~w(op audit cache public)
+
+    # ⚠️ The scope of this guard, and what it cannot see.
+    #
+    # It asserts FK BEHAVIOUR and nothing else. Where erasure removes rows with
+    # an explicit `delete_all` scoped by `user_id` — `op.feedback_entries` is
+    # the clearest case — that step works whatever the FK does, so deleting the
+    # step leaves this guard GREEN. Each such step is guarded only by its own
+    # per-table test asserting on the CONTENT (for feedback, "erasure DELETES
+    # the body" in `feedback_test.exs`), which in turn stays green if the FK is
+    # relaxed. Established by probe: flipping that FK to SET NULL in the test
+    # database fired this guard and left the body test passing.
+    #
+    # So the two defences do not back each other up. Changing either mechanism
+    # means reading the other one's test, because the green you get for free is
+    # from the half you did not touch.
+    #
+    # The second limit is the allowlist above: each entry's justification is a
+    # SENTENCE, and nothing here checks whether it is true. One of them was
+    # false for months — the invite entry claimed the scrub step covered
+    # `note`/`invited_email`, and the scrub never matched the ISSUER, so an
+    # erased issuer's own free text stayed in the row.
     test "every op.* FK that references op.users cascades, or nullifies only on the allowlist" do
       {:ok, %{rows: rows}} =
         Repo.query("""
@@ -629,6 +968,74 @@ defmodule Stacks.GDPR.DeletionTest do
                "#{inspect(offenders)}. If a nilify is intentional, add the table to " <>
                "@nilify_user_fk_allowlist WITH a justification AND ensure any user free-text " <>
                "on it is erased by a delete_user_data/1 step."
+    end
+
+    # Tables that reach op.users ONLY through a non-CASCADE link to a user-owned
+    # parent, so the FK graph does not carry erasure to them. Each must resolve
+    # erasure some other way, and the value here is the SENTENCE saying how —
+    # either an explicit, user-scoped delete step in `delete_user_data/1`, or
+    # deliberate retention with every reference to the person nulled. The
+    # direct-FK guard above cannot see these: it queries FKs to `op.users`, while
+    # these point at a parent (a bookshelf, a post) that is itself user-owned.
+    # This is the miss "one level out" — a table parented below a user-owned row
+    # with a non-cascading FK survives erasure while every direct-FK test stays
+    # green. Nothing here checks the sentence is true, exactly as for the nilify
+    # allowlist.
+    @indirect_explicit_step_allowlist %{
+      "bookshelf_placement_history" =>
+        "erased: reaches users only through op.bookshelves (from_bookshelf/to_bookshelf are NO " <>
+          "ACTION); removed by the from_bookshelf/to_bookshelf-scoped delete_all in " <>
+          "delete_user_data/1, scoped through the erased user's bookshelf_ids",
+      "transactions" =>
+        "retained: a financial record kept past erasure for audit/legal reasons, with the person " <>
+          "fully de-linked — buyer_id, seller_id and listing_id are all ON DELETE SET NULL, so a " <>
+          "seller's erasure deletes the listing (and its free text) while this row survives " <>
+          "carrying only its amount, currency, status and date. No user free-text lives on it."
+    }
+
+    test "every op.* table reaching op.users only indirectly is CASCADE-reachable or an allowlisted explicit step" do
+      # `user_owned` is the CASCADE transitive closure rooted at op.users: every
+      # op table the FK graph deletes when `repo.delete(user)` fires. A table
+      # that references something in that closure but is NOT itself in it reaches
+      # user data over a link the cascade does not follow, so erasure can only
+      # reach it by an explicit step — which this guard requires be declared.
+      {:ok, %{rows: rows}} =
+        Repo.query("""
+        WITH RECURSIVE user_owned AS (
+          SELECT c.oid
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'op' AND c.relname = 'users'
+          UNION
+          SELECT child.oid
+          FROM pg_constraint con
+          JOIN pg_class child ON child.oid = con.conrelid
+          JOIN pg_namespace cn ON cn.oid = child.relnamespace
+          JOIN user_owned uo ON uo.oid = con.confrelid
+          WHERE con.contype = 'f' AND con.confdeltype = 'c' AND cn.nspname = 'op'
+        )
+        SELECT DISTINCT c.relname
+        FROM pg_constraint con
+        JOIN pg_class c ON c.oid = con.conrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'op'
+          AND con.contype = 'f'
+          AND con.confrelid IN (SELECT oid FROM user_owned)
+          AND con.confrelid <> 'op.users'::regclass
+          AND con.conrelid NOT IN (SELECT oid FROM user_owned)
+        ORDER BY c.relname
+        """)
+
+      offenders =
+        for [table] <- rows,
+            not Map.has_key?(@indirect_explicit_step_allowlist, table),
+            do: table
+
+      assert offenders == [],
+             "op.* tables that reach op.users only through a non-CASCADE link to a user-owned " <>
+               "parent, so the FK cascade does not erase them and nothing here proves an " <>
+               "explicit step does. Offenders: #{inspect(offenders)}. Either make the FK " <>
+               "CASCADE, or add the table to @indirect_explicit_step_allowlist naming the " <>
+               "delete_user_data/1 step that erases it."
     end
 
     test "every user-referencing column in op and audit has a foreign key to op.users" do
@@ -680,7 +1087,87 @@ defmodule Stacks.GDPR.DeletionTest do
                "the rows are deliberately retained past erasure — add it to " <>
                "@fkless_user_column_allowlist WITH the reason."
     end
+
+    # The blind spot the two tests above share, closed by declaration.
+    #
+    # Both reach rows through the FK graph, and a reference held inside a JSONB
+    # blob has no foreign key to inspect. `public.oban_jobs.args` carried live
+    # auth tokens and three third-party names while both stayed green.
+    test "every JSONB column in an owned schema declares what it may hold" do
+      {:ok, %{rows: rows}} =
+        Repo.query(
+          """
+          SELECT n.nspname, c.relname, a.attname
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_type t ON t.oid = a.atttypid
+           WHERE n.nspname = ANY($1)
+             AND c.relkind = 'r'
+             AND a.attnum > 0
+             AND NOT a.attisdropped
+             AND t.typname IN ('jsonb', 'json', '_jsonb', '_json')
+           ORDER BY 1, 2, 3
+          """,
+          [@jsonb_governed_schemas]
+        )
+
+      found = for [schema, table, col] <- rows, do: "#{schema}.#{table}.#{col}"
+
+      undeclared = Enum.reject(found, &Map.has_key?(@jsonb_column_declarations, &1))
+
+      assert undeclared == [],
+             "JSONB column(s) with no declaration of what they may hold: " <>
+               "#{inspect(undeclared)}. The FK-based guards above cannot see inside a blob — " <>
+               "`oban_jobs.args` held live auth tokens and three third-party names while both " <>
+               "were green — so a new JSONB column has to say for itself. Add it to " <>
+               "@jsonb_column_declarations stating what it may contain and how erasure reaches " <>
+               "it; if the answer turns out to be 'a person's name', that is the finding."
+
+      # Anti-vacuity, and specifically against the shape that made this
+      # necessary: a declaration list is satisfied by an empty query, and the
+      # query was wrong-by-scope for months. Naming the historical offender
+      # means a scope that stops covering `public` fails here rather than
+      # passing quietly.
+      assert "public.oban_jobs.args" in found,
+             "the sweep did not find public.oban_jobs.args — it is not reading the schemas it " <>
+               "names, which is exactly how the original guard missed this column"
+
+      stale = Enum.reject(Map.keys(@jsonb_column_declarations), &(&1 in found))
+
+      assert stale == [],
+             "declared JSONB column(s) that no longer exist: #{inspect(stale)}. A declaration " <>
+               "for a dropped column is a sentence nobody will re-read; remove it."
+    end
   end
+end
+
+defmodule Stacks.GDPR.DeletionTest.FailingStorage do
+  @moduledoc """
+      Test-local storage backend whose `delete/1` always fails. Proves that an
+      erasure reports what WENT rather than what it attempted, and writes the
+      surviving keys down — the only moment anything still links them to a user.
+  """
+
+  @behaviour Stacks.Storage.StorageBehaviour
+
+  @impl true
+  def put(key, _data, _opts \\ []), do: {:ok, key}
+
+  @impl true
+  def presigned_url(key, _ttl_seconds \\ 900), do: {:ok, key}
+
+  @impl true
+  def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []), do: {:ok, key}
+
+  @impl true
+  def head(_key), do: {:ok, 1}
+
+  @impl true
+  def list(_prefix), do: {:ok, []}
+
+  @impl true
+  def delete(_key), do: {:error, :simulated_storage_outage}
 end
 
 defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
@@ -703,7 +1190,7 @@ defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
   def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []), do: {:ok, key}
 
   @impl true
-  def head(_key), do: {:error, :not_found}
+  def head(_key), do: {:ok, 1}
 
   @impl true
   def list(prefix), do: {:ok, Process.get({__MODULE__, prefix}, [])}

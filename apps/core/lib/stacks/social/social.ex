@@ -13,7 +13,8 @@ defmodule Stacks.Social do
   alias Stacks.Blog.Post
   alias Stacks.Books.Book
   alias Stacks.Events
-  alias Stacks.Shelving.{Bookshelf, Placement}
+  alias Stacks.Scope
+  alias Stacks.Shelving.Bookshelf
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
   @group_required_fields [:owner_id, :name, :type]
@@ -87,33 +88,44 @@ defmodule Stacks.Social do
   """
   @spec block_user(String.t(), String.t()) :: {:ok, UserBlock.t()} | {:error, Ecto.Changeset.t()}
   def block_user(blocker_id, blocked_id) do
-    result =
-      %UserBlock{}
-      |> user_block_changeset(%{blocker_id: blocker_id, blocked_id: blocked_id})
-      |> Repo.insert()
+    Scope.with_user(blocker_id, fn ->
+      # ⛔ `mode: :savepoint` is load-bearing now that this runs inside a
+      # row-level-security scope, and the reason is a measured Ecto
+      # behaviour. A declared `unique_constraint` violation inside an
+      # EXPLICIT transaction returns `{:error, :rollback}` from that
+      # transaction rather than `{:error, changeset}` from the insert — Ecto
+      # does not savepoint automatically here — so the duplicate-block case
+      # would lose its changeset and the caller could not tell a duplicate
+      # from any other failure. The savepoint keeps constraint recovery
+      # working inside the scope's transaction.
+      result =
+        %UserBlock{}
+        |> user_block_changeset(%{blocker_id: blocker_id, blocked_id: blocked_id})
+        |> Repo.insert(mode: :savepoint)
 
-    case result do
-      {:ok, block} ->
-        :telemetry.execute([:stacks, :social, :block], %{count: 1}, %{})
+      case result do
+        {:ok, block} ->
+          :telemetry.execute([:stacks, :social, :block], %{count: 1}, %{})
 
-        Events.emit_safe(%{
-          event_type: "social.user_blocked",
-          aggregate_type: "user",
-          aggregate_id: blocker_id,
-          payload: %{blocked_id: blocked_id}
-        })
+          Events.emit_safe(%{
+            event_type: "social.user_blocked",
+            aggregate_type: "user",
+            aggregate_id: blocker_id,
+            payload: %{blocked_id: blocked_id}
+          })
 
-        {:ok, block}
+          {:ok, block}
 
-      {:error, changeset} ->
-        :telemetry.execute(
-          [:stacks, :social, :block_error],
-          %{count: 1},
-          %{reason: block_error_reason(changeset)}
-        )
+        {:error, changeset} ->
+          :telemetry.execute(
+            [:stacks, :social, :block_error],
+            %{count: 1},
+            %{reason: block_error_reason(changeset)}
+          )
 
-        {:error, changeset}
-    end
+          {:error, changeset}
+      end
+    end)
   end
 
   @spec block_error_reason(Ecto.Changeset.t()) :: :already_blocked | :invalid
@@ -133,29 +145,31 @@ defmodule Stacks.Social do
   """
   @spec unblock_user(String.t(), String.t()) :: {:ok, :unblocked} | {:error, :not_found}
   def unblock_user(blocker_id, blocked_id) do
-    query =
-      from(b in UserBlock,
-        where: b.blocker_id == ^blocker_id and b.blocked_id == ^blocked_id
-      )
+    Scope.with_user(blocker_id, fn ->
+      query =
+        from(b in UserBlock,
+          where: b.blocker_id == ^blocker_id and b.blocked_id == ^blocked_id
+        )
 
-    case Repo.one(query) do
-      nil ->
-        {:error, :not_found}
+      case Repo.one(query) do
+        nil ->
+          {:error, :not_found}
 
-      block ->
-        {:ok, _} = Repo.delete(block)
+        block ->
+          {:ok, _} = Repo.delete(block)
 
-        :telemetry.execute([:stacks, :social, :unblock], %{count: 1}, %{})
+          :telemetry.execute([:stacks, :social, :unblock], %{count: 1}, %{})
 
-        Events.emit_safe(%{
-          event_type: "social.user_unblocked",
-          aggregate_type: "user",
-          aggregate_id: blocker_id,
-          payload: %{blocked_id: blocked_id}
-        })
+          Events.emit_safe(%{
+            event_type: "social.user_unblocked",
+            aggregate_type: "user",
+            aggregate_id: blocker_id,
+            payload: %{blocked_id: blocked_id}
+          })
 
-        {:ok, :unblocked}
-    end
+          {:ok, :unblocked}
+      end
+    end)
   end
 
   @doc """
@@ -165,26 +179,43 @@ defmodule Stacks.Social do
   """
   @spec list_blocked_users(String.t(), keyword()) :: {[map()], non_neg_integer()}
   def list_blocked_users(blocker_id, opts \\ []) do
-    page = Keyword.get(opts, :page, 1)
-    per_page = 20
+    Scope.with_user(blocker_id, fn ->
+      page = Keyword.get(opts, :page, 1)
+      per_page = 20
 
-    base =
-      from b in UserBlock,
-        join: u in User,
-        on: u.id == b.blocked_id,
-        where: b.blocker_id == ^blocker_id,
-        select: %{id: u.id, display_name: u.display_name, blocked_at: b.created_at},
-        order_by: [desc: b.created_at]
+      base =
+        from b in UserBlock,
+          join: u in User,
+          on: u.id == b.blocked_id,
+          where: b.blocker_id == ^blocker_id,
+          # `display_name` is nullable; `handle` is NOT NULL. Coalescing here means
+          # no null ever leaves this endpoint, so one blocked reader who never set
+          # a name cannot decode-fail the whole list on the client — which is
+          # worse here than anywhere else, because this surface exists to let
+          # someone UNBLOCK people and a failed decode hides every row.
+          #
+          # ⚠️ Three sibling queries in this module already did this, and one of
+          # them carries the same reasoning in a comment. This query was missed, so
+          # the defect was fixed where it was found and left where it was not. The
+          # fix belongs on the server rather than in a tolerant decoder: a decoder
+          # that accepted null would render a nameless row instead.
+          select: %{
+            id: u.id,
+            display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
+            blocked_at: b.created_at
+          },
+          order_by: [desc: b.created_at]
 
-    total = Repo.aggregate(base, :count)
+      total = Repo.aggregate(base, :count)
 
-    blocked =
-      base
-      |> limit(^per_page)
-      |> offset(^((page - 1) * per_page))
-      |> Repo.all()
+      blocked =
+        base
+        |> limit(^per_page)
+        |> offset(^((page - 1) * per_page))
+        |> Repo.all()
 
-    {blocked, total}
+      {blocked, total}
+    end)
   end
 
   @doc """
@@ -193,15 +224,46 @@ defmodule Stacks.Social do
       `blocked?(viewer_id, owner_id)` returns true if viewer blocked owner
       OR owner blocked viewer.
   """
-  @spec blocked?(String.t(), String.t()) :: boolean()
+  @spec blocked?(String.t() | nil, String.t() | nil) :: boolean()
+  def blocked?(nil, _owner_id), do: false
+  def blocked?(_viewer_id, nil), do: false
+
   def blocked?(viewer_id, owner_id) do
-    Repo.exists?(
-      from(b in UserBlock,
-        where:
-          (b.blocker_id == ^viewer_id and b.blocked_id == ^owner_id) or
-            (b.blocker_id == ^owner_id and b.blocked_id == ^viewer_id)
-      )
-    )
+    # ⚠️ Deliberately NOT wrapped in a scope of its own. `op.blocked_pair/2`
+    # refuses a question about two users when a scope is set and neither is the
+    # scoped user, and the obvious response — scope to the viewer right here —
+    # costs a transaction per call. Measured: the public blog listing resolves
+    # visibility once per author, and that wrap took a bounded 13 queries for
+    # twenty posts to 43, breaking the bound its own test exists to hold.
+    #
+    # So the scope belongs at the request boundary, where one transaction serves
+    # the whole read, and this function is correct whether or not one is set: no
+    # scope is the public path, the viewer's scope is the signed-in path, and a
+    # THIRD user's scope being active while asking about two others is a genuine
+    # bug that should surface rather than be absorbed.
+    #
+    # ⛔ Relying on the transaction to revert the scope was itself the defect
+    # that made this look fragile — see `Stacks.Scope.with_user/2`, which now
+    # restores the previous value explicitly instead.
+    # ⛔ Asked through `op.blocked_pair/2`, not with a query of our own, and the
+    # reason is row-level security rather than tidiness.
+    #
+    # This predicate is symmetric — it answers "has EITHER of these two blocked
+    # the other" — while the `user_blocks` policy only ever shows a caller its
+    # OWN block rows. So a direct query scoped to the viewer cannot see a block
+    # the owner created, and would answer `false` for a pair that really is
+    # blocked. It would do so SILENTLY, in the authorisation gate, which is the
+    # worst place for a quiet wrong answer: two people who blocked each other
+    # would become mutually visible again.
+    #
+    # `op.blocked_pair/2` is `SECURITY DEFINER`, owned by a role that cannot log
+    # in and has no `BYPASSRLS`, and it returns one boolean. Measured: scoped as
+    # the blocked party a direct read of `user_blocks` returns 0 rows while this
+    # returns `true`, and an unrelated pair still returns `false`.
+    %{rows: [[blocked?]]} =
+      Repo.query!("SELECT op.blocked_pair($1::uuid, $2::uuid)", [viewer_id, owner_id])
+
+    blocked?
   end
 
   @doc """
@@ -209,12 +271,19 @@ defmodule Stacks.Social do
   """
   @spec blocked_user_ids(binary()) :: [binary()]
   def blocked_user_ids(user_id) do
-    Repo.all(
-      from(b in UserBlock,
-        where: b.blocker_id == ^user_id,
-        select: b.blocked_id
+    # ⚠️ Scopeable, and scoped rather than routed through a definer function:
+    # the rows wanted are exactly the ones the owner policy admits when scoped
+    # to this user, because the predicate IS `blocker_id = <this user>`. The
+    # both-directions question is the one that needs `op.blocked_pair/2`; this
+    # one-direction list does not.
+    Scope.with_user(user_id, fn ->
+      Repo.all(
+        from(b in UserBlock,
+          where: b.blocker_id == ^user_id,
+          select: b.blocked_id
+        )
       )
-    )
+    end)
   end
 
   @doc """
@@ -225,11 +294,13 @@ defmodule Stacks.Social do
   """
   @spec blocked_by?(String.t(), String.t()) :: boolean()
   def blocked_by?(viewer_id, owner_id) do
-    Repo.exists?(
-      from(b in UserBlock,
-        where: b.blocker_id == ^viewer_id and b.blocked_id == ^owner_id
+    Scope.with_user(viewer_id, fn ->
+      Repo.exists?(
+        from(b in UserBlock,
+          where: b.blocker_id == ^viewer_id and b.blocked_id == ^owner_id
+        )
       )
-    )
+    end)
   end
 
   @dialyzer {:no_opaque, create_group: 2}
@@ -356,7 +427,20 @@ defmodule Stacks.Social do
             event_type: "group.invitation_sent",
             aggregate_type: "group",
             aggregate_id: group_id,
-            payload: %{invited_user_id: invitee.id, invited_by_id: inviter_id}
+            # v2 adds `invitation_id`. v1 rows in `event_log` are carried
+            # forward by `Upcaster.upcast/1` without one, because it cannot be
+            # recovered after the fact.
+            schema_version: 2,
+            # `invitation_id` is what the notification handler needs to build the
+            # accept link. It is a UUID, so it sits inside the event_log's
+            # UUID-only payload contract — unlike the inviter and group NAMES
+            # the handler used to look for here, which were never emitted and
+            # never should be.
+            payload: %{
+              invited_user_id: invitee.id,
+              invited_by_id: inviter_id,
+              invitation_id: invitation.id
+            }
           })
 
           {:ok, invitation}
@@ -548,6 +632,12 @@ defmodule Stacks.Social do
       Returns {:error,:already_granted} if grant already exists.
   """
   def grant_visibility(bookshelf_id, caller_id, grantee_user_id) do
+    Scope.with_user(caller_id, fn ->
+      do_grant_visibility(bookshelf_id, caller_id, grantee_user_id)
+    end)
+  end
+
+  defp do_grant_visibility(bookshelf_id, caller_id, grantee_user_id) do
     case Repo.get(Bookshelf, bookshelf_id) do
       nil ->
         {:error, :not_found}
@@ -567,7 +657,11 @@ defmodule Stacks.Social do
             granted_to_id: grantee_user_id,
             granted_by_id: caller_id
           })
-          |> Repo.insert()
+          # ⛔ Savepointed for the same reason as the block insert: a declared
+          # unique_constraint violation inside the scope's transaction would
+          # otherwise surface as `{:error, :rollback}` and the :already_granted
+          # case would lose the changeset that identifies it.
+          |> Repo.insert(mode: :savepoint)
 
         case result do
           {:ok, grant} -> {:ok, grant}
@@ -581,6 +675,12 @@ defmodule Stacks.Social do
       Returns {:error,:not_found} if no grant exists.
   """
   def revoke_visibility(bookshelf_id, caller_id, grantee_user_id) do
+    Scope.with_user(caller_id, fn ->
+      do_revoke_visibility(bookshelf_id, caller_id, grantee_user_id)
+    end)
+  end
+
+  defp do_revoke_visibility(bookshelf_id, caller_id, grantee_user_id) do
     case Repo.get(Bookshelf, bookshelf_id) do
       nil ->
         {:error, :not_found}
@@ -612,37 +712,41 @@ defmodule Stacks.Social do
       Lists all visibility grants for a bookshelf. Returns {:error,:unauthorized} if caller doesn't own bookshelf.
   """
   def list_visibility_grants(bookshelf_id, caller_id) do
-    case Repo.get(Bookshelf, bookshelf_id) do
-      nil ->
-        {:error, :not_found}
+    Scope.with_user(caller_id, fn ->
+      case Repo.get(Bookshelf, bookshelf_id) do
+        nil ->
+          {:error, :not_found}
 
-      %Bookshelf{user_id: user_id} when user_id != caller_id ->
-        {:error, :unauthorized}
+        %Bookshelf{user_id: user_id} when user_id != caller_id ->
+          {:error, :unauthorized}
 
-      %Bookshelf{} ->
-        grants =
-          from(g in VisibilityGrant,
-            where: g.resource_type == "bookshelf" and g.resource_id == ^bookshelf_id,
-            order_by: [desc: g.created_at]
-          )
-          |> Repo.all()
+        %Bookshelf{} ->
+          grants =
+            from(g in VisibilityGrant,
+              where: g.resource_type == "bookshelf" and g.resource_id == ^bookshelf_id,
+              order_by: [desc: g.created_at]
+            )
+            |> Repo.all()
 
-        {:ok, grants}
-    end
+          {:ok, grants}
+      end
+    end)
   end
 
   @doc """
       Returns true if viewer_id has an explicit visibility grant for the given bookshelf_id.
   """
   def has_visibility_grant?(bookshelf_id, viewer_id) do
-    Repo.exists?(
-      from(g in VisibilityGrant,
-        where:
-          g.resource_type == "bookshelf" and
-            g.resource_id == ^bookshelf_id and
-            g.granted_to_id == ^viewer_id
+    Scope.with_user(viewer_id, fn ->
+      Repo.exists?(
+        from(g in VisibilityGrant,
+          where:
+            g.resource_type == "bookshelf" and
+              g.resource_id == ^bookshelf_id and
+              g.granted_to_id == ^viewer_id
+        )
       )
-    )
+    end)
   end
 
   @doc """
@@ -674,7 +778,19 @@ defmodule Stacks.Social do
     end
   end
 
+  # ⚠️ Scoped to the VIEWER around the whole read, which this needs for a
+  # reason beyond the usual one: `op.group_feed_placements` asks the scope who
+  # is calling and refuses a caller that is not a member of the group. The
+  # viewer cannot be passed as an argument, because an argument is something a
+  # caller asserts and the scope is something the request established.
+  #
+  # ⚠️ It also flattens what used to be two transactions: `blocked_user_ids/1`
+  # scopes to the same viewer, so nested inside this it runs directly.
   defp build_feed(group_id, viewer_id, opts) do
+    Scope.with_user(viewer_id, fn -> do_build_feed(group_id, viewer_id, opts) end)
+  end
+
+  defp do_build_feed(group_id, viewer_id, opts) do
     limit = min(Keyword.get(opts, :limit, 20), 50)
     before_dt = Keyword.get(opts, :before)
     blocked_ids = blocked_user_ids(viewer_id)
@@ -687,7 +803,12 @@ defmodule Stacks.Social do
     if member_ids == [] do
       {:ok, []}
     else
-      placement_items = feed_placements(member_ids, before_dt, limit)
+      # ⛔ `group_id` and an EXCLUSION list, never the member list. The function
+      # derives the members itself from `op.group_members`; handing it the
+      # subject would let any caller name whose shelf activity to return, which
+      # is what the previous signature did. `blocked_ids` narrows the result and
+      # must be applied before the limit, or a page comes back short.
+      placement_items = feed_placements(group_id, blocked_ids, before_dt, limit)
       post_items = feed_posts(member_ids, before_dt, limit)
 
       items =
@@ -699,39 +820,128 @@ defmodule Stacks.Social do
     end
   end
 
-  defp feed_placements(member_ids, before_dt, limit) do
-    base =
-      from(p in Placement,
-        join: bs in Bookshelf,
-        on: p.bookshelf_id == bs.id,
-        join: b in Book,
-        on: p.book_id == b.id,
-        join: u in User,
-        on: bs.user_id == u.id,
-        where: bs.user_id in ^member_ids,
-        where: p.visibility in ["group", "platform"],
-        where: is_nil(p.removed_at),
-        order_by: [desc: p.placed_at],
-        limit: ^limit,
-        select: %{
-          type: :placement_created,
-          placement_id: p.id,
-          book_id: b.id,
-          book_title: b.title,
-          user_id: u.id,
-          user_display_name: fragment("coalesce(?, ?)", u.display_name, u.handle),
-          occurred_at: p.placed_at
-        }
+  # ⛔ Two steps, and the split is the point: the secured tables are read through
+  # a definer function, the presentation join through tables that carry no
+  # policy.
+  #
+  # This question is cross-user by intent — it asks what the OTHER members of a
+  # group have shelved — so no per-user scope is correct. Scoping to the viewer
+  # would return only the viewer's own placements and silently empty the feed,
+  # which is a wrong answer rather than an error.
+  #
+  # ⚠️ It was previously one unscoped query, and it was INVISIBLE because
+  # `blocked_user_ids/1` raised first on the same request. Scoping that one
+  # moved the failure here rather than fixing the endpoint — the stacked-defect
+  # pattern this project has on record, so re-drive the surface rather than
+  # trusting a fixed neighbour.
+  defp feed_placements(group_id, excluded_ids, before_dt, limit) do
+    rows =
+      Repo.query!(
+        "SELECT placement_id, book_id, owner_id, placed_at FROM op.group_feed_placements($1, $2, $3, $4)",
+        [
+          Ecto.UUID.dump!(group_id),
+          Enum.map(excluded_ids, &Ecto.UUID.dump!/1),
+          before_dt,
+          limit
+        ]
+      ).rows
+
+    rows
+    |> Enum.map(fn [placement_id, book_id, owner_id, placed_at] ->
+      %{
+        placement_id: load_uuid(placement_id),
+        book_id: load_uuid(book_id),
+        owner_id: load_uuid(owner_id),
+        placed_at: placed_at
+      }
+    end)
+    |> decorate_placement_rows()
+  end
+
+  # The book title and the owner's display name, joined in Ecto because
+  # `op.books` and `op.users` carry no row-level policy and so need no
+  # privileged read. Keeping them out of the definer is what holds it to four
+  # values about secured rows.
+  defp decorate_placement_rows([]), do: []
+
+  defp decorate_placement_rows(rows) do
+    book_ids = rows |> Enum.map(& &1.book_id) |> Enum.uniq()
+    owner_ids = rows |> Enum.map(& &1.owner_id) |> Enum.uniq()
+
+    titles =
+      from(b in Book, where: b.id in ^book_ids, select: {b.id, b.title})
+      |> Repo.all()
+      |> Map.new()
+
+    names =
+      from(u in User,
+        where: u.id in ^owner_ids,
+        select: {u.id, fragment("coalesce(?, ?)", u.display_name, u.handle)}
       )
+      |> Repo.all()
+      |> Map.new()
 
-    base =
-      if before_dt do
-        from [p, ...] in base, where: p.placed_at < ^before_dt
-      else
-        base
-      end
+    # ⛔ A row whose decoration is incomplete is DROPPED, not emitted with nils.
+    # The query this replaced INNER JOINed `Book` and `User`, so a placement
+    # whose book or owner was missing never reached the feed. That is the real
+    # argument for the filter: it makes this rewrite BEHAVIOUR-PRESERVING.
+    # Without it, moving a join into Elixir would have silently changed a
+    # reader-facing contract as a side effect of a refactor.
+    #
+    # ⚠️ For the same reason there is deliberately no log line here: logging
+    # would be new behaviour relative to the INNER JOIN, making the rewrite
+    # non-equivalent in a second way. Whether a dropped feed row should be
+    # noisy is a real question about the OLD behaviour too, and this is the
+    # wrong place to decide it. A telemetry count is not behaviour, so that is
+    # what it gets.
+    #
+    # ⚠️ Unreachable today: `book_id` is FK-constrained, and erasure removes a
+    # user's placements along with the user. Counted anyway, because
+    # "unreachable" resting on an unmeasured assumption is how this project
+    # accumulated 6,655 expired image rows behind a nightly `:ok`. The counter
+    # turns "cannot happen" from a belief into a measurement.
+    decorated =
+      rows
+      |> Enum.filter(fn row ->
+        Map.has_key?(titles, row.book_id) and Map.has_key?(names, row.owner_id)
+      end)
+      |> Enum.map(fn row ->
+        %{
+          type: :placement_created,
+          placement_id: row.placement_id,
+          book_id: row.book_id,
+          # ⚠️ `fetch!` is a TRIPWIRE for the filter above being edited away —
+          # not, as an earlier version of this comment claimed, what makes a
+          # future gap loud. The filter guarantees both keys are present, so a
+          # genuine gap is dropped before it ever reaches here and this can
+          # never raise while the two sit together.
+          book_title: Map.fetch!(titles, row.book_id),
+          user_id: row.owner_id,
+          user_display_name: Map.fetch!(names, row.owner_id),
+          occurred_at: row.placed_at
+        }
+      end)
 
-    Repo.all(base)
+    # ⚠️ Emitted UNCONDITIONALLY, including the zero. Guarding on `dropped > 0`
+    # looks like the thrifty choice and defeats the purpose: with no emission
+    # the series never comes into existence, so the panel's `increase()` renders
+    # **No data** — and renders it identically for a healthy system, a feed
+    # nobody has loaded, a broken emitter, and a deleted metric. A counter whose
+    # whole job is to show a zero has to emit the zero.
+    :telemetry.execute(
+      [:stacks, :social, :feed_row_undecorated],
+      %{count: length(rows) - length(decorated)},
+      %{}
+    )
+
+    decorated
+  end
+
+  defp load_uuid(raw) when is_binary(raw) do
+    case Ecto.UUID.load(raw) do
+      {:ok, uuid} -> uuid
+      :error -> Ecto.UUID.cast!(raw)
+    end
   end
 
   defp feed_posts(member_ids, before_dt, limit) do

@@ -9,6 +9,72 @@ defmodule Stacks.Audit do
 
   alias Core.Repo
 
+  # ⚠️ `action` and `resource_type` are arbitrary strings on the way IN — the
+  # function signature says `String.t()` and nothing validates them — and they
+  # went straight out as Prometheus labels, bounded by caller DISCIPLINE and by
+  # nothing else.
+  #
+  # That is not good enough for a label. A label is a dimension: one series per
+  # distinct value, forever. A future caller interpolating a resource name, an
+  # email or an id — the obvious thing to do when debugging — would mint a series
+  # per value in a store that has no erasure path and, for a family classified
+  # public, an anonymous reader.
+  #
+  # So the ROW keeps the exact string, because the audit log is the record and
+  # must be faithful, and the LABEL is bounded to a known set with everything
+  # else collapsing to "other". An unexpected action showing up as `other` in the
+  # metric is a signal to come and add it here; an unbounded label is a signal
+  # nobody gets until the store is already full.
+  #
+  # These sets are the labels' vocabulary, NOT a validation of what may be
+  # audited: a new action writes its row correctly on the day it is added and
+  # only its metric needs catching up.
+  #
+  # ⚠️ The completeness of these sets is a fact about the CALLERS, not about
+  # this list, so it is asserted by a set difference over every audited action
+  # in the tree rather than claimed here. An earlier version of this comment
+  # read "Every caller today passes a literal from the sets below" and was
+  # false on disk the day it was written: four values were missing, including
+  # `system.rollback`, emitted forty lines below by `log_rollback/1` in this
+  # very module, and `admin.account_restored`, which is the only signal
+  # recording that an operator reached into a specific account. Collapsing
+  # that one to `other` made it indistinguishable from any unknown value.
+  @telemetry_actions ~w(
+    admin.account_restored admin.call admin.login admin.mfa_verified
+    data.correction.applied
+    invite.issued invite.revoked
+    operator.access_recovered
+    placement.created placement.moved placement.removed
+    placement.reread placement.restored
+    system.rollback
+    user.data_deleted user.deletion_requested user.login user.registered
+  )
+
+  @telemetry_resource_types ~w(
+    admin_endpoint admin_session book_edition bookshelf deploy invite oban_job
+    placement user unknown
+  )
+
+  # ⚠️ A GUARD, not a runtime membership test inside an `if`, and the difference
+  # is not style. `when value in @list` expands at COMPILE time, so the list is
+  # fixed where it is declared and cannot be handed in by a caller — a bound is
+  # not a bound if the caller chooses it. It also removes the `is_binary/1`
+  # clause the runtime version needed: a `nil` or an atom simply matches no
+  # literal in the list and falls through to `other` on its own.
+  defp bounded_action(action) when action in @telemetry_actions, do: action
+  defp bounded_action(_action), do: "other"
+
+  defp bounded_resource_type(type) when type in @telemetry_resource_types, do: type
+  defp bounded_resource_type(_type), do: "other"
+
+  @doc "The action values the write counter may label. Anything else labels as `other`."
+  @spec telemetry_actions() :: [String.t()]
+  def telemetry_actions, do: @telemetry_actions
+
+  @doc "The resource types the write counter may label. Anything else labels as `other`."
+  @spec telemetry_resource_types() :: [String.t()]
+  def telemetry_resource_types, do: @telemetry_resource_types
+
   @doc """
       Logs an audit entry. This function only ever INSERTs — never updates or deletes.
 
@@ -67,8 +133,8 @@ defmodule Stacks.Audit do
     case Repo.insert_all("audit_log", [params], prefix: "audit") do
       {1, _} ->
         :telemetry.execute([:stacks, :gdpr, :audit, :write], %{count: 1}, %{
-          action: action,
-          resource_type: resource_type
+          action: bounded_action(action),
+          resource_type: bounded_resource_type(resource_type)
         })
 
         {:ok, result_params}
@@ -137,11 +203,25 @@ defmodule Stacks.Audit do
 
     user_id_binary = Ecto.UUID.dump!(user_id)
 
-    total =
-      case Repo.query("SELECT COUNT(*) FROM audit.audit_log WHERE user_id = $1", [user_id_binary]) do
-        {:ok, %{rows: [[count]]}} -> count
-        _ -> 0
-      end
+    # ⛔ Both queries below are deliberately LOUD. They used to map every error
+    # to an empty success — `_ -> 0` and `_ -> []` — which made this surface
+    # unable to distinguish "this reader has no audit history" from "the query
+    # was refused", and it answered `200 {"total":0,"entries":[]}` for both.
+    #
+    # Measured on a deployed stack: the runtime role holds INSERT and no SELECT
+    # on `audit.audit_log`, so every read was refused and every reader was told
+    # their history was empty — a confident lie on a surface whose entire job is
+    # to tell someone what was recorded about them. An absent key would have
+    # been honest; a zero is a claim.
+    #
+    # ⚠️ A failed read must therefore reach the caller as an error, not as a
+    # shorter list. The one thing that IS tolerated is an unreadable `metadata`
+    # blob on an otherwise-readable row — that rescue lives in
+    # `decrypt_metadata/1` and is a different mechanism with its own tests,
+    # because the row is the record that something happened and the metadata is
+    # the least important part of it.
+    %{rows: [[total]]} =
+      Repo.query!("SELECT COUNT(*) FROM audit.audit_log WHERE user_id = $1", [user_id_binary])
 
     sql = """
     SELECT id, action, resource_type, resource_id, metadata, occurred_at
@@ -151,11 +231,7 @@ defmodule Stacks.Audit do
     LIMIT $2 OFFSET $3
     """
 
-    rows =
-      case Repo.query(sql, [user_id_binary, per_page, offset]) do
-        {:ok, %{rows: r}} -> r
-        _ -> []
-      end
+    %{rows: rows} = Repo.query!(sql, [user_id_binary, per_page, offset])
 
     :telemetry.execute([:stacks, :gdpr, :audit, :read], %{count: 1}, %{})
 

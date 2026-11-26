@@ -124,9 +124,12 @@ def analyse(enums: dict[str, dict]) -> tuple[list[dict], list[str]]:
 
         matched: dict[str, set[str]] = {}
         for literal in LITERAL_RE.findall(text):
-            enum_name = value_owner.get(literal)
-            if enum_name:
-                matched.setdefault(enum_name, set()).add(literal)
+            # A distinct name from the `enum_name` bound below: this one is
+            # Optional (a literal may belong to no enum) and reusing the name
+            # made the two types disagree in one scope.
+            owner = value_owner.get(literal)
+            if owner:
+                matched.setdefault(owner, set()).add(literal)
 
         for enum_name, ignores in declared.items():
             if enum_name not in enums:

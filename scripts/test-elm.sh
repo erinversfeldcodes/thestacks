@@ -12,7 +12,7 @@ output="$(cd frontend && npx elm-test 2>&1)" && exit_code=0 || exit_code=$?
 echo "$output"
 
 if [[ $exit_code -ne 0 ]]; then
-    if echo "$output" | grep -qE "No \.elm files found|There are no tests"; then
+    if grep -qE "No \.elm files found|There are no tests" <<< "$output"; then
         echo "No Elm tests found — skipping (add tests to frontend/tests/)."
         exit 0
     fi

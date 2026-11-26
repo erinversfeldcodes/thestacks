@@ -1,6 +1,6 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import type { APIRequestContext } from "@playwright/test";
-import { ownerAdminToken, uniqueEmail } from "./helpers";
+import { authenticateOwner, uniqueEmail } from "./helpers";
 
 /**
  * The closed-beta gate itself, driven against the real stack with
@@ -9,8 +9,12 @@ import { ownerAdminToken, uniqueEmail } from "./helpers";
  * refusal, the code lifecycle, revocation, and single use.
  */
 
+// No header to build: the operator is elevated once in `auth.setup.ts`, and this
+// context only needs the owner's ordinary session cookie. See
+// `authenticateOwner` for why elevating per worker breaks the run.
 async function adminAuth(request: APIRequestContext) {
-  return { Authorization: `Bearer ${await ownerAdminToken(request)}` };
+  await authenticateOwner(request);
+  return {};
 }
 
 async function mintInvite(
@@ -57,7 +61,7 @@ test.describe("Invite gate — the wire", () => {
   }) => {
     const { code } = await mintInvite(request);
 
-    const check = await request.get(`/api/auth/invite/${code}`);
+    const check = await request.post("/api/auth/invite/check", { data: { code } });
     expect(check.status(), "fresh code checks valid").toBe(200);
     expect((await check.json()).valid).toBe(true);
 
@@ -66,7 +70,7 @@ test.describe("Invite gate — the wire", () => {
     });
     expect(first.status(), "invited registration").toBe(201);
 
-    const spent = await request.get(`/api/auth/invite/${code}`);
+    const spent = await request.post("/api/auth/invite/check", { data: { code } });
     expect(spent.status(), "spent code checks exhausted").toBe(409);
 
     const second = await request.post("/api/auth/register", {
@@ -86,7 +90,7 @@ test.describe("Invite gate — the wire", () => {
     });
     expect(revoke.status(), "revoke").toBe(200);
 
-    const check = await request.get(`/api/auth/invite/${code}`);
+    const check = await request.post("/api/auth/invite/check", { data: { code } });
     expect(check.status(), "revoked code → 403").toBe(403);
 
     const attempt = await request.post("/api/auth/register", {

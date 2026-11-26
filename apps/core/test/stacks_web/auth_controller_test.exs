@@ -3,6 +3,7 @@ defmodule StacksWeb.AuthControllerTest do
 
   import Ecto.Query, only: [from: 2]
   import Stacks.Factory
+  import Swoosh.TestAssertions, only: [assert_email_sent: 1]
 
   alias Core.Repo
   alias Stacks.Accounts
@@ -10,6 +11,7 @@ defmodule StacksWeb.AuthControllerTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.Workers.EmailDeliveryJob
   alias StacksWeb.AuthController
+  alias StacksWeb.Plugs.SessionCookie
 
   defp latest_audit_row(action) do
     {:ok, %{rows: [row], columns: cols}} =
@@ -36,7 +38,7 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   defp mirror_response(path, email) do
-    conn = post(build_conn(), path, %{email: email})
+    conn = post(CoreWeb.ConnCase.proven_conn(), path, %{email: email})
 
     %{
       status: conn.status,
@@ -315,6 +317,105 @@ defmodule StacksWeb.AuthControllerTest do
         post(conn, "/api/auth/login", %{email: "no-such-user@example.com", password: "anything"})
 
       assert json_response(response_conn, 401) == %{"error" => "invalid_credentials"}
+    end
+  end
+
+  describe "GET /api/auth/me — a 401 says WHICH kind of 401 it is" do
+    # ⛔ THE SPA CANNOT WORK THIS OUT FOR ITSELF, which is why the server has
+    # to say it. The session cookie is `HttpOnly`, so the page cannot see
+    # whether the browser sent one — and "I presented a session and you refused
+    # it" and "I presented nothing" are the difference between a reader who
+    # must be told their session ended and one who must not be.
+    #
+    # ⚠️ This was a REGRESSION, caught by the E2E suite rather than by
+    # reasoning. Moving boot onto this endpoint made a dead session resolve to
+    # a clean signed-out app: correct about the session, silent about why, and
+    # the reader lost the "we closed your session" notice they used to get.
+
+    test "no credential at all is `unauthenticated`", %{conn: conn} do
+      conn = get(conn, "/api/auth/me")
+
+      assert %{"error" => "unauthenticated"} = json_response(conn, 401)
+    end
+
+    test "a session cookie the server refuses is `session_expired`", %{conn: conn} do
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session("not-a-token-we-issued")
+        |> get("/api/auth/me")
+
+      assert %{"error" => "session_expired"} = json_response(conn, 401),
+             "a presented-and-refused session must be distinguishable from no session, " <>
+               "or the SPA cannot tell an expiry from a signed-out boot"
+    end
+
+    test "an EXPIRED token in the cookie is also `session_expired`", %{conn: conn} do
+      # The realistic case, as opposed to a garbage value: a token this server
+      # really did issue, whose time has passed.
+      user = insert(:user)
+      {:ok, token, _} = Guardian.encode_and_sign(user, %{}, ttl: {-1, :hour})
+
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/auth/me")
+
+      assert %{"error" => "session_expired"} = json_response(conn, 401)
+    end
+
+    test "a refused cookie reports session_expired EVEN alongside a bearer", %{conn: conn} do
+      # ⛔ THE CASE THAT PINS THE MECHANISM, and the one the first version of
+      # this handler got wrong. It matched Guardian's `:unauthenticated`
+      # specifically, which works only because a rejected cookie leaves no token
+      # and Guardian therefore uses that word. Send a bearer as well and
+      # `VerifyHeader` reaches the error handler first with `:invalid_token`,
+      # and the expiry notice vanishes — in exactly the mixed-transport case the
+      # two-transport rollout exists to support.
+      #
+      # ⚠⚠ Without this case the suite cannot tell the two implementations
+      # apart: all the others go through the no-bearer path, and rekeying the
+      # handler left them 81/0 either way.
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session("refused-cookie")
+        |> put_req_header("authorization", "Bearer also-rubbish")
+        |> get("/api/auth/me")
+
+      assert %{"error" => "session_expired"} = json_response(conn, 401)
+    end
+
+    test "a refused cookie alongside a VALID bearer authenticates, and says nothing", %{
+      conn: conn
+    } do
+      # The control for the case above: the rollout accepts both transports, so
+      # a junk cookie must not poison a request a live bearer can carry. There
+      # is no 401 here at all, and therefore no reason token to get wrong.
+      user = insert(:user, email: "both-transports@example.com")
+      {:ok, bearer, _} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session("refused-cookie")
+        |> put_req_header("authorization", "Bearer #{bearer}")
+        |> get("/api/auth/me")
+
+      assert %{"user" => returned} = json_response(conn, 200)
+      assert returned["email"] == "both-transports@example.com"
+    end
+
+    test "a VALID cookie is not a 401 at all", %{conn: conn} do
+      # The anti-vacuity control. Without it, a handler that answered
+      # `session_expired` for every request would satisfy both cases above.
+      user = insert(:user, email: "still-here@example.com")
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> CoreWeb.ConnCase.with_session(token)
+        |> get("/api/auth/me")
+
+      assert %{"user" => returned} = json_response(conn, 200)
+      assert returned["email"] == "still-here@example.com"
     end
   end
 
@@ -1075,8 +1176,22 @@ defmodule StacksWeb.AuthControllerTest do
       assert [%Oban.Job{args: %{"template" => "registration_confirmation"} = args}] =
                Repo.all(Oban.Job)
 
-      assert args["params"]["token"] == new_token,
-             "the email must carry the token that was just stored"
+      # ⚠️ The job carries NO token — it carries the user id, and the worker
+      # reads the live token off the row at delivery. This assertion used to
+      # read `args["params"]["token"]`, which was pinning a defect: a
+      # confirmation token has no expiry and is compared straight against the
+      # user row, so one sitting in `oban_jobs.args` is a usable credential for
+      # as long as the row survives — now seven days rather than sixty seconds.
+      refute Map.has_key?(args["params"], "token"),
+             "a usable confirmation token reached oban_jobs.args: #{inspect(args["params"])}"
+
+      assert args["user_id"] == user.id
+
+      # The property the old assertion was reaching for, asserted where it
+      # actually holds: what the reader receives carries the NEW token. This
+      # goes through the worker, so it covers the resolution step too.
+      assert :ok = EmailDeliveryJob.perform(%Oban.Job{args: args})
+      assert_email_sent(fn email -> email.html_body =~ new_token end)
 
       assert {:error, :invalid} = Stacks.Email.confirm_email(old_token)
       assert {:ok, confirmed} = Stacks.Email.confirm_email(new_token)
@@ -1433,6 +1548,112 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert_receive {:telemetry_event, [:stacks, :auth, :login_failure], %{count: 1},
                       %{type: :missing_params}}
+    end
+  end
+
+  # ⛔ THE COOKIE'S ISSUANCE, which was unobserved until these cases: the plug
+  # suite proves a cookie is ACCEPTED, and nothing proved one was ever SENT.
+  # Those are different claims and only the second is this controller's.
+  describe "the session cookie is issued where a session is issued" do
+    setup do
+      # The factory hashes "password123"; `password:` is not a settable field.
+      user = insert(:user)
+      %{user: user}
+    end
+
+    defp session_cookie(conn) do
+      Map.get(conn.resp_cookies, SessionCookie.cookie_name())
+    end
+
+    test "login sets it, with the session's own token as the value", %{conn: conn, user: user} do
+      conn = post(conn, "/api/auth/login", %{email: user.email, password: "password123"})
+
+      assert %{"token" => body_token} = json_response(conn, 200)
+      cookie = session_cookie(conn)
+
+      # ⚠️ The cookie must carry the SAME token the body does, not merely some
+      # token. A cookie holding a different (or stale) credential would
+      # authenticate a different session than the client believes it has.
+      assert cookie.value == body_token
+      assert cookie.http_only
+      assert cookie.secure
+      assert cookie.same_site == "Lax"
+    end
+
+    # ⛔ PHASE ONE KEEPS THE BODY TOKEN, and this asserts it rather than leaving
+    # it to be noticed when it disappears. With no operator recovery path in
+    # existence, the both-transports phase IS the recovery path, so removing the
+    # body token here would break the deploy that is meant to be the fallback.
+    test "login still returns the token in the body during phase one", %{conn: conn, user: user} do
+      conn = post(conn, "/api/auth/login", %{email: user.email, password: "password123"})
+
+      assert %{"token" => token} = json_response(conn, 200)
+      assert is_binary(token)
+    end
+
+    test "refresh re-sets it, which is what makes renewal server-side", %{conn: conn} do
+      user = insert(:user, email: "refresh-cookie@example.com", email_confirmed: true)
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> post("/api/auth/refresh")
+
+      assert %{"token" => new_token} = json_response(conn, 200)
+      cookie = session_cookie(conn)
+
+      assert cookie.value == new_token
+
+      # ⚠️ The rotation half: refresh issues a NEW token, so a cookie still
+      # holding the old one would pin the browser to a credential the server has
+      # just revoked — a session that dies at the next request for no visible
+      # reason.
+      refute cookie.value == token
+    end
+
+    test "logout clears it", %{conn: conn, user: user} do
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> delete("/api/auth/logout")
+
+      assert conn.status == 204
+      cookie = session_cookie(conn)
+
+      # ⚠️ A deletion carries NO `:value` — it is `max_age: 0` plus a 1970
+      # expiry, which is stronger evidence than an empty string would be: it
+      # proves the cookie is being EXPIRED rather than merely overwritten with
+      # something falsy.
+      assert cookie.max_age == 0
+      assert cookie.universal_time == {{1970, 1, 1}, {0, 0, 0}}
+
+      # ⛔ And the attributes are repeated on the clear. A cookie is identified
+      # by name plus path plus domain, so a mismatched deletion leaves the
+      # original in place — a logout that reports 204 while the session keeps
+      # being replayed.
+      assert cookie.http_only
+      assert cookie.secure
+      assert cookie.same_site == "Lax"
+    end
+
+    # ⛔ The paths that issue NO session must set NO cookie, and this is the half
+    # the issue got wrong: it specified "set on login, register and email
+    # confirmation", but registration returns `confirmation_email_sent` and
+    # confirmation REDIRECTS. A cookie set on either would be a credential
+    # issued to someone who has not authenticated.
+    test "register sets no cookie, because it issues no session", %{conn: conn} do
+      conn =
+        post(conn, "/api/auth/register", %{
+          email: "fresh@example.com",
+          password: "password123!",
+          display_name: "Fresh Reader"
+        })
+
+      assert conn.status in [201, 422]
+      refute session_cookie(conn)
     end
   end
 end

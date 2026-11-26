@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
 
           if [[ -z "${NEON_API_KEY:-}" || -z "${NEON_PROJECT_ID:-}" ]]; then
-            echo "::error::NEON_API_KEY and NEON_PROJECT_ID must be set as repo secrets (introduced in Issue #137)." >&2
+            echo "::error::NEON_API_KEY and NEON_PROJECT_ID must be set as repo secrets." >&2
             exit 1
           fi
 

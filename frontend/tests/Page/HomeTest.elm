@@ -38,7 +38,7 @@ suite =
                         |> Expect.equal Landing
             , test "signed in → Collection with the preview Loading" <|
                 \() ->
-                    case Tuple.first (Home.init (Just "token-abc")) of
+                    case Tuple.first (Home.init (Just (TestHelpers.creds "token-abc"))) of
                         Collection { preview } ->
                             Expect.equal Loading preview
 
@@ -51,8 +51,8 @@ suite =
                     Home.view Landing
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.tag "h1", Selector.text "The Stacks" ]
-                            , Query.has [ Selector.text "Your personal collection, beautifully organised." ]
+                            [ Query.has [ Selector.tag "h1", Selector.exactText "The Stacks" ]
+                            , Query.has [ Selector.exactText "Your personal collection, beautifully organised." ]
                             ]
             , test "renders the About CTA → /about" <|
                 \() ->
@@ -61,7 +61,7 @@ suite =
                         |> Query.find [ Selector.class "home__link--about" ]
                         |> Expect.all
                             [ Query.has [ Selector.attribute (Attr.href "/about") ]
-                            , Query.has [ Selector.text "About The Stacks" ]
+                            , Query.has [ Selector.exactText "About The Stacks" ]
                             ]
             , test "renders the Marketplace CTA → /marketplace" <|
                 \() ->
@@ -76,7 +76,7 @@ suite =
                         |> Query.find [ Selector.attribute (Attr.attribute "data-testid" "home-faq-link") ]
                         |> Expect.all
                             [ Query.has [ Selector.attribute (Attr.href "/faq") ]
-                            , Query.has [ Selector.text "Questions, answered" ]
+                            , Query.has [ Selector.exactText "Questions, answered" ]
                             ]
             , test "does NOT route into the collection (no Add-Book CTA)" <|
                 \() ->
@@ -91,7 +91,7 @@ suite =
                         |> Query.find [ Selector.class "home-collection__add" ]
                         |> Expect.all
                             [ Query.has [ Selector.attribute (Attr.href "/upload") ]
-                            , Query.has [ Selector.text "Add a book" ]
+                            , Query.has [ Selector.exactText "Add a book" ]
                             ]
             , test "renders a continue-reading entry point into the Reading Pile" <|
                 \() ->
@@ -143,13 +143,33 @@ suite =
 
                         _ ->
                             Expect.fail "expected Collection/NoOut with the flattened placements"
-            , test "an unauthorised preview error signals SessionExpired" <|
+            , -- ⛔ REWRITTEN WITH THE MIGRATION, and the rewrite is the point. This
+              -- used to feed `PreviewLoaded (Err (BadStatus 401))` straight to
+              -- `update` and assert `SessionExpired`, which tested the page's OWN
+              -- `Api.isUnauthorized` re-test. That re-test is gone: the request is
+              -- an `Effect.authed` plan now, and the plan claims the 401 before any
+              -- handler sees it. Feeding the old message by hand asserts a path
+              -- that no longer exists, so the test would have been green about
+              -- nothing — or, as here, red about the right change.
+              --
+              -- ⚖️ The equivalent claim at the new seam is that the page's expiry
+              -- msg reaches `Main`, which is what `onExpired` was given to carry.
+              test "the page's expiry msg is what signals SessionExpired" <|
                 \() ->
                     let
                         ( _, _, out ) =
-                            Home.update (PreviewLoaded (Err (Http.BadStatus 401))) (collectionLoading ())
+                            Home.update SessionExpiryDetected (collectionLoading ())
                     in
                     Expect.equal SessionExpired out
+            , -- ⚠️ ANTI-VACUITY for the branch above: a non-401 failure must still
+              -- be shown to the reader as a failure rather than signing them out.
+              test "an ordinary failure is not an expiry" <|
+                \() ->
+                    let
+                        ( _, _, out ) =
+                            Home.update (PreviewLoaded (Err (Http.BadStatus 500))) (collectionLoading ())
+                    in
+                    Expect.equal NoOut out
             ]
         ]
 

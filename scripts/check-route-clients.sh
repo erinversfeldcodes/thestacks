@@ -353,7 +353,16 @@ def elm_calls(code, strings, path_label, sites):
         if segs:
             sites.append((segs, path_label))
 
-    for match in re.finditer(r"Url\.Builder\.(?:absolute|crossOrigin|relative)", code):
+    # ⚠️ `Api.Url.path` BELONGS HERE, and omitting it made three live routes
+    # read as clientless. This gate finds a client by the URL text beside the
+    # call, so moving `Api.elm` from `baseUrl ++ "/api/upload/init"` to
+    # `Api.Url.path [ "api", "upload", "init" ] []` removed the literal it was
+    # looking for while the client went on calling the route. A structured URL
+    # is better for every other purpose and invisible to a grep — so any gate
+    # that reads URLs as strings has to learn each constructor by name.
+    for match in re.finditer(
+        r"(?:Url\.Builder\.(?:absolute|crossOrigin|relative)|Api\.Url\.path)", code
+    ):
         open_at = code.find("[", match.end())
         if open_at == -1:
             continue

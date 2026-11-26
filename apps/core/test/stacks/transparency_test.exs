@@ -17,6 +17,8 @@ defmodule Stacks.TransparencyTest do
   alias Stacks.Transparency
   alias Stacks.Transparency.{Cache, MockPrometheusClient}
 
+  import Stacks.Factory
+
   @allowed_entry_keys MapSet.new([:key, :label, :what, :how, :why, :unit, :value])
 
   @app_label "app-under-test"
@@ -243,6 +245,49 @@ defmodule Stacks.TransparencyTest do
 
       assert after_second == after_first,
              "expected the second call to hit the cache, but the client was invoked again"
+    end
+  end
+
+  describe "enrichment_profile/0 (the data nutrition label)" do
+    test "reports gaps per dimension as a profile with a share, not a single score" do
+      enriched = insert(:book)
+
+      edition =
+        insert(:book_edition, book: enriched, cover_image_url: "https://example.test/c.jpg")
+
+      insert(:price_snapshot, book: enriched, book_edition: edition)
+
+      insert(:review_snapshot,
+        book: enriched,
+        source: "open_library",
+        source_url: "https://openlibrary.org/works/OL1W"
+      )
+
+      _bare = insert(:book)
+
+      profile = Transparency.enrichment_profile()
+      assert profile.key == :enrichment_gaps
+      assert profile.total_books == 2
+      # it is a profile (dimensions with shares), never a collapsed gauge
+      refute Map.has_key?(profile, :value)
+
+      by_dim = Map.new(profile.dimensions, &{&1.dimension, &1})
+      assert by_dim["cover art"].present == 1
+      assert by_dim["cover art"].missing == 1
+      assert by_dim["cover art"].missing_pct == 50.0
+      assert by_dim["price data"].missing == 1
+      assert by_dim["sanctioned reviews"].missing == 1
+    end
+
+    test "a de-sanctioned review does not fill the reviews gap" do
+      book = insert(:book)
+      # goodreads left the sanctioned set — it must not read as review enrichment
+      insert(:review_snapshot, book: book, source: "goodreads")
+
+      profile = Transparency.enrichment_profile()
+      by_dim = Map.new(profile.dimensions, &{&1.dimension, &1})
+      assert by_dim["sanctioned reviews"].present == 0
+      assert by_dim["sanctioned reviews"].missing == 1
     end
   end
 end

@@ -7,9 +7,11 @@ import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Page.Blog.Post as Post exposing (Msg(..))
+import Stacks.Api.V1.BlogResponses as Envelope
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.BlogPost exposing (Comment(..), Visibility(..), commentDecoder, commentReplies)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -40,6 +42,7 @@ testModel =
     , blockModal = Nothing
     , origin = "https://thestacks.test"
     , syndication = Nothing
+    , now = Nothing
     }
 
 
@@ -143,7 +146,7 @@ suite =
                     Post.view model
                         |> Query.fromHtml
                         |> Expect.all
-                            [ Query.has [ Selector.text "This post is no longer available." ]
+                            [ Query.has [ Selector.exactText "This post is no longer available." ]
                             , Query.hasNot [ Selector.text "Could not load post. Please try again." ]
                             ]
             ]
@@ -220,7 +223,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Post.update SubmitComment testModel (Just "token")
+                            Post.update SubmitComment testModel (Just (TestHelpers.creds "token"))
                     in
                     Expect.equal False model.commentSubmitting
             , test "non-empty draft with token sets submitting" <|
@@ -230,7 +233,7 @@ suite =
                             { testModel | commentDraft = "hello" }
 
                         ( model, _, _ ) =
-                            Post.update SubmitComment draftModel (Just "token")
+                            Post.update SubmitComment draftModel (Just (TestHelpers.creds "token"))
                     in
                     Expect.equal True model.commentSubmitting
             , test "non-empty draft without token does not submit" <|
@@ -274,6 +277,7 @@ suite =
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             , syndicated = True
+                            , associationOutcome = Envelope.AssociationOutcomeUnspecified
                             }
 
                         model =
@@ -285,7 +289,7 @@ suite =
                     Post.view model
                         |> Query.fromHtml
                         |> Query.find [ Selector.class "comment__author-badge" ]
-                        |> Query.has [ Selector.text "(author)" ]
+                        |> Query.has [ Selector.exactText "(author)" ]
             , test "no author badge when comment author is not the post author" <|
                 \_ ->
                     let
@@ -312,6 +316,7 @@ suite =
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             , syndicated = True
+                            , associationOutcome = Envelope.AssociationOutcomeUnspecified
                             }
 
                         model =
@@ -328,11 +333,11 @@ suite =
             [ test "the block menu names the author from authorDisplayName" <|
                 \_ ->
                     blockMenuView { authorName = "Fable Quill" }
-                        |> Query.has [ Selector.text "Block Fable Quill" ]
+                        |> Query.has [ Selector.exactText "Block Fable Quill" ]
             , test "falls back to a generic label when authorDisplayName is absent" <|
                 \_ ->
                     blockMenuView { authorName = "" }
-                        |> Query.has [ Selector.text "Block the author" ]
+                        |> Query.has [ Selector.exactText "Block the author" ]
             ]
         , describe "author byline links to the profile"
             [ test "renders the author name as a link to /u/:handle when a handle is present" <|
@@ -341,7 +346,7 @@ suite =
                         |> Query.find [ Selector.class "blog-post__author-link" ]
                         |> Query.has
                             [ Selector.attribute (Html.Attributes.href "/u/fable_quill")
-                            , Selector.text "Fable Quill"
+                            , Selector.exactText "Fable Quill"
                             ]
             , test "renders the author name as plain text when no handle is present" <|
                 \_ ->
@@ -368,6 +373,7 @@ postView { displayName, handle } =
             , authorDisplayName = displayName
             , authorHandle = handle
             , syndicated = True
+            , associationOutcome = Envelope.AssociationOutcomeUnspecified
             }
 
         model =
@@ -395,6 +401,7 @@ blockMenuView { authorName } =
             , authorDisplayName = authorName
             , authorHandle = "fable_quill"
             , syndicated = True
+            , associationOutcome = Envelope.AssociationOutcomeUnspecified
             }
 
         viewerModel =

@@ -245,6 +245,7 @@ those skips into hard failures, and CI sets them:
 | `E2E_EXPECT_FULL_SEEDS=1` | `assertSeedOrSkip` skipping for insufficient seed data |
 | `E2E_EXPECT_LIVE_METRICS=1` | the transparency spec skipping its frontend-render guarantee |
 | `E2E_EXPECT_RATE_LIMITING=1` | the rate-limit spec skipping when limiting looks disabled |
+| `E2E_EXPECT_ABSENT_COST_LINE=1` | the cost spec skipping its unmeasured-line rendering guarantee |
 
 `E2E_EXPECT_RATE_LIMITING` is the one that reads in both directions: it is
 explicit operator intent, so any value other than `1` asserts that this stack

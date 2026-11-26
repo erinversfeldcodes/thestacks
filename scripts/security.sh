@@ -78,7 +78,18 @@ _dockle_image() {
 
 if command -v dockle &>/dev/null; then
     if command -v docker &>/dev/null; then
-        if docker buildx version &>/dev/null; then
+        # The DAEMON, not just the client. `command -v docker` and `docker buildx
+        # version` both answer from the CLI alone, so with Docker Desktop stopped
+        # every check above passed and the build failed — reported as
+        # "FAIL dockle", which reads as a CIS finding against the Dockerfile
+        # rather than as "this gate could not run". A gate whose inability to run
+        # is indistinguishable from a real finding is worse than one that says so.
+        #
+        # This only converts an unreachable daemon into a SKIP. In CI the daemon
+        # is reachable, so a genuine build failure still fails.
+        if ! docker info &>/dev/null; then
+            echo "SKIP: dockle — the docker daemon is not reachable (the CLI is installed but nothing is listening), so no image could be built to scan. Start Docker, or rely on CI to gate this."
+        elif docker buildx version &>/dev/null; then
             echo "Running dockle CIS benchmark..."
             _dockle_image stacks-dockle-core deploy/Dockerfile.core
             if [[ "$(uname -s)/$(uname -m)" == "Linux/x86_64" ]]; then

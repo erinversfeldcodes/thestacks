@@ -218,7 +218,7 @@ N/A. The result surfaces inside the book detail overlay, which does not change t
 
 | Metric | Source | Type | How Measured | Target / SLA |
 |--------|--------|------|-------------|-------------|
-| Oban outcome for `DiscoverEditionsJob` | `oban_jobs` / `mart_job_stats` | Counter | completed / retryable / cancelled / discarded | `cancelled` > 0 means malformed args are being enqueued |
+| Oban outcome for `DiscoverEditionsJob` | `oban_jobs` (the `mart_job_stats` rollup was deleted 2026-10-15 — read the table) | Counter | completed / retryable / cancelled / discarded | `cancelled` > 0 means malformed args are being enqueued |
 | `offered` vs `created` per run | Logger info (`offered=N created=M`) | Histogram | The job's own log line | **The ratio is the health metric.** `created` ≪ `offered` means the hard gate is rejecting most of Open Library's list — expected, but a *sudden* collapse means a resolver problem, not a data problem |
 | `DiscoverEditionsJob: skipped <isbn>` | Logger debug | Counter | Per hard-gate rejection | Baseline; needs debug level to see, which is a gap (§16) |
 | `open_library_fuse` state | `:fuse` / `op.source_health_checks` | Gauge | Blown / reset transitions | A blown fuse stalls discovery entirely; jobs pile up as `retryable` |

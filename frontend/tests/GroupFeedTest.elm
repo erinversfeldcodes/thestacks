@@ -7,6 +7,7 @@ import Page.Groups.Detail as Detail
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.FeedItem exposing (FeedItem(..), FeedResponse)
 import Types.Group exposing (Group)
 import Types.RemoteData exposing (RemoteData(..))
@@ -16,7 +17,7 @@ detailInit : Detail.Model
 detailInit =
     let
         ( m, _ ) =
-            Detail.init "group-1" "user-1" "token-abc"
+            Detail.init "group-1" "user-1" (TestHelpers.creds "token-abc")
     in
     m
 
@@ -167,7 +168,7 @@ suite =
                 Detail.view emptyModel
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "groups-detail__feed-empty" ]
-                    |> Query.has [ Selector.text "No activity yet." ]
+                    |> Query.has [ Selector.exactText "No activity yet." ]
         , test "view shows Load More button only when nextCursor is present" <|
             \_ ->
                 let

@@ -14,7 +14,7 @@ defmodule Core.Repo.Migrations.BackfillAndConstrainUserHandles do
   """
   use Ecto.Migration
 
-  @breaking_ok "handle is new this release; app writes it on every insert (Accounts.maybe_put_handle) and the backfill fills all existing rows, so the column is never null when tightened. #218 tracks deferring the tighten if the table reaches rolling prod."
+  @breaking_ok "handle is new this release; app writes it on every insert (Accounts.maybe_put_handle) and the backfill fills all existing rows, so the column is never null when tightened. Deferring the tighten is the recorded fallback if the table ever reaches a size where a rolling production deploy cannot take the lock."
 
   def up do
     execute("""

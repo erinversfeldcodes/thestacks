@@ -9,14 +9,15 @@ import Page.Settings.Privacy as Privacy exposing (Msg(..), OutMsg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
 {-| No token means Save messages short-circuit; most tests supply one.
 -}
-token : Maybe String
+token : Maybe Api.Credentials
 token =
-    Just "tok"
+    Just (TestHelpers.creds "tok")
 
 
 suite : Test
@@ -91,7 +92,7 @@ suite =
                     { init0 | savingProfile = Success () }
                         |> Privacy.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Visibility updated." ]
+                        |> Query.has [ Selector.exactText "Visibility updated." ]
             ]
         , describe "shelf visibility"
             [ test "SetShelfVisibility updates only the matching shelf" <|
@@ -163,14 +164,14 @@ suite =
                     { init0 | savingShelf = Success () }
                         |> Privacy.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Visibility updated." ]
+                        |> Query.has [ Selector.exactText "Visibility updated." ]
             , test "shelf Failure renders the error feedback (build a)" <|
                 \_ ->
                     { init0 | savingShelf = Failure (Http.BadStatus 500) }
                         |> Privacy.view
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "and we cannot say why" ]
-            , -- ⛔ #374. The 422 here is the ceiling rule this module documents
+            , -- ⛔ The 422 here is the ceiling rule this module documents
               test "a 422 names the ceiling rule rather than saying 'try again'" <|
                 \_ ->
                     { init0 | savingShelf = Failure (Http.BadStatus 422) }
@@ -184,7 +185,7 @@ suite =
                     Privacy.init
                         |> Privacy.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "never appear in search engine results" ]
+                        |> Query.has [ Selector.exactText "By default your profile and content stay out of search engine results. You can opt in to search indexing of your public content below." ]
             ]
         , describe "loading saved visibility (FE-1)"
             [ test "GotPrivacySettings Ok seeds the profile visibility from the payload" <|
@@ -249,18 +250,28 @@ suite =
                                 [ Selector.attribute
                                     (Html.Attributes.attribute "data-testid" "writing-assistant-consent-toggle")
                                 ]
-                            , Query.has [ Selector.text "Linking books in your writing" ]
+                            , Query.has [ Selector.exactText "Linking books in your writing" ]
                             ]
-            , test "initWithToken seeds the folded-in consent from the user's state" <|
+            , test "⛔ initWithToken does NOT seed the folded-in consent from the auth payload" <|
+                -- ⛔ Planted red for the deleted login-blob seed. The consent
+                -- toggles open at `init`'s defaults and are set ONLY by
+                -- `GET /api/settings/privacy` (the single source of truth); until
+                -- it answers the page is Loading and the toggles render as "not
+                -- yet known". Re-seed consent from the auth payload here (so a
+                -- consenting user's True reaches a toggle before the fetch) and
+                -- these equalities go red — a confident On/Off for a consent
+                -- nobody has read back is the manufactured-value defect this
+                -- deletion closes.
                 \_ ->
                     let
                         ( model, _ ) =
-                            Privacy.initWithToken (Just "tok")
-                                { analytics = True, writingAssistant = True }
+                            Privacy.initWithToken (Just (TestHelpers.creds "tok"))
                     in
                     Expect.all
-                        [ \m -> m.consent.analyticsConsent |> Expect.equal True
-                        , \m -> m.consent.writingAssistantConsent |> Expect.equal True
+                        [ \m -> m.settings |> Expect.equal Loading
+                        , \m -> m.consent.analyticsConsent |> Expect.equal False
+                        , \m -> m.consent.writingAssistantConsent |> Expect.equal False
+                        , \m -> m.consent.searchIndexingConsent |> Expect.equal False
                         ]
                         model
             , test "ConsentMsg delegates to Consent.update (flips analytics consent)" <|
@@ -275,7 +286,7 @@ suite =
                     let
                         ( _, _, out ) =
                             Privacy.update
-                                (ConsentMsg (Consent.SaveCompleted (Err (Http.BadStatus 401))))
+                                (ConsentMsg (Consent.SaveAnalyticsCompleted True (Err (Http.BadStatus 401))))
                                 init0
                                 token
                     in
@@ -309,6 +320,7 @@ samplePrivacySettings =
         ]
     , consentAnalytics = True
     , consentWritingAssistant = False
+    , consentSearchIndexing = False
     }
 
 

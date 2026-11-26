@@ -9,7 +9,7 @@ defmodule Stacks.Workers.ExportRetentionJob do
       nightly so the object outlives its own link by an hour at worst.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 
@@ -30,4 +30,14 @@ defmodule Stacks.Workers.ExportRetentionJob do
         {:error, reason}
     end
   end
+
+  @doc """
+      How many export artefacts remain past their deadline. Zero after a
+      complete run.
+
+      Delegates to `ExportDelivery.expired_count/1`, which reuses the same
+      `past_deadline?/2` predicate `sweep_expired/1` splits on.
+  """
+  @spec pending_count() :: non_neg_integer()
+  def pending_count, do: ExportDelivery.expired_count()
 end

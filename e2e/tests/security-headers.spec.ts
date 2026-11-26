@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 test.describe("Security headers — SPA CSP regression guard", () => {
   test("upload page response sets CSP and connect-src allows R2", async ({

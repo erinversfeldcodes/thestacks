@@ -1,7 +1,7 @@
 module Types.Shelf exposing (BookshelfResponse, Shelf, bookshelfResponseDecoder, rowLabel, shelvesResponseDecoder)
 
 import Json.Decode as Decode
-import Types.Placement exposing (Placement, placementDecoder)
+import Types.Placement exposing (Placement, placementDetailDecoder)
 
 
 type alias Shelf =
@@ -41,7 +41,7 @@ shelfDecoder =
     Decode.map3 Shelf
         (Decode.field "id" Decode.string)
         (Decode.field "position" Decode.int)
-        (Decode.field "placements" (Decode.list placementDecoder))
+        (Decode.field "placements" (Decode.list placementDetailDecoder))
 
 
 shelvesResponseDecoder : Decode.Decoder (List Shelf)

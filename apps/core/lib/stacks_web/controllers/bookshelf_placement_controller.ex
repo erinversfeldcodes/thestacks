@@ -64,7 +64,7 @@ defmodule StacksWeb.BookshelfPlacementController do
         {:error, :not_found} ->
           conn
           |> put_status(404)
-          |> json(%{error: "not found"})
+          |> json(%{error: "not_found"})
 
         {:error, :unauthorized} ->
           conn
@@ -106,7 +106,7 @@ defmodule StacksWeb.BookshelfPlacementController do
       {:error, :not_found} ->
         conn
         |> put_status(404)
-        |> json(%{error: "not found"})
+        |> json(%{error: "not_found"})
 
       {:error, :unauthorized} ->
         conn
@@ -169,7 +169,7 @@ defmodule StacksWeb.BookshelfPlacementController do
       {:error, :not_found} ->
         conn
         |> put_status(404)
-        |> json(%{error: "not found"})
+        |> json(%{error: "not_found"})
 
       {:error, changeset} ->
         conn
@@ -193,7 +193,7 @@ defmodule StacksWeb.BookshelfPlacementController do
         json(conn, %{placement: ProtoJSON.placement_ref(placement)})
 
       {:error, :not_found} ->
-        conn |> put_status(404) |> json(%{error: "not found"})
+        conn |> put_status(404) |> json(%{error: "not_found"})
 
       {:error, :unauthorized} ->
         conn |> put_status(403) |> json(%{error: "forbidden"})
@@ -218,7 +218,7 @@ defmodule StacksWeb.BookshelfPlacementController do
       {:error, :not_found} ->
         conn
         |> put_status(404)
-        |> json(%{error: "not found"})
+        |> json(%{error: "not_found"})
 
       {:error, :unauthorized} ->
         conn
@@ -254,7 +254,7 @@ defmodule StacksWeb.BookshelfPlacementController do
       {:error, :not_found} ->
         conn
         |> put_status(404)
-        |> json(%{error: "not found"})
+        |> json(%{error: "not_found"})
 
       {:error, :unauthorized} ->
         conn

@@ -1,9 +1,10 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
   extractLink,
   fetchSentEmails,
   mintOrSkip,
   signInViaForm,
+  skipIfGlobalEmailBudgetFull,
   uniqueEmail,
 } from "./helpers";
 
@@ -20,6 +21,7 @@ test.describe("Password reset", () => {
     page,
     request,
   }) => {
+    await skipIfGlobalEmailBudgetFull(request);
     const session = await mintOrSkip(request, {
       email: uniqueEmail("e2e-forgot"),
     });
@@ -59,6 +61,7 @@ test.describe("Password reset", () => {
     page,
     request,
   }) => {
+    await skipIfGlobalEmailBudgetFull(request);
     const session = await mintOrSkip(request, {
       email: uniqueEmail("e2e-reset"),
     });

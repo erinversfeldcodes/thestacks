@@ -51,7 +51,7 @@ suite =
                     |> Query.fromHtml
                     |> Expect.all
                         [ Query.find [ Selector.class "shelf-label" ]
-                            >> Query.has [ Selector.text "Looking for a Home" ]
+                            >> Query.has [ Selector.exactText "Looking for a Home" ]
                         , Query.hasNot [ Selector.class "page__title" ]
                         ]
         , test "the pile-view of cover cards is staged INSIDE the room" <|
@@ -66,5 +66,5 @@ suite =
                 LookingForHome.view empty
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "shelf-room" ]
-                    |> Query.has [ Selector.text "Nothing here yet — these are books looking for a new home." ]
+                    |> Query.has [ Selector.exactText "Nothing here yet — these are books looking for a new home." ]
         ]

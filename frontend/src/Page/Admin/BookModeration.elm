@@ -17,10 +17,12 @@ replacement for the removed automatic classifier.
 -}
 
 import Api exposing (AdminBook, AdminBooksResponse)
+import Effect
 import Html exposing (Html, button, div, form, h1, input, p, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, disabled, placeholder, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
+import Json.Decode as Decode
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -43,6 +45,7 @@ type alias Model =
 
 type Msg
     = BooksReceived (Result Http.Error AdminBooksResponse)
+    | SessionExpiryDetected
     | SetTierFilter TierFilter
     | SearchChanged String
     | SearchSubmitted
@@ -56,7 +59,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         model =
@@ -71,16 +74,19 @@ init maybeToken =
     ( model, fetchBooks model maybeToken )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         BooksReceived result ->
             case result of
                 Ok response ->
                     ( { model | books = Success response }, Cmd.none, NoOut )
 
                 Err err ->
-                    if Api.isUnauthorized err then
+                    if Api.needsAdminElevation err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
@@ -114,7 +120,15 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | actionInProgress = Just bookId }
-                    , Api.adminSetBookAgeGate bookId newAgeGated token (AgeGateCompleted bookId)
+                    , Effect.perform
+                        (Effect.authed (Api.adminSetBookAgeGateRequest bookId newAgeGated)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "book" Api.adminBookDecoder)
+                                    >> AgeGateCompleted bookId
+                            }
+                        )
                     , NoOut
                     )
 
@@ -151,7 +165,7 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    if Api.isUnauthorized err then
+                    if Api.needsAdminElevation err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
@@ -161,11 +175,17 @@ update msg model maybeToken =
                         )
 
 
-fetchBooks : Model -> Maybe String -> Cmd Msg
+fetchBooks : Model -> Maybe Api.Credentials -> Cmd Msg
 fetchBooks model maybeToken =
     case maybeToken of
         Just token ->
-            Api.adminListBooks (booksParams model) token BooksReceived
+            Effect.perform
+                (Effect.authed (Api.adminListBooksRequest (booksParams model))
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveJson Api.adminBooksResponseDecoder >> BooksReceived
+                    }
+                )
 
         Nothing ->
             Cmd.none

@@ -4,6 +4,7 @@ module Page.Feedback exposing
     , OutMsg(..)
     , init
     , update
+    , updateWithEffect
     , view
     )
 
@@ -25,10 +26,10 @@ exactly the small dishonesty a feedback form is supposed to be the cure for.
 -}
 
 import Api
+import Effect exposing (Effect)
 import Html exposing (Html, button, div, h1, label, p, text, textarea)
 import Html.Attributes exposing (class, disabled, for, id, placeholder, value)
 import Html.Events exposing (onClick, onInput)
-import Http
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -44,14 +45,14 @@ maxLength =
 type alias Model =
     { message : String
     , pageContext : String
-    , sending : RemoteData Http.Error ()
+    , sending : RemoteData Api.RequestError ()
     }
 
 
 type Msg
     = MessageChanged String
     | SendClicked
-    | SendCompleted (Result Http.Error ())
+    | SendCompleted (Result Api.RequestError ())
     | SessionExpiryDetected
 
 
@@ -83,41 +84,51 @@ isSendable model =
         && (model.sending /= Loading)
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         MessageChanged value ->
-            ( { model | message = value, sending = NotAsked }, Cmd.none, NoOut )
+            ( { model | message = value, sending = NotAsked }, Effect.None, NoOut )
 
         SendClicked ->
             case ( isSendable model, maybeToken ) of
                 ( True, Just token ) ->
                     ( { model | sending = Loading }
-                    , Api.sendFeedback
-                        { body = String.trim model.message
-                        , pageContext = model.pageContext
-                        }
-                        (Api.authed token
-                            { onExpired = SessionExpiryDetected
-                            , onResult = SendCompleted
+                    , Effect.authed
+                        (Api.sendFeedbackRequest
+                            { body = String.trim model.message
+                            , pageContext = model.pageContext
                             }
                         )
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveNoContent >> SendCompleted
+                        }
                     , NoOut
                     )
 
                 _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
         SendCompleted (Ok ()) ->
-            ( { model | message = "", sending = Success () }, Cmd.none, NoOut )
+            ( { model | message = "", sending = Success () }, Effect.None, NoOut )
 
         -- The draft survives. See the module comment: a lost network is not a
         -- reason to throw away what someone took the trouble to write.
         SendCompleted (Err err) ->
-            ( { model | sending = Failure err }, Cmd.none, NoOut )
+            ( { model | sending = Failure err }, Effect.None, NoOut )
 
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
 
 view : Model -> Html Msg
@@ -171,14 +182,20 @@ viewLengthWarning model =
 {-| Every branch says something true. `NotAsked` says nothing at all, which is
 also true, and is why the acknowledgement cannot be mistaken for a default.
 -}
-viewOutcome : RemoteData Http.Error () -> Html Msg
+viewOutcome : RemoteData Api.RequestError () -> Html Msg
 viewOutcome sending =
     case sending of
         Success () ->
             p [ class "feedback__outcome feedback__outcome--sent", testId "feedback-sent" ]
                 [ text "Read and filed. Thank you — if it's a bug, it's now on a list with a person looking at it." ]
 
-        Failure (Http.BadStatus 429) ->
+        -- ⚠️ `RateLimited`, not `BadStatus 429`, since the request became a plan:
+        -- `Api.resolveNoContent` classifies a 429 and parses its `Retry-After`,
+        -- where the old builder flattened both into a bare status. The message
+        -- below is unchanged — telling the reader HOW LONG to wait is now
+        -- possible from the payload this branch discards, and is a separate
+        -- change from moving the request.
+        Failure (Api.RateLimited _) ->
             p [ class "feedback__outcome feedback__outcome--failed", testId "feedback-failed" ]
                 [ text "You've sent a few already — thank you, genuinely. Try again in a little while; your message is still here." ]
 

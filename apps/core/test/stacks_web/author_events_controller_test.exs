@@ -49,11 +49,17 @@ defmodule StacksWeb.AuthorEventsControllerTest do
       assert hd(events)["store_name"] == "The Corner Shop"
     end
 
-    test "an unknown or malformed author id is an empty list, not an error", %{conn: conn} do
+    test "an unknown author is an empty list, not an error", %{conn: conn} do
       assert %{"events" => []} =
                json_response(get(conn, "/api/authors/#{Ecto.UUID.generate()}/events"), 200)
+    end
 
-      assert %{"events" => []} = json_response(get(conn, "/api/authors/not-a-uuid/events"), 200)
+    test "an id that is not an id says so rather than reporting no events", %{conn: conn} do
+      # These two answers used to be identical, which made a caller sending a
+      # slug or a name indistinguishable from an author who has no events —
+      # permanently, and on the client's own book page.
+      assert %{"error" => "invalid_author_id"} =
+               json_response(get(conn, "/api/authors/not-a-uuid/events"), 400)
     end
 
     test "no auth required — the data is the shops' own public pages", %{conn: conn} do

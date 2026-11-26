@@ -23,6 +23,7 @@ select
     shelf_id,
     book_edition_id,
     source,
+    user_id,
     created_at,
     updated_at
 from {{ source('op', 'bookshelf_placements') }}

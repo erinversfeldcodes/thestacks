@@ -22,11 +22,11 @@ defmodule Stacks.UploadPipelineTest do
 
   alias Core.Repo
   alias Stacks.Accounts.Guardian
-  alias Stacks.AI.BudgetTracker
+  alias Stacks.AI.Budget
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.AI.MockClient
+  alias Stacks.AI.Spend
   alias Stacks.Books
-  alias Stacks.Books.{Book, BookEdition, UploadedImage}
   alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
   alias Stacks.GDPR.ImageRetention
@@ -35,6 +35,8 @@ defmodule Stacks.UploadPipelineTest do
   alias Stacks.Storage.Mock, as: StorageMock
   alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
+
+  alias Stacks.Books.{Book, BookEdition, UploadedImage}
 
   @image_b64 Base.encode64("fake image bytes for testing")
 
@@ -114,7 +116,7 @@ defmodule Stacks.UploadPipelineTest do
       try do
         results =
           Enum.map(1..121, fn _ ->
-            build_conn()
+            CoreWeb.ConnCase.proven_conn()
             |> auth_conn(token)
             |> post("/api/upload/init", %{})
             |> Map.get(:status)
@@ -136,7 +138,7 @@ defmodule Stacks.UploadPipelineTest do
     } do
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
 
       assert conn.status == 200
       [content_type | _] = get_resp_header(conn, "content-type")
@@ -165,7 +167,11 @@ defmodule Stacks.UploadPipelineTest do
           user_id: owner.id
         )
 
-      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{requester_token}")
+      conn =
+        get(
+          CoreWeb.ConnCase.with_session(conn, requester_token),
+          "/api/upload/#{image.id}/stream"
+        )
 
       assert conn.status == 403
     end
@@ -174,14 +180,14 @@ defmodule Stacks.UploadPipelineTest do
     test "returns 404 for unknown image_id", %{conn: conn, token: token} do
       fake_id = Ecto.UUID.generate()
 
-      conn = get(conn, "/api/upload/#{fake_id}/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{fake_id}/stream")
 
       assert conn.status == 404
     end
 
     @tag suite: :api
     test "returns 400 or 422 for invalid (non-UUID) image_id", %{conn: conn, token: token} do
-      conn = get(conn, "/api/upload/not-a-uuid/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/not-a-uuid/stream")
 
       assert conn.status in [400, 422]
     end
@@ -201,7 +207,7 @@ defmodule Stacks.UploadPipelineTest do
           user_id: user.id
         )
 
-      conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+      conn = get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
 
       assert conn.status == 200
       body = conn.resp_body
@@ -222,7 +228,7 @@ defmodule Stacks.UploadPipelineTest do
 
       task =
         Task.async(fn ->
-          get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+          get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
         end)
 
       Process.sleep(50)
@@ -256,7 +262,7 @@ defmodule Stacks.UploadPipelineTest do
 
       {elapsed_us, _conn} =
         :timer.tc(fn ->
-          get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+          get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
         end)
 
       assert elapsed_us < 1_000_000,
@@ -425,7 +431,9 @@ defmodule Stacks.UploadPipelineTest do
         })
       end)
 
-      stream_conn = get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
+      stream_conn =
+        get(CoreWeb.ConnCase.with_session(conn, token), "/api/upload/#{image.id}/stream")
+
       assert stream_conn.status == 200
 
       body = stream_conn.resp_body
@@ -1471,9 +1479,9 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag suite: :external
     test "steering is per-endpoint — an unsteered endpoint keeps its default" do
-      MockClient.put_response("extract_isbn", {:error, :steered_failure})
+      MockClient.put_response("analyze", {:error, :steered_failure})
 
-      assert {:error, :steered_failure} = MockClient.call_vision("extract_isbn", %{})
+      assert {:error, :steered_failure} = MockClient.call_vision("analyze", %{})
 
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
                MockClient.call_vision("is_book", %{})
@@ -1481,36 +1489,36 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag suite: :external
     test "the most recent registration for an endpoint wins" do
-      MockClient.put_response("extract_isbn", {:error, :first})
-      MockClient.put_response("extract_isbn", {:error, :second})
-      assert {:error, :second} = MockClient.call_vision("extract_isbn", %{})
+      MockClient.put_response("analyze", {:error, :first})
+      MockClient.put_response("analyze", {:error, :second})
+      assert {:error, :second} = MockClient.call_vision("analyze", %{})
     end
 
     @tag suite: :external
     test "an exact-endpoint registration wins over an :any registration" do
       MockClient.put_response(:any, {:error, :catch_all})
-      MockClient.put_response("extract_isbn", {:error, :specific})
+      MockClient.put_response("analyze", {:error, :specific})
 
-      assert {:error, :specific} = MockClient.call_vision("extract_isbn", %{})
+      assert {:error, :specific} = MockClient.call_vision("analyze", %{})
       assert {:error, :catch_all} = MockClient.call_vision("is_book", %{})
     end
 
     @tag suite: :external
     test "a response can be a function of the payload" do
-      MockClient.put_response("extract_isbn", fn payload ->
+      MockClient.put_response("analyze", fn payload ->
         {:ok, %{"echoed" => Map.get(payload, :image_b64)}}
       end)
 
       assert {:ok, %{"echoed" => "abc"}} =
-               MockClient.call_vision("extract_isbn", %{image_b64: "abc"})
+               MockClient.call_vision("analyze", %{image_b64: "abc"})
     end
 
     @tag suite: :external
     test "a steered response reaches work the caller farms out to a Task ($callers)" do
-      MockClient.put_response("extract_isbn", {:error, :steered_in_parent})
+      MockClient.put_response("analyze", {:error, :steered_in_parent})
 
       result =
-        Task.async(fn -> MockClient.call_vision("extract_isbn", %{}) end)
+        Task.async(fn -> MockClient.call_vision("analyze", %{}) end)
         |> Task.await()
 
       assert {:error, :steered_in_parent} = result
@@ -1634,10 +1642,10 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 6 — BudgetTracker" do
+  describe "Suite 6 — Budget" do
     @tag suite: :external
     test "check_budget returns :ok when under budget" do
-      assert :ok = BudgetTracker.check_budget(:modal)
+      assert :ok = Budget.check_budget(:modal)
     end
 
     @tag suite: :external
@@ -1647,23 +1655,27 @@ defmodule Stacks.UploadPipelineTest do
       try do
         Application.put_env(:core, :ai_budget, daily_limit_cents: 1, monthly_limit_cents: 50_000)
 
-        BudgetTracker.record_cost(:modal, 2)
+        Budget.record_cost(:modal, 200_000)
         Process.sleep(50)
 
-        assert {:error, :daily_limit_exceeded} = BudgetTracker.check_budget(:modal)
+        assert {:error, :daily_limit_exceeded} = Budget.check_budget(:modal)
       after
         Application.put_env(:core, :ai_budget, original_config)
       end
     end
 
+    # ⛔ READ FROM THE LEDGER. This asserted on a GenServer struct that has been
+    # deleted — a second copy of the spend that died with the process — and
+    # needed a `Process.sleep(50)` because the write was a `cast`. The write is
+    # synchronous now, so the sleep goes too: a test that waits on a mailbox is
+    # a test that can be flaky for reasons that have nothing to do with it.
     @tag suite: :external
     test "record_cost increases daily spend" do
-      state_before = BudgetTracker.current_state()
-      BudgetTracker.record_cost(:test_provider, 10)
-      Process.sleep(50)
-      state_after = BudgetTracker.current_state()
+      before = Spend.spent(:test_provider, :daily)
 
-      assert state_after.daily_total_cents >= state_before.daily_total_cents + 10
+      Budget.record_cost(:test_provider, 1_000_000)
+
+      assert Spend.spent(:test_provider, :daily) == before + 1_000_000
     end
   end
 
@@ -1675,7 +1687,7 @@ defmodule Stacks.UploadPipelineTest do
       try do
         Application.put_env(:core, :vision_hmac_secret, "test_secret_key")
 
-        req = AIClient.build_vision_request("/classify", %{image: "test"})
+        req = AIClient.build_vision_request("/analyze", %{image: "test"})
 
         token_header =
           Enum.find_value(req.headers, fn
@@ -2021,7 +2033,7 @@ defmodule Stacks.UploadPipelineTest do
       book_id = List.first(resolved_image.book_ids)
 
       book_conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(token)
         |> get("/api/books/#{book_id}")
 
@@ -2030,7 +2042,7 @@ defmodule Stacks.UploadPipelineTest do
       assert is_binary(book_resp["book"]["title"])
 
       place_conn =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(token)
         |> post("/api/bookshelves/wishlist/placements", %{"book_id" => book_id})
 

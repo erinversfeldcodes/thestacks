@@ -16,9 +16,14 @@ SANDBOX="$(mktemp -d)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
 MIGRATIONS="$SANDBOX/apps/core/priv/repo/migrations"
-mkdir -p "$MIGRATIONS" "$SANDBOX/scripts"
+mkdir -p "$MIGRATIONS" "$SANDBOX/scripts/lib"
 cp "$REPO_ROOT/scripts/security-squawk.sh" "$SANDBOX/scripts/"
 cp "$REPO_ROOT/scripts/extract-migration-sql.py" "$SANDBOX/scripts/"
+# The gate sources its suppression list from scripts/lib. Copying it keeps the
+# sandbox asserting against the real policy rather than a sandbox-local one —
+# and `source` of a missing file under `set -u` aborts the gate with a shell
+# error, which every assertion here then reads as its own failure.
+cp "$REPO_ROOT/scripts/lib/squawk-rules.sh" "$SANDBOX/scripts/lib/"
 
 git -C "$SANDBOX" init -q
 git -C "$SANDBOX" config user.email "platform-test@thestacks.invalid"
@@ -64,6 +69,12 @@ end
 EOF
 }
 
+# The "safe" fixtures carry a timeout preamble because the gate requires one:
+# `require-timeout-settings` is no longer excluded (see scripts/lib/squawk-rules.sh),
+# so a migration without it is not considered safe however benign its DDL.
+# squawk applies that rule even to an index on a table created in the same
+# migration — it suppresses `require-concurrent-index-creation` there, but not
+# this one — which is why the new-table fixture needs the preamble too.
 write_good_migration() {
     cat > "$1" <<'EOF'
 defmodule Core.Repo.Migrations.Good do
@@ -71,6 +82,9 @@ defmodule Core.Repo.Migrations.Good do
   @disable_ddl_transaction true
 
   def change do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     create index(:users, [:email], prefix: "op", concurrently: true, name: :users_email_idx)
   end
 end
@@ -83,6 +97,9 @@ defmodule Core.Repo.Migrations.NewTable do
   use Ecto.Migration
 
   def change do
+    execute("SET LOCAL lock_timeout = '5s'")
+    execute("SET LOCAL statement_timeout = '30s'")
+
     create table(:widgets, prefix: "op") do
       add :name, :string
       timestamps()

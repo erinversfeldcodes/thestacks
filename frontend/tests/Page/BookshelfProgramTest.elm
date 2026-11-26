@@ -39,14 +39,14 @@ import TestHelpers
 -}
 startLibrary : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startLibrary =
-    ProgramTest.start () (libraryProgram (Just "test-token"))
+    ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
 
 
 {-| Start any owner-mode bookshelf under the given config.
 -}
 startShelf : Bookshelf.Config -> ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startShelf config =
-    ProgramTest.start () (bookshelfProgram config (Just "test-token"))
+    ProgramTest.start () (bookshelfProgram config (Just (TestHelpers.creds "test-token")))
 
 
 suite : Test
@@ -151,7 +151,7 @@ bookshelfLoadingState =
                     |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
                     |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true") ]
                     |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "role" "status") ]
-                    |> ProgramTest.ensureViewHas [ Selector.text "Fetching your Library…" ]
+                    |> ProgramTest.ensureViewHas [ Selector.exactText "Fetching your Library…" ]
                     |> ProgramTest.expectView
                         (Query.findAll [ Selector.class "book-skeleton" ]
                             >> Query.count (Expect.greaterThan 1)
@@ -178,7 +178,7 @@ bookshelfLoadingState =
         , test "profile_shelf_loading_names_whose_shelf: read-only browse does not call it 'your' library" <|
             \() ->
                 ProgramTest.start () (bookshelfProgram (Bookshelf.profileConfig "ada" "library") Nothing)
-                    |> ProgramTest.ensureViewHas [ Selector.text "Fetching @ada’s Library…" ]
+                    |> ProgramTest.ensureViewHas [ Selector.exactText "Fetching @ada’s Library…" ]
                     |> ProgramTest.expectViewHasNot [ Selector.text "Fetching your Library…" ]
         ]
 
@@ -222,7 +222,7 @@ bookshelfErrorState =
                     "/api/bookshelves/library"
                     (shelfErrorResponse "/api/bookshelves/library" 500)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Could not load your library. Please try again." ]
+                    [ Selector.exactText "Could not load your library. Please try again." ]
 
 
 {-| higher-severity property, pinned: a failed load must NEVER read as
@@ -253,7 +253,7 @@ bookshelfAgeGate =
                     "/api/bookshelves/library"
                     (shelfErrorResponse "/api/bookshelves/library" 403)
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Age Verification Required" ]
+                    [ Selector.exactText "Age Verification Required" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "age-gate" ]
                 |> ProgramTest.clickButton "Go Back"
@@ -289,7 +289,7 @@ antiLibrarySuite =
                         "/api/bookshelves/antilibrary"
                         (simulateBookshelfResponse [])
                     |> ProgramTest.expectViewHas
-                        [ Selector.text "Books you own but haven't read yet. Upload a photo to start building your collection." ]
+                        [ Selector.exactText "Books you own but haven't read yet. Upload a photo to start building your collection." ]
         , test "antilibrary_error_state: a 500 names the antilibrary in the error copy" <|
             \() ->
                 startShelf Bookshelf.antiLibraryConfig
@@ -297,7 +297,7 @@ antiLibrarySuite =
                         "/api/bookshelves/antilibrary"
                         (shelfErrorResponse "/api/bookshelves/antilibrary" 500)
                     |> ProgramTest.ensureViewHas
-                        [ Selector.text "Could not load your antilibrary. Please try again." ]
+                        [ Selector.exactText "Could not load your antilibrary. Please try again." ]
                     |> ProgramTest.expectViewHasNot [ Selector.class "age-gate" ]
         , test "antilibrary_age_gate: a 403 raises the age gate over the antilibrary" <|
             \() ->
@@ -339,7 +339,7 @@ wishListSuite =
                         "/api/bookshelves/wishlist"
                         (simulateBookshelfResponse [])
                     |> ProgramTest.expectViewHas
-                        [ Selector.text "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN." ]
+                        [ Selector.exactText "Books you're dreaming about. Add one from a photo, a screenshot, or an ISBN." ]
         , test "wishlist_error_state: a 500 names the wish list in the error copy" <|
             \() ->
                 startShelf Bookshelf.wishListConfig
@@ -347,7 +347,7 @@ wishListSuite =
                         "/api/bookshelves/wishlist"
                         (shelfErrorResponse "/api/bookshelves/wishlist" 500)
                     |> ProgramTest.ensureViewHas
-                        [ Selector.text "Could not load your wish list. Please try again." ]
+                        [ Selector.exactText "Could not load your wish list. Please try again." ]
                     |> ProgramTest.expectViewHasNot [ Selector.class "age-gate" ]
         , test "wishlist_age_gate: a 403 raises the age gate over the wish list" <|
             \() ->
@@ -412,11 +412,11 @@ viewModeSuite =
                     |> ProgramTest.simulateDomEvent (findViewModeButton "List view") Event.click
                     |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--list-view" ]
                     |> ProgramTest.ensureViewHas [ Selector.class "book-list" ]
-                    |> ProgramTest.ensureViewHas [ Selector.text "Title" ]
-                    |> ProgramTest.ensureViewHas [ Selector.text "Author" ]
-                    |> ProgramTest.ensureViewHas [ Selector.text "Pages" ]
-                    |> ProgramTest.ensureViewHas [ Selector.text "Date Added" ]
-                    |> ProgramTest.ensureViewHas [ Selector.text "Formats" ]
+                    |> ProgramTest.ensureViewHas [ Selector.exactText "Title" ]
+                    |> ProgramTest.ensureViewHas [ Selector.exactText "Author" ]
+                    |> ProgramTest.ensureViewHas [ Selector.exactText "Pages" ]
+                    |> ProgramTest.ensureViewHas [ Selector.exactText "Date Added" ]
+                    |> ProgramTest.ensureViewHas [ Selector.exactText "Formats" ]
                     |> ProgramTest.expectViewHasNot [ Selector.class "bookcase" ]
         , test "spine_view_returns: toggling back to spine view restores the bookcase" <|
             \() ->
@@ -499,7 +499,7 @@ findColumnHeader : String -> Query.Single msg -> Query.Single msg
 findColumnHeader label =
     Query.find
         [ Selector.tag "th"
-        , Selector.containing [ Selector.text label ]
+        , Selector.containing [ Selector.exactText label ]
         ]
 
 

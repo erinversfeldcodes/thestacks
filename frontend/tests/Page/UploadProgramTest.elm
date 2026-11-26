@@ -39,7 +39,7 @@ covered explicitly by `uploadAdultsOnlyHiddenWhenFlagOff`.
 -}
 startUpload : ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
 startUpload =
-    ProgramTest.start () (uploadProgram True (Just "test-token"))
+    ProgramTest.start () (uploadProgram True (Just (TestHelpers.creds "test-token")))
 
 
 {-| Helper to start an upload program with age-gating OFF (the production
@@ -47,7 +47,7 @@ default), used to prove age UI is hidden.
 -}
 startUploadAgeGatingOff : ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
 startUploadAgeGatingOff =
-    ProgramTest.start () (uploadProgram False (Just "test-token"))
+    ProgramTest.start () (uploadProgram False (Just (TestHelpers.creds "test-token")))
 
 
 {-| Build an SSE frame exactly as the server emits it — the one wire shape
@@ -328,7 +328,7 @@ outMsgOf : Upload.Msg -> Upload.Model -> Upload.OutMsg
 outMsgOf msg model =
     let
         ( _, _, out ) =
-            Upload.update msg model (Just "test-token")
+            Upload.update msg model (Just (TestHelpers.creds "test-token"))
     in
     out
 
@@ -341,6 +341,7 @@ awaitingItem imageId bookId =
     , kind = Api.AwaitingConfirmation
     , bookIds = [ bookId ]
     , rejectionReason = Nothing
+    , retryable = True
     }
 
 
@@ -350,6 +351,7 @@ failedItem imageId reason =
     , kind = Api.Failed
     , bookIds = []
     , rejectionReason = reason
+    , retryable = True
     }
 
 
@@ -358,7 +360,7 @@ startWithInbox :
     -> ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
 startWithInbox items =
     ProgramTest.start ()
-        (uploadProgramWithInbox True (Just "test-token") (Types.RemoteData.Success items))
+        (uploadProgramWithInbox True (Just (TestHelpers.creds "test-token")) (Types.RemoteData.Success items))
 
 
 testIdSelector : String -> Selector.Selector
@@ -450,10 +452,10 @@ inboxNamesTheFailureCause =
                 ]
                 |> ProgramTest.expectView
                     (Expect.all
-                        [ Query.has [ Selector.text "The service that reads book covers is not answering. There is nothing wrong with your photo. Type the ISBN in to add the book now, or try the photo again later." ]
-                        , Query.has [ Selector.text "We found a book but could not make out its ISBN. A closer photo of the barcode or the copyright page will usually do it — or type the number in." ]
-                        , Query.has [ Selector.text "We couldn't detect a book in that image. Please try a photo of a book cover." ]
-                        , Query.has [ Selector.text "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in." ]
+                        [ Query.has [ Selector.exactText "The service that reads book covers is not answering. There is nothing wrong with your photo. Type the ISBN in to add the book now, or try the photo again later." ]
+                        , Query.has [ Selector.exactText "We found a book but could not make out its ISBN. A closer photo of the barcode or the copyright page will usually do it — or type the number in." ]
+                        , Query.has [ Selector.exactText "We couldn't detect a book in that image. Please try a photo of a book cover." ]
+                        , Query.has [ Selector.exactText "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in." ]
                         ]
                     )
 
@@ -479,10 +481,10 @@ inboxResumesTheExistingConfirmFlow =
                 |> ProgramTest.expectView
                     (Expect.all
                         [ Query.has [ testIdSelector "upload-verify" ]
-                        , Query.has [ Selector.text "We think this is…" ]
-                        , Query.has [ Selector.text "Piranesi" ]
-                        , Query.has [ Selector.text "Yes, that's it" ]
-                        , Query.has [ Selector.text "No, try again" ]
+                        , Query.has [ Selector.exactText "We think this is…" ]
+                        , Query.has [ Selector.exactText "Piranesi" ]
+                        , Query.has [ Selector.exactText "Yes, that's it" ]
+                        , Query.has [ Selector.exactText "No, try again" ]
                         ]
                     )
 
@@ -585,7 +587,7 @@ waitingCopyOffersTheDoorAfterTwentySeconds =
                 |> ProgramTest.update WaitTick
                 |> ProgramTest.expectViewHas
                     [ testIdSelector "upload-leave-note"
-                    , Selector.text "This one is taking a while. You don't have to wait — you can close this page and carry on. We'll keep going, and the result will be waiting for you under Add a Book."
+                    , Selector.exactText "This one is taking a while. You don't have to wait — you can close this page and carry on. We'll keep going, and the result will be waiting for you under Add a Book."
                     ]
 
 
@@ -606,8 +608,8 @@ waitingCopySaysNothingAboutRetries =
                         >> Expect.all
                             [ Query.findAll [ Selector.tag "p" ]
                                 >> Query.count (Expect.equal 2)
-                            , Query.has [ Selector.text "Reading your photo..." ]
-                            , Query.has [ Selector.text "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return." ]
+                            , Query.has [ Selector.exactText "Reading your photo..." ]
+                            , Query.has [ Selector.exactText "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return." ]
                             ]
                     )
 
@@ -632,7 +634,7 @@ waitingWatchdogNoticesASilentStream =
                     (Expect.all
                         [ Query.has
                             [ testIdSelector "upload-stream-silent"
-                            , Selector.text "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return."
+                            , Selector.exactText "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return."
                             ]
                         , Query.hasNot [ testIdSelector "upload-error" ]
                         ]
@@ -695,7 +697,7 @@ manualIsbnNewBookIsCreatedThroughConfirm =
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-complete") ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "\"The Book of Disquiet\" added to Wish List" ]
+                    [ Selector.exactText "\"The Book of Disquiet\" added to Wish List" ]
 
 
 {-| , re-driven over the wired path.
@@ -704,7 +706,7 @@ The manual add now goes through `POST /api/books/confirm`, which places the
 book and reports every bookshelf the reader has it on. The duplicate awareness
 survives the rewiring — and the ruling's point survives with it: the notice
 INFORMS. It appears alongside a completed add, not instead of one. The flow
-reached its terminal screen, "Add another" and "View on shelf" are both live,
+reached its terminal screen, "Add another" and "View on bookshelf" are both live,
 and nothing anywhere was refused.
 
 -}
@@ -732,15 +734,15 @@ manualIsbnDuplicateNoticeInformsWithoutBlocking =
                     )
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-complete")
-                    , Selector.text "\"The Power of Habit\" added to Wish List"
+                    , Selector.exactText "\"The Power of Habit\" added to Wish List"
                     ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours")
-                    , Selector.text "You already have this on your Library."
+                    , Selector.exactText "You already have this on your Library."
                     ]
                 |> ProgramTest.clickButton "Add another"
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Drag a photo of a book cover here" ]
+                    [ Selector.exactText "Drag a photo of a book cover here" ]
 
 
 {-| The notice must not appear for a book the reader does not own — otherwise
@@ -798,7 +800,7 @@ photoPathDuplicateNoticeInformsWithoutBlocking =
                     )
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours")
-                    , Selector.text "You already have this on your Library and Antilibrary."
+                    , Selector.exactText "You already have this on your Library and Antilibrary."
                     ]
                 |> ProgramTest.clickButton "Yes, that's it"
                 |> ProgramTest.ensureViewHas
@@ -834,7 +836,7 @@ manualIsbnSameWorkOffersMerge =
                     (simulateBookResponse "work-existing-1" "The Name of the Rose" "Umberto Eco")
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-same-work")
-                    , Selector.text "You already have \"The Name of the Rose\" by Umberto Eco. Add this edition to it?"
+                    , Selector.exactText "You already have \"The Name of the Rose\" by Umberto Eco. Add this edition to it?"
                     ]
                 |> ProgramTest.clickButton "Yes, merge"
                 |> ProgramTest.simulateHttpResponse "POST"
@@ -847,11 +849,11 @@ manualIsbnSameWorkOffersMerge =
                 |> ProgramTest.ensureViewHasNot [ Selector.text "Yes, merge" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-complete")
-                    , Selector.text "\"The Name of the Rose\" has a new edition"
-                    , Selector.text "The Paperback edition (ISBN 9780156453806) is now listed on the book's page."
+                    , Selector.exactText "\"The Name of the Rose\" has a new edition"
+                    , Selector.exactText "The Paperback edition (ISBN 9780156453806) is now listed on the book's page."
                     ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "It isn't on one of your bookshelves yet — open the book to add it." ]
+                    [ Selector.exactText "It isn't on one of your bookshelves yet — open the book to add it." ]
 
 
 {-| `Books.confirm/2`'s `:already_placed` branch (`source: "collection"`).
@@ -881,7 +883,7 @@ manualIsbnAlreadyOnThatShelfSaysSo =
                         }
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "\"The Power of Habit\" is already on your Wish List" ]
+                    [ Selector.exactText "\"The Power of Habit\" is already on your Wish List" ]
 
 
 {-| The reader picks the bookshelf on the manual-entry screen, and that choice
@@ -924,11 +926,11 @@ uploadHappyPath =
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Test Book" "Test Author")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "We think this is…" ]
+                    [ Selector.exactText "We think this is…" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Test Book" ]
+                    [ Selector.exactText "Test Book" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Test Author" ]
+                    [ Selector.exactText "Test Author" ]
 
 
 uploadIsbnRejection : Test
@@ -939,9 +941,9 @@ uploadIsbnRejection =
                 |> simulateUploadAccepted
                 |> ProgramTest.update (StreamEvent (simulateRejection "isbn_not_found"))
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Could Not Read the ISBN" ]
+                    [ Selector.exactText "Could Not Read the ISBN" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Try Another Photo" ]
+                    [ Selector.exactText "Try Another Photo" ]
 
 
 {-| Four causes, four messages — the whole of first requirement.
@@ -966,7 +968,7 @@ uploadFailureCauses =
                     |> simulateUploadAccepted
                     |> ProgramTest.update (StreamEvent (simulateRejection "undecodable_image"))
                     |> ProgramTest.ensureViewHas
-                        [ Selector.text "That Photo Could Not Be Opened" ]
+                        [ Selector.exactText "That Photo Could Not Be Opened" ]
                     |> onlyFailureCause "image-unreadable"
         , test "image_too_large is an unreadable file, not an unreadable ISBN" <|
             \() ->
@@ -974,7 +976,7 @@ uploadFailureCauses =
                     |> simulateUploadAccepted
                     |> ProgramTest.update (StreamEvent (simulateRejection "image_too_large"))
                     |> ProgramTest.ensureViewHas
-                        [ Selector.text "That Photo Could Not Be Opened" ]
+                        [ Selector.exactText "That Photo Could Not Be Opened" ]
                     |> onlyFailureCause "image-unreadable"
         , test "isbn_not_found keeps the message that was always about it" <|
             \() ->
@@ -990,14 +992,14 @@ uploadFailureCauses =
                     |> simulateUploadAccepted
                     |> ProgramTest.update (StreamEvent (simulateRejection "not_a_book"))
                     |> ProgramTest.expectViewHas
-                        [ Selector.text "That Doesn't Look Like a Book" ]
+                        [ Selector.exactText "That Doesn't Look Like a Book" ]
         , test "vision_unavailable tells the reader their photo is fine" <|
             \() ->
                 startUpload
                     |> simulateUploadAccepted
                     |> ProgramTest.update (StreamEvent (simulateRejection "vision_unavailable"))
                     |> ProgramTest.ensureViewHas
-                        [ Selector.text "The Cataloguing Desk Is Closed" ]
+                        [ Selector.exactText "The Cataloguing Desk Is Closed" ]
                     |> ProgramTest.ensureViewHas
                         [ Selector.text "There is nothing wrong with your photo." ]
                     |> onlyFailureCause "service-unavailable"
@@ -1007,7 +1009,7 @@ uploadFailureCauses =
                     |> simulateUploadAccepted
                     |> ProgramTest.update (StreamEvent (simulateRejection "vision_budget_exceeded"))
                     |> ProgramTest.ensureViewHas
-                        [ Selector.text "The Cataloguing Desk Is Closed" ]
+                        [ Selector.exactText "The Cataloguing Desk Is Closed" ]
                     |> onlyFailureCause "service-unavailable"
         , test "the SSE timeout frame reports no verdict, not a bad photo" <|
             \() ->
@@ -1015,7 +1017,7 @@ uploadFailureCauses =
                     |> simulateUploadAccepted
                     |> ProgramTest.update (StreamEvent (simulateStreamEvent TimedOut Nothing False))
                     |> ProgramTest.ensureViewHas
-                        [ Selector.text "No Answer Came Back" ]
+                        [ Selector.exactText "No Answer Came Back" ]
                     |> ProgramTest.ensureViewHas
                         [ Selector.text "Nothing has been added to your shelves." ]
                     |> onlyFailureCause "timed-out"
@@ -1117,33 +1119,33 @@ uploadSendFailures =
                     |> ProgramTest.update (UploadAccepted (Err (Http.BadStatus 429)))
                     |> ProgramTest.expectViewHas
                         [ Selector.attribute (Html.Attributes.attribute "data-failure-cause" "not-sent")
-                        , Selector.text "Too many attempts from here just now. Please wait a little while before trying again."
+                        , Selector.exactText "Too many attempts from here just now. Please wait a little while before trying again."
                         ]
         , test "a 413 says the file is too large" <|
             \() ->
                 startUpload
                     |> ProgramTest.update (UploadAccepted (Err (Http.BadStatus 413)))
                     |> ProgramTest.expectViewHas
-                        [ Selector.text "That photo is too large to send. A smaller one — or your phone's own resized copy — will go through." ]
+                        [ Selector.exactText "That photo is too large to send. A smaller one — or your phone's own resized copy — will go through." ]
         , test "an unrecognised status admits it is unrecognised" <|
             \() ->
                 startUpload
                     |> ProgramTest.update (UploadAccepted (Err (Http.BadStatus 418)))
                     |> ProgramTest.expectViewHas
-                        [ Selector.text "Your photo could not be sent, and we cannot say why. Please try again in a moment." ]
+                        [ Selector.exactText "Your photo could not be sent, and we cannot say why. Please try again in a moment." ]
         , test "⛔ the three do not share a sentence" <|
             \() ->
                 [ Http.BadStatus 429, Http.BadStatus 413, Http.BadStatus 418 ]
                     |> List.map (\err -> Upload.sendError err)
                     |> distinctCount
                     |> Expect.equal 3
-        , -- ⛔ Added because a probe found nothing (#374).
+        , -- ⛔ Added because a probe found nothing.
           test "a 429 on the R2 PUT keeps its status instead of becoming a network error" <|
             \() ->
                 startUpload
-                    |> ProgramTest.update (Upload.R2PutCompleted "img-test-001" "test-token" (Err (Http.BadStatus 429)))
+                    |> ProgramTest.update (Upload.UploadBytesSent "img-test-001" (TestHelpers.creds "test-token") (Err (Http.BadStatus 429)))
                     |> ProgramTest.expectViewHas
-                        [ Selector.text "Too many attempts from here just now. Please wait a little while before trying again." ]
+                        [ Selector.exactText "Too many attempts from here just now. Please wait a little while before trying again." ]
         ]
 
 
@@ -1169,7 +1171,7 @@ uploadNotABook =
                 |> simulateUploadAccepted
                 |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved Nothing False))
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "That Doesn't Look Like a Book" ]
+                    [ Selector.exactText "That Doesn't Look Like a Book" ]
 
 
 uploadPollTimeout : Test
@@ -1180,7 +1182,7 @@ uploadPollTimeout =
                 |> simulateUploadAccepted
                 |> ProgramTest.update StreamError
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "The Library Is Unreachable" ]
+                    [ Selector.exactText "The Library Is Unreachable" ]
 
 
 uploadPollTimeoutViaLimit : Test
@@ -1191,7 +1193,7 @@ uploadPollTimeoutViaLimit =
                 |> simulateUploadAccepted
                 |> ProgramTest.update (Upload.StatusReceived (Err Http.NetworkError))
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "The Library Is Unreachable" ]
+                    [ Selector.exactText "The Library Is Unreachable" ]
 
 
 uploadDuplicateDetected : Test
@@ -1205,11 +1207,11 @@ uploadDuplicateDetected =
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Duplicate Book" "Dupe Author")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Already in Your Library" ]
+                    [ Selector.exactText "Already in Your Library" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "upload-duplicate__merge" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Yes, merge" ]
+                    [ Selector.exactText "Yes, merge" ]
 
 
 {-| The manual path driven entirely through the affordances a reader can see:
@@ -1224,7 +1226,7 @@ uploadManualIsbnEntry =
             startUpload
                 |> ProgramTest.clickButton "Enter ISBN manually instead"
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Enter ISBN Manually" ]
+                    [ Selector.exactText "Enter ISBN Manually" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "isbn-input" ]
                 |> ProgramTest.update (ManualIsbnChanged "9780141988511")
@@ -1263,13 +1265,13 @@ uploadMultiBook =
                     "/api/books/book-c"
                     (simulateBookResponse "book-c" "Third Book" "Author Three")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Books Identified!" ]
+                    [ Selector.exactText "Books Identified!" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "First Book" ]
+                    [ Selector.exactText "First Book" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Second Book" ]
+                    [ Selector.exactText "Second Book" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Third Book" ]
+                    [ Selector.exactText "Third Book" ]
 
 
 uploadMergeFormatSuccess : Test
@@ -1283,7 +1285,7 @@ uploadMergeFormatSuccess =
                     "/api/books/book-1"
                     (simulateBookWithEditionCount "book-1" "Duplicate Book" "Dupe Author" 1)
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Already in Your Library" ]
+                    [ Selector.exactText "Already in Your Library" ]
                 |> ProgramTest.clickButton "Yes, merge"
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/books/book-1/merge-format"
@@ -1292,8 +1294,8 @@ uploadMergeFormatSuccess =
                 |> ProgramTest.ensureViewHasNot [ Selector.text "Yes, merge" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-complete")
-                    , Selector.text "\"Duplicate Book\" has a new edition"
-                    , Selector.text "The Hardback edition (ISBN 9780141988511) is now listed on the book's page."
+                    , Selector.exactText "\"Duplicate Book\" has a new edition"
+                    , Selector.exactText "The Hardback edition (ISBN 9780141988511) is now listed on the book's page."
                     ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-shelf-hint") ]
@@ -1310,7 +1312,7 @@ uploadMergeFormatFailure =
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Duplicate Book" "Dupe Author")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Already in Your Library" ]
+                    [ Selector.exactText "Already in Your Library" ]
                 |> ProgramTest.clickButton "Yes, merge"
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/books/book-1/merge-format"
@@ -1337,7 +1339,7 @@ uploadManualIsbnValidation =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "isbn-input--error" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Invalid ISBN checksum. Please check the number and try again." ]
+                    [ Selector.exactText "Invalid ISBN checksum. Please check the number and try again." ]
 
 
 uploadReset : Test
@@ -1348,12 +1350,12 @@ uploadReset =
                 |> simulateUploadAccepted
                 |> ProgramTest.update StreamError
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "The Library Is Unreachable" ]
+                    [ Selector.exactText "The Library Is Unreachable" ]
                 |> ProgramTest.clickButton "Try Another Photo"
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "upload-area" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Drag a photo of a book cover here" ]
+                    [ Selector.exactText "Drag a photo of a book cover here" ]
 
 
 uploadDragOver : Test
@@ -1386,7 +1388,7 @@ uploadAgeGated =
                     "/api/books/book-age-gated"
                     (simulateBookWithVisibilityTier "book-age-gated" "Adult Title" "Adult Author" "age_gated")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "We think this is…" ]
+                    [ Selector.exactText "We think this is…" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-age-gate-notice") ]
                 |> ProgramTest.expectViewHas
@@ -1425,16 +1427,16 @@ uploadMultiBookPartialFailure =
                         ""
                     )
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Books Identified!" ]
+                    [ Selector.exactText "Books Identified!" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "First Book" ]
+                    [ Selector.exactText "First Book" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Second Book" ]
+                    [ Selector.exactText "Second Book" ]
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Could not identify" ]
+                    [ Selector.exactText "Could not identify" ]
                 |> ProgramTest.update Upload.ConfirmPlacement
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "First Book" ]
+                    [ Selector.exactText "First Book" ]
 
 
 {-| "No, try again" must keep the image, append the rejected book id to
@@ -1454,7 +1456,7 @@ uploadRejectIdentificationRetries =
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Wrong Guess" "Wrong Author")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "We think this is…" ]
+                    [ Selector.exactText "We think this is…" ]
                 |> ProgramTest.clickButton "No, try again"
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/upload/img-test-001/reject-identification"
@@ -1468,7 +1470,7 @@ uploadRejectIdentificationRetries =
                     )
                 |> ProgramTest.expectViewHas
                     [ testIdSelector "upload-loading"
-                    , Selector.text "Reading your photo..."
+                    , Selector.exactText "Reading your photo..."
                     ]
 
 
@@ -1503,7 +1505,7 @@ uploadAdultsOnly =
                         "{}"
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Adding to shelf..." ]
+                    [ Selector.exactText "Adding to your bookshelf..." ]
 
 
 {-| age-gating shipped dark. With the server config flag OFF (the

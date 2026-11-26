@@ -1,5 +1,10 @@
-import { test, expect } from "@playwright/test";
-import { signInViaForm, suiteAuthFile } from "./helpers";
+import { test, expect } from "./fixtures";
+import {
+  expireSession,
+  hasSessionCookie,
+  signInViaForm,
+  suiteAuthFile,
+} from "./helpers";
 
 const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
@@ -138,30 +143,61 @@ test.describe("Logout", () => {
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
-    const token = await page.evaluate(
-      () => JSON.parse(localStorage.getItem("stacks-auth") || "{}").token
-    );
-    expect(token).toBeTruthy();
+    expect(
+      await hasSessionCookie(page),
+      "signing in must leave this context holding a session cookie"
+    ).toBe(true);
 
     await page.getByTestId("user-menu").click();
+
+    // ⛔ AWAIT THE REQUEST, NOT THE NAVIGATION, and the reason has changed since
+    // this was written. Sign-out used to dispatch
+    // `Cmd.batch [ logoutCmd, clearListingDraft (), Nav.pushUrl … ]`, so the URL
+    // changed LOCALLY and immediately while `DELETE /api/auth/logout` was still
+    // in flight; `waitForURL` was satisfied before the server had cleared the
+    // cookie, and the assertion below read a cookie the response was about to
+    // remove — failing consistently rather than flakily, because the local
+    // navigation always won the race. Measured on a deployed stack: the server
+    // answers `204` and sends
+    //   set-cookie: stacks_session=…; max-age=0; expires=Thu, 01 Jan 1970 …
+    // which is correct, so this was never a server defect.
+    //
+    // ⚖️ The app now waits for that response itself — a sign-out the server did
+    // not confirm leaves the reader signed in and says so — so the navigation no
+    // longer races this. Awaiting the response stays anyway: it is what makes the
+    // cookie assertion below an assertion about a COMPLETED sign-out rather than
+    // about whichever of two async events happened to land first.
+    const loggedOut = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/auth/logout") && r.request().method() === "DELETE"
+    );
     await page.getByRole("button", { name: "Sign Out" }).click();
+    await loggedOut;
 
     await page.waitForURL("**/login");
 
     await expect(page.locator('a[href="/login"]')).toBeVisible();
     await expect(page.getByTestId("user-menu")).toHaveCount(0);
 
-    const stored = await page.evaluate(() =>
-      localStorage.getItem("stacks-auth")
-    );
-    expect(stored).toBeFalsy();
+    // ⛔ The cookie, not a localStorage blob. Sign-out clears it SERVER-side
+    // (`AuthController.logout/2` → `SessionCookie.delete_session_cookie/1`), so
+    // this asserts the credential is actually gone from the browser rather than
+    // that the SPA forgot a copy of it — which is what the old assertion
+    // checked, and which was never a revocation.
+    expect(
+      await hasSessionCookie(page),
+      "signing out must clear the session cookie, not merely the SPA's memory"
+    ).toBe(false);
 
     await page.goto("/upload");
     await expect(page.locator('input[id="email"]')).toBeVisible();
 
-    const resp = await page.request.get("/api/placements/mine", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    // ⛔ `page.request` shares the browser context's cookie jar, which sign-out
+    // emptied — so this is the signed-out reader's own request, not a synthetic
+    // credential-free one. It used to send the bearer the SPA had been holding;
+    // there is no such bearer any more, and the cookie's absence is the whole
+    // credential story.
+    const resp = await page.request.get("/api/placements/mine");
     expect(resp.status()).toBe(401);
   });
 });
@@ -251,21 +287,29 @@ test.describe("Unauthenticated access to protected pages", () => {
  * Under the pre-code both hang until timeout: the token is never written.
  */
 test.describe("Login is not downstream of the door animation", () => {
-  /** Poll localStorage until the auth token appears; return how long it took. */
-  async function msUntilTokenStored(page, deadlineMs: number) {
+  /**
+   * Poll until the SPA has ACTED on the 200; return how long it took.
+   *
+   * ⛔ It polls the post-login NAVIGATION, and the reason is the whole point of
+   * this file. The obvious migration — poll for the session cookie — would be
+   * VACUOUS: the cookie arrives on the login response itself, before a line of
+   * Elm runs, so it would be there even if the SPA discarded the 200 entirely.
+   * That is exactly the defect this suite exists to catch.
+   *
+   * Navigating to the asked-for page is a `LoginEffect`, fired from the update
+   * that decodes the 200. Under the pre-code — where the effects waited for an
+   * animation-finished signal an occluded window never sends — the URL stays on
+   * `/login` until the deadline.
+   */
+  async function msUntilSignedIn(page, deadlineMs: number) {
     const start = Date.now();
     while (Date.now() - start < deadlineMs) {
-      const token = await page.evaluate(() => {
-        try {
-          return JSON.parse(localStorage.getItem("stacks-auth") || "{}").token;
-        } catch {
-          return null;
-        }
-      });
-      if (token) return { elapsed: Date.now() - start, token };
+      if (!page.url().includes("/login")) {
+        return { elapsed: Date.now() - start, signedIn: true };
+      }
       await page.waitForTimeout(25);
     }
-    return { elapsed: Date.now() - start, token: null };
+    return { elapsed: Date.now() - start, signedIn: false };
   }
 
   /**
@@ -322,11 +366,11 @@ test.describe("Login is not downstream of the door animation", () => {
     await page.getByTestId("login-submit").click();
     await response;
 
-    const { elapsed, token } = await msUntilTokenStored(page, 1000);
+    const { elapsed, signedIn } = await msUntilSignedIn(page, 1000);
     expect(
-      token,
-      "the 200 was discarded: no stacks-auth token within 1s (#359)"
-    ).toBeTruthy();
+      signedIn,
+      "the 200 was discarded: still on /login 1s after a successful login"
+    ).toBe(true);
     expect(elapsed).toBeLessThan(1000);
 
     await page.reload();
@@ -358,10 +402,10 @@ test.describe("Login is not downstream of the door animation", () => {
     await page.getByTestId("login-submit").click();
     await response;
 
-    const { elapsed, token } = await msUntilTokenStored(page, 1000);
+    const { elapsed, signedIn } = await msUntilSignedIn(page, 1000);
     expect(
-      token,
-      "the 200 was discarded while every animation was stalled (#359)"
+      signedIn,
+      "the 200 was discarded while every animation was stalled"
     ).toBeTruthy();
     expect(elapsed).toBeLessThan(1000);
 
@@ -476,7 +520,7 @@ test.describe("The arrival door plays from the shell", () => {
     const count = await doorAnimationCount(page, 4000);
     expect(
       count,
-      "the door started zero animations — the dolly-shot is not playing over the arrival (#364)"
+      "the door started zero animations — the dolly-shot is not playing over the arrival"
     ).toBeGreaterThan(0);
   });
 
@@ -512,7 +556,7 @@ test.describe("The arrival door plays from the shell", () => {
     const count = await doorAnimationCount(page, 4000);
     expect(
       count,
-      "the door never started, so this is not exercising the frozen dolly-shot (#364)"
+      "the door never started, so this is not exercising the frozen dolly-shot"
     ).toBeGreaterThan(0);
 
     await page.reload();
@@ -526,11 +570,13 @@ test.describe("Session expiry", () => {
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
-    await page.evaluate(() => {
-      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      raw.token = `${raw.token}.expired`;
-      localStorage.setItem("stacks-auth", JSON.stringify(raw));
-    });
+    // ⛔ BOTH TRANSPORTS. Corrupting only the stored bearer token stopped ending
+    // the session once the server began issuing an HttpOnly cookie: measured on
+    // a preview, a context whose stored token had been corrupted still got 200
+    // from /api/placements/mine, /api/bookshelves/library and
+    // /api/onboarding/status, and nothing redirected — the cookie authenticated
+    // every one of them. `expireSession` corrupts the cookie too.
+    await expireSession(page);
 
     await page.goto("/library");
 
@@ -543,13 +589,13 @@ test.describe("Session expiry", () => {
 
     await expect(page.getByTestId("login-error")).toHaveCount(0);
 
-    const stored = await page.evaluate(() =>
-      localStorage.getItem("stacks-auth")
-    );
-    expect(stored).toBeFalsy();
+    // ⚠️ NOT an assertion about the cookie. `expireSession` CORRUPTS it rather
+    // than removing it, so it is still present — what must be true is that the
+    // app refuses to render itself signed in on a credential the server rejects.
+    await expect(page.getByTestId("user-menu")).toHaveCount(0);
   });
 
-  test("Session expiry redirects from a newly-covered page (Settings/Privacy) []", async ({
+  test("Session expiry redirects from a newly-covered page (Settings/Privacy)", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
@@ -561,12 +607,10 @@ test.describe("Session expiry", () => {
     });
     await expect(saveProfileVisibility).toBeVisible({ timeout: 15000 });
 
+    // Revoke the session out from under the open page. No credential to look
+    // up: this runs in the page, so the session cookie goes with the request.
     await page.evaluate(async () => {
-      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      await fetch("/api/auth/logout", {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${raw.token}` },
-      });
+      await fetch("/api/auth/logout", { method: "DELETE" });
     });
 
     await page.locator(".form-field__select").first().selectOption("platform");
@@ -581,22 +625,25 @@ test.describe("Session expiry", () => {
 
     await expect(page.getByTestId("login-error")).toHaveCount(0);
 
-    const stored = await page.evaluate(() =>
-      localStorage.getItem("stacks-auth")
-    );
-    expect(stored).toBeFalsy();
+    // The app is signed OUT, not merely showing a login form: the signed-in
+    // chrome is gone. (Asserted on the nav rather than on the cookie, because
+    // the server revoked this session without being asked to clear a cookie
+    // the browser still holds.)
+    await expect(page.getByTestId("user-menu")).toHaveCount(0);
   });
 
-  test("Session expiry redirects at boot when the placement check 401s (boot hook) []", async ({
+  test("Session expiry redirects at boot when the placement check 401s (boot hook)", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
-    await page.evaluate(() => {
-      const raw = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      raw.token = `${raw.token}.expired`;
-      localStorage.setItem("stacks-auth", JSON.stringify(raw));
-    });
+    // ⛔ BOTH TRANSPORTS. Corrupting only the stored bearer token stopped ending
+    // the session once the server began issuing an HttpOnly cookie: measured on
+    // a preview, a context whose stored token had been corrupted still got 200
+    // from /api/placements/mine, /api/bookshelves/library and
+    // /api/onboarding/status, and nothing redirected — the cookie authenticated
+    // every one of them. `expireSession` corrupts the cookie too.
+    await expireSession(page);
 
     await page.goto("/");
 
@@ -609,9 +656,9 @@ test.describe("Session expiry", () => {
 
     await expect(page.getByTestId("login-error")).toHaveCount(0);
 
-    const stored = await page.evaluate(() =>
-      localStorage.getItem("stacks-auth")
-    );
-    expect(stored).toBeFalsy();
+    // ⚠️ NOT an assertion about the cookie. `expireSession` CORRUPTS it rather
+    // than removing it, so it is still present — what must be true is that the
+    // app refuses to render itself signed in on a credential the server rejects.
+    await expect(page.getByTestId("user-menu")).toHaveCount(0);
   });
 });

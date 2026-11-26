@@ -3,7 +3,19 @@
 **Status:** Accepted
 **Date:** 2026-07-09
 **Deciders:** Platform owner
-**Technical area:** Authentication, session management
+**Technical area:** Authentication, session management — **revocation specifically**
+
+> ⚠️ **Scope, added 2026-10-22.** This ADR decides how a session is
+> **invalidated**. It does not decide how a session token is **carried**.
+> Transport is decided by
+> [ADR 024](024-httponly-cookie-sessions.md), which moves it from a bearer token
+> in a JSON body to an `HttpOnly` cookie and explicitly leaves everything here
+> unchanged: the `guardian_tokens` families and the `family_id` revocation check
+> for user sessions, and the boot-scoped `bid` rejection for admin sessions
+> (`typ: "admin_session"`).
+>
+> ⛔ ADR 024 does **not** supersede this document. A change that read it as doing
+> so would drop the revocation layer, which 024 neither replaces nor can.
 
 ---
 

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
   provisionBookOnShelf,
   assertSeedOrSkip,
@@ -191,11 +191,7 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
     await placementsLoaded;
 
     const unplacedHref = await page.evaluate(async () => {
-      const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
-      if (!auth.token) return null;
-      const resp = await fetch("/api/placements/mine", {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
+      const resp = await fetch("/api/placements/mine");
       const data = resp.ok ? await resp.json() : { placements: [] };
       const placedIds = new Set(
         (data.placements as Array<{ book_id: string }>).map((p) => p.book_id)

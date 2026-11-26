@@ -4,10 +4,25 @@ defmodule Stacks.Blog.SyndicationTest do
   import Ecto.Query
   import Stacks.Factory
 
+  alias Ecto.Adapters.SQL
+  alias Stacks.Blog.Post
   alias Stacks.Blog.PostSyndication
   alias Stacks.Blog.Syndication
   alias Stacks.Events.EventLog
   alias Stacks.GDPR.Deletion
+
+  # What an Atom consumer does to `<content type="html">`: one pass of entity
+  # decoding, after which the result is treated as HTML. Asserting against this
+  # rather than against the raw XML is the whole point — the raw XML was
+  # well-formed both before and after the escaping fix, so only the consumer's
+  # view distinguishes text from markup.
+  defp unescape_once(xml) do
+    xml
+    |> String.replace("&lt;", "<")
+    |> String.replace("&gt;", ">")
+    |> String.replace("&quot;", "\"")
+    |> String.replace("&amp;", "&")
+  end
 
   defp public_post(attrs \\ []) do
     insert(
@@ -35,6 +50,39 @@ defmodule Stacks.Blog.SyndicationTest do
       assert [post] = Syndication.feed_posts(user.id)
       assert post.id == visible.id
     end
+
+    test "every term of the partial index's predicate reaches Postgres as a constant" do
+      # The feed is served by a PARTIAL index whose predicate is
+      # `visibility = 'public' AND syndicated AND published_at IS NOT NULL`.
+      # Postgres uses a partial index only when it can PROVE the query implies
+      # that predicate, and it can only prove it from constants: a bound
+      # parameter is opaque to the proof under a generic plan, so
+      # `visibility == ^visibility` would silently demote the feed to a
+      # sequential scan over every post the writer has ever written. Nothing
+      # about the result changes, so no behavioural test can see it.
+      #
+      # Writing the three terms as literals in the query expression is
+      # therefore load-bearing rather than stylistic, and this pins it. The
+      # ONLY value that may be parameterised is `user_id`, which is an index
+      # COLUMN — the proof does not involve it.
+      {sql, params} = SQL.to_sql(:all, Core.Repo, feed_query(Ecto.UUID.generate()))
+
+      assert sql =~ ~s|b0."visibility" = 'public'|
+      assert sql =~ ~s|AND b0."syndicated"|
+      assert sql =~ ~s|NOT (b0."published_at" IS NULL)|
+      assert length(params) == 1, "only user_id may be bound; got #{inspect(params)}"
+    end
+  end
+
+  # The same shape `Syndication.feed_posts/1` builds. Kept beside the assertion
+  # rather than reaching for the private function, so a divergence between the
+  # two shows up as a failing assertion about the real one.
+  defp feed_query(user_id) do
+    from(p in Post,
+      where:
+        p.user_id == ^user_id and p.visibility == "public" and p.syndicated and
+          not is_nil(p.published_at)
+    )
   end
 
   describe "feed_xml/1" do
@@ -59,13 +107,39 @@ defmodule Stacks.Blog.SyndicationTest do
       refute xml =~ "<entry>"
     end
 
-    test "post bodies are escaped — markup in a post cannot break the XML" do
+    test "post bodies survive the consumer's unescape as TEXT, not as markup" do
+      # ⚠️ This assertion was changed deliberately. It previously asserted the
+      # SINGLE-escaped form `&lt;/feed&gt; weird &amp; trick`, which is well-formed
+      # XML — and that is exactly why the defect survived: the feed is emitted as
+      # `<content type="html">`, which per Atom is entity-encoded HTML, so the
+      # consumer unescapes once. One level of escaping meant the consumer recovered
+      # `</feed> weird & trick` and rendered it as markup. The body is plain text
+      # everywhere else in the product, so the feed was the only surface
+      # reinterpreting it.
+      #
+      # The body therefore needs two levels here, so that one unescape leaves text.
       user = insert(:user)
       public_post(user: user, body: "One </feed> weird & trick")
 
       {xml, _} = Syndication.feed_xml(user)
-      assert xml =~ "&lt;/feed&gt; weird &amp; trick"
+
+      assert xml =~ "&amp;lt;/feed&amp;gt; weird &amp;amp; trick"
       refute xml =~ "One </feed>"
+
+      # What the consumer actually sees after its single unescape: the escaped text,
+      # not tags.
+      assert xml |> unescape_once() =~ "&lt;/feed&gt; weird &amp; trick"
+      refute xml |> unescape_once() =~ "<p>One </feed>"
+    end
+
+    test "a script tag in a body is not republished as live markup" do
+      user = insert(:user)
+      public_post(user: user, body: "Look: <script>alert(1)</script>")
+
+      {xml, _} = Syndication.feed_xml(user)
+
+      refute unescape_once(xml) =~ "<script>"
+      assert unescape_once(xml) =~ "&lt;script&gt;"
     end
   end
 

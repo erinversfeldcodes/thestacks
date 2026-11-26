@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { suiteAuthFile, apiCallFromPage } from "./helpers";
 
 /**
@@ -244,26 +244,35 @@ test.describe("Privacy — ViewAs preview", () => {
  *
  * Server-side robots.txt content is covered by robots_test.exs; this adds the
  * browser-level guarantees: the crawler directives are actually served, and the
- * SPA shell carries the noindex meta.
+ * SPA shell is noindex by default via the per-request `x-robots-tag` header
+ * (the blanket `<meta name="robots">` was removed so the header — which can say
+ * `index` for an opted-in public profile — is the single governor).
  */
 test.describe("Privacy — Search engine privacy", () => {
   test("robots.txt disallows user-content paths", async ({ request }) => {
     const resp = await request.get("/robots.txt");
     expect(resp.ok()).toBeTruthy();
     const body = await resp.text();
-    for (const p of ["/api/", "/u/", "/shelf/", "/post/", "/listing/"]) {
+    for (const p of ["/api/", "/shelf/", "/post/", "/listing/"]) {
       expect(body, `robots.txt should disallow ${p}`).toContain(`Disallow: ${p}`);
     }
+    // Profiles are crawlable now — the per-user x-robots-tag header governs indexing.
+    expect(body).not.toContain("Disallow: /u/");
   });
 
-  test("SPA shell carries the noindex, nofollow robots meta", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
-      "content",
-      "noindex, nofollow"
-    );
+  test("the SPA shell is noindex by default via the x-robots-tag header", async ({
+    page,
+  }) => {
+    const resp = await page.goto("/");
+    expect(resp?.headers()["x-robots-tag"]).toBe("noindex, nofollow");
+    // and the blanket meta is gone, so the header is the only governor
+    await expect(page.locator('meta[name="robots"]')).toHaveCount(0);
   });
 
+  test("a non-profile SPA route is noindex via the header", async ({ page }) => {
+    const resp = await page.goto("/library");
+    expect(resp?.headers()["x-robots-tag"]).toBe("noindex, nofollow");
+  });
 });
 
 /**
@@ -273,14 +282,23 @@ test.describe("Privacy — Search engine privacy", () => {
 test.describe("Privacy — search-privacy info text", () => {
   test.use({ storageState: suiteAuthFile("settings") });
 
-  test("settings page shows the 'never appear in search engine results' info text", async ({
+  test("settings page shows the default-private search info text", async ({
     page,
   }) => {
     await page.goto("/settings/privacy");
     await expect(
       page.getByText(
-        "Your profile and content will never appear in search engine results."
+        "By default your profile and content stay out of search engine results."
       )
+    ).toBeVisible({ timeout: 10000 });
+  });
+
+  test("settings page offers the search-indexing opt-in toggle", async ({
+    page,
+  }) => {
+    await page.goto("/settings/privacy");
+    await expect(
+      page.getByTestId("search-indexing-consent-toggle")
     ).toBeVisible({ timeout: 10000 });
   });
 });

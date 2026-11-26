@@ -5,6 +5,13 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandler do
       `books.edition_merged`, `book.visibility_tier_changed`, `book.enriched`,
       `blog.associations_suggested`.
 
+      ⚠️ `book.cover_confirmed` has had NO EMITTER since 2026-10-15 — the
+      cover-verification loop that produced it was deleted — so that clause
+      cannot currently fire. It is kept, with the subscription, because the
+      event is declared in `Stacks.Events.Registry`'s `@pending` list, which is
+      compile-time and test-gated and therefore cannot go stale the way this
+      sentence can. See the reason recorded there.
+
       The only question asked of an event is "which work changed?" — and the
       answer is NOT always `aggregate_id`: three of these events aggregate
       something else (an edition, a blog post), so every handler reads the work

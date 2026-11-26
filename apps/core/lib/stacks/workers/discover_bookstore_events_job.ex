@@ -11,7 +11,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
       retried.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

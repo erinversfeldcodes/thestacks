@@ -98,10 +98,10 @@ staleSiblingShelfResponseIsDiscarded =
         \() ->
             let
                 ( libraryModel, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "test-token") "test-user-id"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "test-token")) "test-user-id"
 
                 ( antiLibraryModel, _ ) =
-                    Bookshelf.init Bookshelf.antiLibraryConfig (Just "test-token") "test-user-id"
+                    Bookshelf.init Bookshelf.antiLibraryConfig (Just (TestHelpers.creds "test-token")) "test-user-id"
 
                 ( afterStale, _, _ ) =
                     Bookshelf.update
@@ -110,6 +110,7 @@ staleSiblingShelfResponseIsDiscarded =
                             (Ok staleLibraryResponse)
                         )
                         antiLibraryModel
+                        (Just (TestHelpers.creds "test-token"))
             in
             Expect.all
                 [ \_ -> libraryModel.shelves |> Expect.equal Loading
@@ -127,7 +128,7 @@ staleSiblingShelfResponseDoesNotRender =
         \() ->
             let
                 ( antiLibraryModel, _ ) =
-                    Bookshelf.init Bookshelf.antiLibraryConfig (Just "test-token") "test-user-id"
+                    Bookshelf.init Bookshelf.antiLibraryConfig (Just (TestHelpers.creds "test-token")) "test-user-id"
 
                 ( afterStale, _, _ ) =
                     Bookshelf.update
@@ -136,6 +137,7 @@ staleSiblingShelfResponseDoesNotRender =
                             (Ok staleLibraryResponse)
                         )
                         antiLibraryModel
+                        (Just (TestHelpers.creds "test-token"))
             in
             Bookshelf.view afterStale
                 |> Query.fromHtml
@@ -151,7 +153,7 @@ matchingShelfResponseIsStillApplied =
         \() ->
             let
                 ( libraryModel, _ ) =
-                    Bookshelf.init Bookshelf.libraryConfig (Just "test-token") "test-user-id"
+                    Bookshelf.init Bookshelf.libraryConfig (Just (TestHelpers.creds "test-token")) "test-user-id"
 
                 ( afterFresh, _, _ ) =
                     Bookshelf.update
@@ -160,6 +162,7 @@ matchingShelfResponseIsStillApplied =
                             (Ok staleLibraryResponse)
                         )
                         libraryModel
+                        (Just (TestHelpers.creds "test-token"))
             in
             afterFresh.shelves
                 |> Expect.equal (Success staleLibraryResponse.shelves)
@@ -182,10 +185,10 @@ pilePagesStartIndependentlyLoading =
         \() ->
             let
                 ( readingPileModel, _ ) =
-                    ReadingPile.init (Just "test-token")
+                    ReadingPile.init (Just (TestHelpers.creds "test-token"))
 
                 ( lookingForHomeModel, _ ) =
-                    LookingForHome.init (Just "test-token")
+                    LookingForHome.init (Just (TestHelpers.creds "test-token"))
             in
             Expect.all
                 [ \_ -> readingPileModel.books |> Expect.equal Loading
@@ -203,7 +206,7 @@ navigateToUpload =
                     fromPath "/upload"
 
                 view =
-                    Upload.view Upload.init (Just "test-token") Types.RemoteData.NotAsked
+                    Upload.view Upload.init (Just (TestHelpers.creds "test-token")) Types.RemoteData.NotAsked
             in
             Expect.all
                 [ \_ -> route |> Expect.equal Upload
@@ -216,7 +219,7 @@ navigateToUpload =
                     view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text "Add a Book" ]
+                            [ Selector.exactText "Add a Book" ]
                 ]
                 ()
 
@@ -246,7 +249,7 @@ navigateToLibrary =
                     view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text "Library" ]
+                            [ Selector.exactText "Library" ]
                 ]
                 ()
 
@@ -273,7 +276,7 @@ navigateToSearch =
                     view
                         |> Query.fromHtml
                         |> Query.has
-                            [ Selector.text "Search books & readers" ]
+                            [ Selector.exactText "Search books & readers" ]
                 ]
                 ()
 

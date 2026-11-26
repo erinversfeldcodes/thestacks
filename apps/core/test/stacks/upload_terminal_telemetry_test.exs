@@ -108,7 +108,7 @@ defmodule Stacks.UploadTerminalTelemetryTest do
 
       conn
       |> auth_conn(token)
-      |> get("/api/upload/#{image.id}/stream?token=#{token}")
+      |> get("/api/upload/#{image.id}/stream")
 
       assert_receive {:terminal, %{count: 1}, %{outcome: :timeout}}, 5_000
     end

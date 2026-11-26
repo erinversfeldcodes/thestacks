@@ -25,6 +25,7 @@ defmodule Stacks.Books do
   alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolver
   alias Stacks.Events
+  alias Stacks.Scope
   alias Stacks.Shelving
 
   @book_required_fields [:title]
@@ -71,26 +72,112 @@ defmodule Stacks.Books do
   end
 
   @doc """
-      Returns the community read count for a book from the marts.mart_community_read_count
-      analytics view. Returns 0 if the mart does not yet exist or the book has no entry.
-  """
-  @spec community_read_count(binary()) :: non_neg_integer()
-  def community_read_count(book_id) do
-    result =
-      Repo.query(
-        "SELECT read_count FROM marts.mart_community_read_count WHERE book_id = $1 LIMIT 1",
-        [book_id]
-      )
+      The community read count for a book, from `marts.mart_community_read_count`.
 
-    case result do
-      {:ok, %{rows: [[count]]}} -> count
-      _ -> 0
+      `{:ok, n}` for a real answer — including a genuine `{:ok, 0}` for a book
+      nobody has read. `:error` when the question could not be answered.
+
+      ⚠️ **Those were the same value until 2026-10-17, and that is the defect.**
+      This had a `_ -> 0` catch-all AND a `rescue … 0`, so a missing mart, a
+      revoked `marts` grant, and a genuine query error all returned the same
+      confident zero as "nobody has read this book". A reader saw 0; so did
+      every test, which is what made the original `assert is_integer(count)`
+      vacuous — it held for every one of those states.
+
+      ⛔ **Moving the refresh to a scheduled workflow made this sharper, not
+      milder.** The mart's existence now depends on
+      `.github/workflows/scheduled-dbt-refresh.yml` running. If that stops,
+      every book reports zero community reads, forever, with nothing anywhere
+      saying so. That workflow asserts mart rows at its own far end precisely
+      because a silent zero is unacceptable there; this is the same hole at the
+      read end.
+
+      The shape is `Costs.metric_count_this_month/1`'s, which took it
+      deliberately for the same reason: a measurement you could not take is not
+      a measurement of zero.
+
+      Telemetry on the failure path, not just a log line. A log line is read
+      when somebody is already suspicious; this failure's whole character is
+      that nobody becomes suspicious.
+  """
+  @spec community_read_count(binary()) :: {:ok, non_neg_integer()} | :error
+  def community_read_count(book_id) do
+    case Repo.query(
+           "SELECT read_count FROM marts.mart_community_read_count WHERE book_id = $1 LIMIT 1",
+           [book_id]
+         ) do
+      {:ok, %{rows: [[count]]}} ->
+        {:ok, count}
+
+      # The mart exists and holds no row for this book — a real, knowable zero.
+      {:ok, %{rows: []}} ->
+        {:ok, 0}
+
+      {:error, reason} ->
+        read_count_unavailable(book_id, reason)
     end
   rescue
-    e ->
-      require Logger
-      Logger.warning("community_read_count: unexpected error for book #{book_id}: #{inspect(e)}")
-      0
+    e -> read_count_unavailable(book_id, e)
+  end
+
+  @doc """
+      Community read counts for many books in one query — the shelf payload runs
+      this once for a whole bookcase rather than `community_read_count/1` per
+      spine.
+
+      `{:ok, map}` carries every requested id: a book with a mart row gets its
+      count, a book with none gets a knowable `0` (the mart exists). `:error`
+      means the mart could not be read at all, and the caller omits the key for
+      every book rather than assert a `0` nobody measured — the same honesty the
+      singular keeps, applied to the whole batch.
+  """
+  @spec community_read_counts([binary()]) :: {:ok, %{binary() => non_neg_integer()}} | :error
+  def community_read_counts([]), do: {:ok, %{}}
+
+  def community_read_counts(book_ids) do
+    case Repo.query(
+           "SELECT book_id::text, read_count FROM marts.mart_community_read_count WHERE book_id::text = ANY($1)",
+           [book_ids]
+         ) do
+      {:ok, %{rows: rows}} ->
+        found = Map.new(rows, fn [book_id, count] -> {book_id, count} end)
+        {:ok, Map.new(book_ids, fn id -> {id, Map.get(found, id, 0)} end)}
+
+      {:error, reason} ->
+        read_counts_unavailable(reason)
+    end
+  rescue
+    e -> read_counts_unavailable(e)
+  end
+
+  defp read_counts_unavailable(reason) do
+    require Logger
+
+    Logger.warning(
+      "community_read_counts: mart unavailable — #{inspect(reason)}. " <>
+        "A missing mart means the scheduled dbt refresh has not run."
+    )
+
+    :telemetry.execute([:stacks, :marts, :read_unavailable], %{count: 1}, %{
+      mart: "mart_community_read_count"
+    })
+
+    :error
+  end
+
+  defp read_count_unavailable(book_id, reason) do
+    require Logger
+
+    Logger.warning(
+      "community_read_count: unavailable for book #{book_id} — #{inspect(reason)}. " <>
+        "A missing mart means the scheduled dbt refresh has not run."
+    )
+
+    :telemetry.execute([:stacks, :marts, :read_unavailable], %{count: 1}, %{
+      mart: "mart_community_read_count"
+    })
+
+    :error
   end
 
   @doc """
@@ -597,60 +684,6 @@ defmodule Stacks.Books do
   end
 
   @doc """
-      Update cover_image_url on a book edition after the vision sidecar confirms the association.
-      Emits a book.cover_confirmed event.
-      Returns {:ok, edition} or {:error, reason}.
-  """
-  @spec confirm_cover_association(String.t(), String.t()) ::
-          {:ok, BookEdition.t()} | {:error, :not_found} | {:error, Ecto.Changeset.t()}
-  def confirm_cover_association(edition_id, cover_url) do
-    case Repo.get(BookEdition, edition_id) do
-      nil ->
-        {:error, :not_found}
-
-      edition ->
-        final_url = maybe_store_cover_in_r2(edition.isbn, cover_url)
-        changeset = book_edition_changeset(edition, %{cover_image_url: final_url})
-
-        case Repo.update(changeset) do
-          {:ok, updated} ->
-            Events.emit_safe(%{
-              event_type: "book.cover_confirmed",
-              aggregate_type: "book_edition",
-              aggregate_id: updated.id,
-              payload: %{book_id: updated.book_id, cover_image_url: final_url},
-              metadata: %{actor: "vision_sidecar"}
-            })
-
-            {:ok, updated}
-
-          {:error, changeset} ->
-            {:error, changeset}
-        end
-    end
-  end
-
-  defp maybe_store_cover_in_r2(isbn, cover_url) when is_binary(isbn) do
-    with {:ok, image_data} <- download_cover(cover_url),
-         {:ok, storage_key} <- Stacks.Storage.store_cover(isbn, image_data),
-         {:ok, r2_url} <- Stacks.Storage.get_image_url(storage_key, 604_800) do
-      r2_url
-    else
-      _ -> cover_url
-    end
-  end
-
-  defp maybe_store_cover_in_r2(_isbn, cover_url), do: cover_url
-
-  defp download_cover(url) when is_binary(url) do
-    books_http_client().get_binary(url)
-  end
-
-  defp books_http_client do
-    Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient)
-  end
-
-  @doc """
       Finds books in the platform that are likely the same work as the given title
       and author, using Jaro-Winkler string similarity on both fields combined.
 
@@ -754,7 +787,13 @@ defmodule Stacks.Books do
   defp create_placement_for_existing(user_id, book, shelf_name, existing, book_edition_id) do
     case Shelving.place_book(user_id, book.id, shelf_name, book_edition_id) do
       {:ok, placement} ->
-        placement = Repo.preload(placement, :bookshelf)
+        # ⚠️ Scoped even though it reads as a plain association load. `:bookshelf`
+        # resolves to `op.bookshelves`, which is row-level secured, so this is a
+        # secured read that names no schema module anywhere at the call site —
+        # the reason a grep over schema aliases cannot find it, and the reason it
+        # survived the scoping sweep. `place_book/4` scopes internally and has
+        # already committed by the time this runs.
+        placement = Scope.with_user(user_id, fn -> Repo.preload(placement, :bookshelf) end)
         {:ok, :existing, book, placement, existing ++ [placement]}
 
       {:error, reason} ->
@@ -979,7 +1018,16 @@ defmodule Stacks.Books do
     |> cast(attrs, @edition_required_fields ++ @edition_optional_fields)
     |> validate_required(@edition_required_fields)
     |> validate_inclusion(:verification_source, @verification_sources)
-    |> validate_format(:isbn, ~r/^\d{10}(\d{3})?$/, message: "must be a valid ISBN-10 or ISBN-13")
+    # ⚠️ The shape must admit the X check digit or the message lies: a valid
+    # ISBN-10 ends in X roughly one time in eleven, `Stacks.Books.ISBN`
+    # handles it everywhere (shape, checksum, 10→13 conversion), and this
+    # regex silently rejected what the whole pipeline downstream supports —
+    # watched live when Google Books served 043941184X for a cover and the
+    # reader's identification died at the store with "must be a valid
+    # ISBN-10". Mirrors `ISBN.isbn10_shaped?/1`.
+    |> validate_format(:isbn, ~r/^(\d{9}[\dXx]|\d{13})$/,
+      message: "must be a valid ISBN-10 or ISBN-13"
+    )
     |> validate_isbn_checksum()
     |> normalize_edition_isbn()
     |> unique_constraint(:isbn)
@@ -1019,5 +1067,189 @@ defmodule Stacks.Books do
         [isbn: "has an invalid checksum"]
       end
     end)
+  end
+
+  # Every table carrying a plain `book_id` FK to `op.books` with no unique
+  # constraint on `book_id` — a straight re-parent cannot collide. Verified
+  # against `pg_index` (2026-11); the five tables whose unique key pairs
+  # `book_id` with another column are handled explicitly in `merge_duplicate/2`.
+  @book_reparent_plain ~w(
+    book_content_chunks
+    bookshelf_placement_history
+    library_import_rows
+    price_snapshots
+    uploaded_images
+    user_book_content_access
+  )
+
+  @doc """
+  Merge a duplicate work into a survivor so the catalogue holds one row per work.
+
+  Every row pointing at `duplicate_id` is re-parented to `survivor_id` — across
+  all eleven book-FK tables and the `uploaded_images.book_ids` array — and the
+  duplicate `books` row is deleted, in one transaction so a half-merge cannot
+  happen.
+
+  No user data is lost: placements, images, listings and content access are
+  re-pointed, never removed, so erasure and export still reach them through the
+  survivor. Where a unique key would collide (a reader holding both works on one
+  bookshelf, a seller listing both, a post citing both, a source reviewing both),
+  the duplicate's row is dropped in favour of the survivor's equivalent — the
+  work is already represented, so the drop loses no distinct fact. Editions
+  re-parent with `is_primary` cleared, because a book may have only one primary
+  edition; the survivor keeps its own.
+
+  Privileged: it deletes an `op.books` row, which the `stacks_app` runtime role
+  cannot do. Call it from a migration or an operator task, never a user-facing
+  request path.
+  """
+  @spec merge_duplicate(binary(), binary()) :: {:ok, binary()} | {:error, term()}
+  def merge_duplicate(survivor_id, duplicate_id)
+      when is_binary(survivor_id) and is_binary(duplicate_id) and survivor_id != duplicate_id do
+    Repo.transaction(fn ->
+      s = survivor_id
+      d = duplicate_id
+
+      # Editions: ISBN is globally unique so no isbn collision; clear is_primary
+      # so the survivor's own primary stays the only one.
+      Repo.query!(
+        "UPDATE op.book_editions SET book_id = $1::uuid, is_primary = false WHERE book_id = $2::uuid",
+        [s, d]
+      )
+
+      # Tables whose unique key pairs book_id with another column: drop the
+      # duplicate's colliding row, then re-parent what remains.
+      merge_placements!(s, d)
+      reparent_consolidate!("post_book_associations", "post_id", s, d)
+      reparent_consolidate!("review_snapshots", "source", s, d)
+      merge_listings!(s, d)
+
+      # Plain book_id FKs with no unique constraint: a straight re-parent.
+      Enum.each(@book_reparent_plain, &reparent_plain!(&1, s, d))
+
+      # The uploaded_images.book_ids array (not an FK): swap the id in place.
+      Repo.query!(
+        "UPDATE op.uploaded_images SET book_ids = array_replace(book_ids, $2::uuid, $1::uuid) WHERE $2::uuid = ANY(book_ids)",
+        [s, d]
+      )
+
+      # Don't let the merge blank out a described work: if the survivor has no
+      # description but the duplicate does, carry it over. Idempotent — once the
+      # survivor has a description this changes nothing on a re-run.
+      Repo.query!(
+        "UPDATE op.books surv SET description = dup.description FROM op.books dup " <>
+          "WHERE surv.id = $1::uuid AND dup.id = $2::uuid " <>
+          "AND (surv.description IS NULL OR btrim(surv.description) = '') " <>
+          "AND dup.description IS NOT NULL AND btrim(dup.description) <> ''",
+        [s, d]
+      )
+
+      # An irreversible merge with a no-op `down`: record the pair so an
+      # over-merge (two genuinely distinct works that share a normalised title
+      # under one author) is diagnosable after the fact. Application log only —
+      # never event_log, which is UUID-only and must not carry the free-text title.
+      %{rows: [[dup_title, dup_author]]} =
+        Repo.query!("SELECT title, author_id::text FROM op.books WHERE id = $1::uuid", [d])
+
+      Logger.info(
+        "catalogue merge: duplicate #{d} (#{inspect(dup_title)}, author #{dup_author}) " <>
+          "merged into survivor #{s}"
+      )
+
+      Repo.query!("DELETE FROM op.books WHERE id = $1::uuid", [d])
+      s
+    end)
+  end
+
+  @doc """
+  Groups of books that are the same work — identical title (case-, whitespace-
+  and edge-insensitive) under the same author — with more than one row. Each
+  group names the survivor (the oldest row) and the duplicates to merge into it.
+
+  Books with no author are left alone: without an author the title alone is too
+  weak a signal to merge two rows on, and a wrong merge cannot be undone.
+  """
+  @spec duplicate_work_groups() :: [%{survivor: binary(), duplicates: [binary()]}]
+  def duplicate_work_groups do
+    sql = """
+    SELECT array_agg(id::text ORDER BY created_at ASC)
+    FROM op.books
+    WHERE author_id IS NOT NULL
+    GROUP BY regexp_replace(lower(btrim(title)), '\\s+', ' ', 'g'), author_id
+    HAVING count(*) > 1
+    """
+
+    %{rows: rows} = Repo.query!(sql, [])
+
+    Enum.map(rows, fn [ids] ->
+      [survivor | duplicates] = ids
+      %{survivor: survivor, duplicates: duplicates}
+    end)
+  end
+
+  @doc """
+  Merge every duplicate work into its survivor so the catalogue holds one row per
+  work. Returns the number of duplicate rows removed.
+  """
+  @spec dedup_works() :: non_neg_integer()
+  def dedup_works do
+    duplicate_work_groups()
+    |> Enum.flat_map(fn %{survivor: s, duplicates: dups} -> Enum.map(dups, &{s, &1}) end)
+    |> Enum.reduce(0, fn {s, d}, acc ->
+      {:ok, _} = merge_duplicate(s, d)
+      acc + 1
+    end)
+  end
+
+  # Listings collide only while draft/active (the partial unique). Drop the
+  # duplicate's live listing where the seller already holds one on the survivor,
+  # so no seller loses an active listing the survivor does not already carry.
+  defp merge_listings!(s, d) do
+    Repo.query!(
+      "DELETE FROM op.listings dup WHERE dup.book_id = $2::uuid AND dup.status IN ('draft', 'active') " <>
+        "AND EXISTS (SELECT 1 FROM op.listings surv WHERE surv.book_id = $1::uuid " <>
+        "AND surv.seller_id = dup.seller_id AND surv.status IN ('draft', 'active'))",
+      [s, d]
+    )
+
+    Repo.query!("UPDATE op.listings SET book_id = $1::uuid WHERE book_id = $2::uuid", [s, d])
+  end
+
+  # Placements collide only on the ACTIVE partial unique
+  # `(book_id, bookshelf_id) WHERE removed_at IS NULL`. Drop the duplicate's
+  # ACTIVE placement only where the survivor already holds an active one on the
+  # same shelf; a removed (soft-deleted) placement is outside the index, so it
+  # never collides and re-parents freely — the user keeps its notes and rating.
+  # Consolidating on bookshelf_id alone (ignoring removed_at) would delete a
+  # live active placement whenever the survivor had a removed history row on the
+  # same shelf: silent, irreversible loss of the reader's current placement.
+  defp merge_placements!(s, d) do
+    Repo.query!(
+      "DELETE FROM op.bookshelf_placements dup " <>
+        "WHERE dup.book_id = $2::uuid AND dup.removed_at IS NULL " <>
+        "AND EXISTS (SELECT 1 FROM op.bookshelf_placements surv " <>
+        "WHERE surv.book_id = $1::uuid AND surv.bookshelf_id = dup.bookshelf_id " <>
+        "AND surv.removed_at IS NULL)",
+      [s, d]
+    )
+
+    reparent_plain!("bookshelf_placements", s, d)
+  end
+
+  # The table and column are compile-time literals from this module, never input.
+  # sobelow_skip ["SQL.Query"]
+  defp reparent_consolidate!(table, col, s, d) do
+    Repo.query!(
+      "DELETE FROM op.#{table} dup WHERE dup.book_id = $2::uuid " <>
+        "AND EXISTS (SELECT 1 FROM op.#{table} surv WHERE surv.book_id = $1::uuid AND surv.#{col} = dup.#{col})",
+      [s, d]
+    )
+
+    reparent_plain!(table, s, d)
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp reparent_plain!(table, s, d) do
+    Repo.query!("UPDATE op.#{table} SET book_id = $1::uuid WHERE book_id = $2::uuid", [s, d])
   end
 end

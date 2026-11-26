@@ -2,8 +2,9 @@ module Page.AboutTest exposing (suite)
 
 {-| Oracle for the About page copy (sibling;, 8c).
 
-The page now carries the owner's approved launch copy
-(`plans/318-about-page-copy-draft.md`), section by section.
+The page now carries the owner's approved launch copy, section by section.
+This test is the oracle for it: if the copy changes, change it here deliberately
+rather than letting the assertion follow the page.
 
 ⚠️ **Drift oracle.** The pre-8c About was placeholder prose — a single lede
 ("Placeholder copy — the owner will refine this.") plus the transparency links.
@@ -34,40 +35,40 @@ suite =
             \() ->
                 rendered
                     |> Query.has
-                        [ Selector.text "A quiet place for the books you own, the pieces you've read, and the knowledge you've yet to map." ]
+                        [ Selector.exactText "A quiet place for the books you own, the pieces you've read, and the knowledge you've yet to map." ]
         , test "'What The Stacks is' names the antilibrary conviction" <|
             \() ->
                 rendered
                     |> Expect.all
-                        [ Query.has [ Selector.text "What The Stacks is" ]
-                        , Query.has [ Selector.text "antilibrary" ]
+                        [ Query.has [ Selector.exactText "What The Stacks is" ]
+                        , Query.has [ Selector.exactText "antilibrary" ]
                         ]
         , test "'The five shelves' lists all five by name" <|
             \() ->
                 rendered
                     |> Query.find [ Selector.class "about__shelves" ]
                     |> Expect.all
-                        [ Query.has [ Selector.text "Antilibrary" ]
-                        , Query.has [ Selector.text "Library" ]
-                        , Query.has [ Selector.text "Reading pile" ]
-                        , Query.has [ Selector.text "Wishlist" ]
-                        , Query.has [ Selector.text "Looking for a home" ]
+                        [ Query.has [ Selector.exactText "Antilibrary" ]
+                        , Query.has [ Selector.exactText "Library" ]
+                        , Query.has [ Selector.exactText "Reading pile" ]
+                        , Query.has [ Selector.exactText "Wishlist" ]
+                        , Query.has [ Selector.exactText "Looking for a home" ]
                         ]
         , test "'What you can do' leads with the cover-scan capability" <|
             \() ->
                 rendered
                     |> Query.find [ Selector.class "about__do-list" ]
-                    |> Query.has [ Selector.text "Add a book by its cover." ]
+                    |> Query.has [ Selector.exactText "Add a book by its cover." ]
         , test "'Built to be yours' states the source-available, build-your-own framing" <|
             \() ->
                 rendered
                     |> Query.has
-                        [ Selector.text "The Stacks is source-available and privately hosted. Read the code, take inspiration from it, and build something similar for yourself — but be a mensch and don't fork this one, or I'll have to come find you every time I fix a bug of my own." ]
+                        [ Selector.exactText "The Stacks is source-available and privately hosted. Read the code, take inspiration from it, and build something similar for yourself — but be a mensch and don't fork this one, or I'll have to come find you every time I fix a bug of my own." ]
         , test "'The wider shelf' is PRESENT-TENSE (owner ruling) — no 'coming soon' hedge" <|
             \() ->
                 rendered
                     |> Expect.all
-                        [ Query.has [ Selector.text "The wider shelf" ]
+                        [ Query.has [ Selector.exactText "The wider shelf" ]
                         , Query.has
                             [ Selector.text "Bookshops, reading groups, and cafés can share what they're up to" ]
                         ]
@@ -75,7 +76,7 @@ suite =
             \() ->
                 rendered
                     |> Query.has
-                        [ Selector.text "Pull up a chair. The Stacks is quieter than the internet, and it's here to give you the space to think." ]
+                        [ Selector.exactText "Pull up a chair. The Stacks is quieter than the internet, and it's here to give you the space to think." ]
         , test "preserves the transparency links (still About's only entry point)" <|
             \() ->
                 rendered

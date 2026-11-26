@@ -31,10 +31,23 @@ from app.main import app
 
 _CORPUS_DIR = Path(__file__).parent.parent.parent.parent / "images"
 
-_MOCK_EXTRACT = {"choices": [{"message": {"content": '{"books":[]}'}}]}
-_MOCK_CLASSIFY = {
-    "choices": [{"message": {"content": '{"classification":"ambiguous","confidence":0.5}'}}]
-}
+# ⚠️ These are the shapes `VisionClient` ACTUALLY returns, not an OpenAI
+# `choices` envelope. The envelope is unwrapped inside the Modal class; by the
+# time `classify`/`extract` return, the result is already a parsed dict
+# (`vision_client.py:50,65-69`).
+#
+# They were wrong, and the consequence was not cosmetic: with a `choices`
+# envelope, `_parse_classification` read `.get("classification", "ambiguous")`
+# off a dict with no such key, landed on AMBIGUOUS every single time, and
+# `/analyze` short-circuited — so `extract` was never awaited and
+# `_parse_extracted_books` was never reached through the ASGI stack. The
+# `status < 500` assertion below, whose stated purpose is "no input reaches an
+# unhandled exception", was structurally unable to see model-output parsing at
+# all, which this file's own docstring claims as covered.
+#
+# Classify returns BOOK so the extract leg actually runs.
+_MOCK_EXTRACT: dict[str, object] = {"books": [{"title": "T", "potential_isbns": ["9780743273565"]}]}
+_MOCK_CLASSIFY: dict[str, object] = {"classification": "book", "confidence": 0.95}
 
 _extract_patcher = patch(
     "app.services.vision_client.VisionClient.extract",
@@ -52,6 +65,10 @@ _classify_patcher.start()
 _http_client = TestClient(app)
 _http_client.__enter__()
 
+# The one authenticated endpoint the sidecar serves. Kept as a constant so a
+# future route change is a one-line edit here rather than a silent 404 loop.
+_PATH = "/analyze"
+
 
 def _make_auth_header(path: str) -> dict[str, str]:
     ts = str(int(time.time()))
@@ -61,7 +78,7 @@ def _make_auth_header(path: str) -> dict[str, str]:
 
 
 def _fuzz_base64_and_size(raw: bytes) -> None:
-    """Simulate the per-image validation path shared by /extract and /classify."""
+    """Simulate the per-image validation path used by /analyze."""
     b64 = base64.b64encode(raw).decode()
     try:
         decoded = base64.b64decode(b64, validate=True)
@@ -101,10 +118,43 @@ def _fuzz_http_body(raw: bytes) -> None:
 
     Exercises: FastAPI JSON body parsing, Pydantic model validation, base64 decode,
     and size check — paths not reachable from the unit-level fuzz functions above.
+
+    ⚠️ This looped over ("/extract", "/classify") until 2026-10-15. Both routes
+    are gone, and the loop would have kept running happily against two 404s:
+    the target discards the response, so only an unhandled server exception
+    surfaces and a missing route is silent. That is the failure mode this
+    function is supposed to protect against, so it now asserts the status CLASS
+    as well — a fuzz target that cannot tell "handled correctly" from "route
+    does not exist" is not fuzzing anything.
     """
-    for path in ("/extract", "/classify"):
-        headers = {**_make_auth_header(path), "Content-Type": "application/json"}
-        _http_client.post(path, content=raw, headers=headers)
+    headers = {**_make_auth_header(_PATH), "Content-Type": "application/json"}
+    response = _http_client.post(_PATH, content=raw, headers=headers)
+
+    # ⚠️ Two properties, and deliberately NOT "the status is 4xx". This request
+    # is authenticated, so a fuzzer that happens to emit valid JSON with a
+    # decodable tiny image reaches the real handler and gets a legitimate 200 —
+    # `_resize_for_vlm` swallows Pillow errors, the mocked classifier answers
+    # BOOK, and the extract leg runs to a successful response. A 4xx-only
+    # assertion would call that correct behaviour a crash, which is how a fuzz
+    # target starts reporting findings nobody can act on. The properties that
+    # actually matter are that the route exists and that no input reaches an
+    # unhandled exception.
+    #
+    # An earlier version of this comment said the 200 arrived because "the
+    # classifier defaults to AMBIGUOUS". That was an accurate description of
+    # what happened and a wrong account of why: the default was being hit
+    # because the mocks were malformed, so a consequence of a broken fixture
+    # was written up as intended behaviour — and it meant the extract leg was
+    # never reached.
+    assert response.status_code != 404, (
+        f"the fuzz target is pointed at a route that does not exist: "
+        f"got 404 for {_PATH}. This is the silent-vacuity failure this "
+        f"assertion exists to catch — fix the path, do not relax the check."
+    )
+    assert response.status_code < 500, (
+        f"any input must yield a structured response, never a 5xx: "
+        f"got {response.status_code} for {raw!r:.80}"
+    )
 
 
 def _fuzz_http_token(raw: bytes) -> None:
@@ -120,9 +170,13 @@ def _fuzz_http_token(raw: bytes) -> None:
     token_str = "".join(chr(b) for b in raw if 0x20 <= b <= 0x7E)
     if not token_str:
         return
-    for path in ("/extract", "/classify"):
-        body = {"images": ["dGVzdA=="]} if path == "/extract" else {"image": "dGVzdA=="}
-        _http_client.post(path, json=body, headers={"X-Internal-Token": token_str})
+    response = _http_client.post(
+        _PATH, json={"image": "dGVzdA=="}, headers={"X-Internal-Token": token_str}
+    )
+    assert 400 <= response.status_code < 500, (
+        f"an adversarial token must be rejected, never accepted or crashed on: "
+        f"got {response.status_code} for token {token_str!r:.80}"
+    )
 
 
 def TestOneInput(data: bytes) -> None:  # noqa: N802 — Atheris requires this exact name
@@ -140,10 +194,12 @@ def _run_seed_corpus() -> None:
         b'{"classification": "book", "confidence": 0.95}',
         b'{"classification": "unknown", "confidence": 999}',
         b'{"choices": []}',
-        b'{"images": ["dGVzdA=="]}',
+        # `images` (plural) is not a field on AnalyzeRequest, so these three
+        # only ever exercised the oneof rejection, never the shape they name.
         b'{"image": "dGVzdA=="}',
-        b'{"images": [null]}',
-        b'{"images": [""]}',
+        b'{"image": null}',
+        b'{"image": ""}',
+        b'{"images": ["dGVzdA=="]}',  # kept: the unknown-field path is worth one seed
         bytes(range(256)),
         b"\x00" * 10_000,
     ]

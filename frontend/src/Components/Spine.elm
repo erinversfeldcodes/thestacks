@@ -175,6 +175,11 @@ book :
     , coverImageUrl : Maybe String
     , hidden : Bool
     , hasWriting : Bool
+
+    -- True for the one book that was just placed and navigated to with
+    -- `?arrived=<id>`: it plays the one-shot `book--arriving` keyframe on the
+    -- shelf. False everywhere else, which is every spine on an ordinary visit.
+    , arriving : Bool
     }
     -> Html msg
 book config =
@@ -295,19 +300,26 @@ book config =
                 ++ notesSuffix
                 ++ hiddenSuffix
 
-        wrapperClass =
+        baseClass =
             case ( config.hidden, config.wearLevel ) of
                 ( True, Softened ) ->
-                    class "book book--hidden book--softened"
+                    "book book--hidden book--softened"
 
                 ( True, Pristine ) ->
-                    class "book book--hidden"
+                    "book book--hidden"
 
                 ( False, Softened ) ->
-                    class "book book--softened"
+                    "book book--softened"
 
                 ( False, Pristine ) ->
-                    class "book"
+                    "book"
+
+        wrapperClass =
+            if config.arriving then
+                class (baseClass ++ " book--arriving")
+
+            else
+                class baseClass
 
         lockEls =
             if config.hidden then

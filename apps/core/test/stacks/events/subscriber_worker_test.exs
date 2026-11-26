@@ -53,7 +53,12 @@ defmodule Stacks.Events.SubscriberWorkerTest do
           prefix: "op"
         )
 
-      assert %NaiveDateTime{} = after_dispatch.published_at
+      # `%DateTime{}`, not `%NaiveDateTime{}`, and the distinction is the point
+      # of asserting it here. The query is schemaless (`from e in "event_log"`),
+      # so Ecto applies no type cast and this is the column's own type reaching
+      # the caller. A naive struct here would mean the stored value carries no
+      # zone and depends on every reader agreeing which one wrote it.
+      assert %DateTime{} = after_dispatch.published_at
     end
 
     test "returns :ok when event exists and has no registered handlers" do
@@ -169,7 +174,8 @@ defmodule Stacks.Events.SubscriberWorkerTest do
           prefix: "op"
         )
 
-      assert %NaiveDateTime{} = row.published_at
+      # See the note above: schemaless query, so this is the column's own type.
+      assert %DateTime{} = row.published_at
     end
 
     test "upcaster is applied to fetched events" do

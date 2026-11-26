@@ -11,10 +11,13 @@ defmodule StacksWeb.AuthController do
 
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
+  alias Stacks.Accounts.Invites
   alias Stacks.Audit
   alias Stacks.Duration
   alias Stacks.Email
+  alias StacksWeb.Plugs.SessionCookie
   alias StacksWeb.ProtoJSON
+  alias StacksWeb.SessionTeardown
 
   @doc "POST /api/auth/register — create a new user account and send confirmation email."
   def register(conn, params) do
@@ -38,7 +41,7 @@ defmodule StacksWeb.AuthController do
 
       {:error, invite_error} when is_atom(invite_error) ->
         :telemetry.execute([:stacks, :auth, :invite], %{count: 1}, %{
-          result: invite_telemetry_label(invite_error)
+          result: Invites.telemetry_label(invite_error)
         })
 
         conn
@@ -78,7 +81,9 @@ defmodule StacksWeb.AuthController do
           {:ok, _family} ->
             :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :login})
 
-            json(conn, %{token: token, user: ProtoJSON.user(user)})
+            conn
+            |> put_session_cookie(token)
+            |> json(%{token: token, user: ProtoJSON.user(user)})
 
           {:error, reason} ->
             Logger.error("rotate_token_family failed on login: #{inspect(reason)}")
@@ -147,30 +152,13 @@ defmodule StacksWeb.AuthController do
 
   @doc "DELETE /api/auth/logout — revoke the current JWT."
   def logout(conn, _params) do
-    token = Guardian.Plug.current_token(conn)
-    claims = Guardian.Plug.current_claims(conn) || %{}
-
-    # Revoke server-side (deletes the guardian_tokens row). We still return 204
-    # even if revocation fails — the client should consider itself logged out —
-    # but a failure means the token stays valid until its ttl expires, so it must
-    # be logged for investigation rather than silently discarded.
-    case Guardian.revoke(token) do
-      {:ok, _claims} ->
-        :ok
-
-      error ->
-        Logger.warning("Guardian.revoke failed on logout: #{inspect(error)}")
-    end
-
-    case claims do
-      %{"family_id" => family_id} when is_binary(family_id) ->
-        Accounts.revoke_token_family(family_id)
-
-      _ ->
-        :ok
-    end
-
-    send_resp(conn, 204, "")
+    # ⚖️ The sequence moved to `StacksWeb.SessionTeardown` because a SECOND path
+    # ends a session — the account-deletion request — and it was doing none of
+    # this. One function, two callers, so the next path cannot end a session
+    # halfway by copying only the part it noticed.
+    conn
+    |> SessionTeardown.end_session(:this_device)
+    |> send_resp(204, "")
   end
 
   @doc """
@@ -333,7 +321,9 @@ defmodule StacksWeb.AuthController do
 
       :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :refresh})
 
-      json(conn, %{token: token, user: ProtoJSON.user(user)})
+      conn
+      |> put_session_cookie(token)
+      |> json(%{token: token, user: ProtoJSON.user(user)})
     end
   end
 
@@ -363,16 +353,33 @@ defmodule StacksWeb.AuthController do
     json(conn, %{user: ProtoJSON.user(user)})
   end
 
+  # ⛔ THE COOKIE IS SET BESIDE THE BODY TOKEN, NOT INSTEAD OF IT, for phase one.
+  #
+  # The decision record is explicit that with NO operator recovery path in
+  # existence, the rollout's first phase accepting both transports IS the
+  # recovery path. Dropping the body token here would break every client on the
+  # very deploy that is supposed to be the fallback.
+  #
+  # ⚠️ So the XSS exposure the ADR exists to close is STILL OPEN after this
+  # change. It closes when the SPA stops storing the token and the bearer path
+  # is deleted. What this buys is reload-survival and the measurement that makes
+  # that deletion decidable — both real, neither the security win.
+  #
+  # ⚠️ The cookie's lifetime is READ FROM Guardian's own `ttl` rather than
+  # restated, because a cookie that outlives the token it carries presents a
+  # credential the server will refuse — a session that looks live to the browser
+  # and is dead on arrival, which is indistinguishable from a server fault.
+  defp put_session_cookie(conn, token) do
+    SessionCookie.put_session_cookie(conn, token, SessionCookie.session_max_age())
+  end
+
   defp get_ip(conn), do: StacksWeb.ClientIP.get(conn)
 
+  # The HTTP answer to a refusal is a web concern and stays here. The METRIC
+  # label for the same refusal is not, and now lives in `Stacks.Accounts.Invites`
+  # beside the atoms it maps — on a controller its drift from those atoms was
+  # invisible to a reader and caught only by a test.
   defp invite_error_status(:invite_expired), do: 410
   defp invite_error_status(:invite_exhausted), do: 409
   defp invite_error_status(_), do: 403
-
-  defp invite_telemetry_label(:invite_required), do: :required
-  defp invite_telemetry_label(:invite_invalid), do: :invalid
-  defp invite_telemetry_label(:invite_expired), do: :expired
-  defp invite_telemetry_label(:invite_revoked), do: :revoked
-  defp invite_telemetry_label(:invite_exhausted), do: :exhausted
-  defp invite_telemetry_label(:invite_email_mismatch), do: :email_mismatch
 end

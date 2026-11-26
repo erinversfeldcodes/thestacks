@@ -101,7 +101,34 @@ there, delete it and do the work.
    - **cross-artefact propagation boxes**: deleting a symbol → docs grep (0 refs or updated);
      adding a route → nav entry or a recorded URL-only decision; building a storied feature →
      mapping status flipped. A sibling artefact left stale is how a deleted job got documented as
-     a live deletion gate three days after it ceased to exist;
+     a live deletion gate three days after it ceased to exist.
+     ⛔ **A deletion's propagation sweep has SIX surfaces, and "I grepped `docs/`" is one of
+     them.** Three deletions in a row ticked propagation having swept only the docs tree, and
+     the rule was derived incompletely three times before it was complete:
+       1. `docs/` — the obvious one, and the only one anybody swept unprompted;
+       2. the **story corpus** — missed once by sweeping `implementation-mapping.md` alone;
+       3. **test fixtures** — a fixture naming a deleted thing is still a valid string, so
+          nothing contradicts it. A job test used three deleted dbt models as its fixture and
+          kept passing, describing a warehouse that was gone. *Now gated for dbt model names
+          specifically* by `scripts/check-dbt-model-drift.sh`'s Elixir-reference check — planted
+          red, and the planted case passes the test suite 17/0 while the gate catches it;
+       4. **proto / contract comments** — a wire-contract message documented its backing table
+          after that table was deleted, which is the kind of comment someone implements against;
+       5. **the agent and reviewer rubrics in `docs/agents/`** — removing a spent config entry
+          broke the rubric a reviewer is run from. A config entry's consumers include the
+          documents citing it as an example, and those are invisible to compilers, gates and
+          tests alike;
+       6. ⚠️ **the session's own persistent memory index** — and this one is different in kind.
+          Every other stale record has *something* that can eventually contradict it: a gate, a
+          compiler, a test, or a reader following a path to the thing it describes. A comment
+          sits next to the code it lies about; a rubric sits next to the review it misdirects.
+          **A memory index sits next to nothing**, is read before the reader has any code in
+          front of them, and its errors propagate into the next session's reasoning rather than
+          being caught by it. It is the only surface with no adjacent disagreement, and it is
+          the one read first. It once claimed 41 staging dbt models when a wave had taken the
+          number to 40 — a confident, specific, false figure about work done hours earlier.
+     So the sweep does not end at the code, the docs, the fixtures, the proto comments or the
+     rubrics. **It ends at the notes that will be read before any of them.**
    - **instance-vs-class**: the DoD states which the issue closes; instance-only issues name the
      class follow-up (issue or `plans/residue-ledger.md` row) inline.
    **Close-out duty:** if an issue's notes say "remains / follow-up-class / not filed", either file

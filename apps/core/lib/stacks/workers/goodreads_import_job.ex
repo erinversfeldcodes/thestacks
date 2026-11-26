@@ -11,7 +11,8 @@ defmodule Stacks.Workers.GoodreadsImportJob do
       the import and emits `import.completed`.
   """
 
-  use Oban.Worker,
+  use Stacks.Worker,
+    scope: :user,
     queue: :default,
     max_attempts: 5,
     unique: [fields: [:args], keys: [:import_id, :offset], period: 300]
@@ -194,6 +195,21 @@ defmodule Stacks.Workers.GoodreadsImportJob do
         {:error, %Ecto.Changeset{} = changeset} ->
           Imports.record_outcome(row, "duplicate",
             reason: "placement rejected: #{inspect(changeset.errors)}",
+            book_id: book.id
+          )
+
+          :ok
+
+        # `place_book/5`'s transaction ends with `{:error, _, reason, _} ->
+        # {:error, reason}`, and one of its steps is the audit write, whose
+        # contract permits `{:error, term()}`. Without this clause such a reason
+        # raises `CaseClauseError` here, which kills the job mid-import and
+        # leaves every remaining row with no outcome at all — a worse failure
+        # than the one row that actually went wrong. The reader gets a row they
+        # can see and re-import instead.
+        {:error, reason} ->
+          Imports.record_outcome(row, "unverified",
+            reason: "could not be shelved: #{inspect(reason)}",
             book_id: book.id
           )
 

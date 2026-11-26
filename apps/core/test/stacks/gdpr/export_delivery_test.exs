@@ -193,6 +193,40 @@ defmodule Stacks.GDPR.ExportDeliveryTest do
       assert {:ok, 1} = ExportDelivery.sweep_expired()
       assert_received {:swept, %{count: 1}}
     end
+
+    test "an object carrying no deadline raises an observable alarm, not just a log line" do
+      # ⛔ An export key with no parseable deadline is not merely late: the sweep
+      # selects by deadline, so it can NEVER select this object. It is a copy of
+      # a reader's personal data that stays in the bucket permanently.
+      #
+      # ⚠️ This alarm was log-only while its two siblings (`:expired` and
+      # `:orphan`) had been given metrics in an earlier pass that recorded, in a
+      # comment, that they were "emitted into nothing". This one was beside them
+      # and missed — the same fix-where-found shape — and it is the one of the
+      # three whose failure is permanent rather than delayed.
+      #
+      # A log line is read when somebody is already suspicious. Nothing about
+      # this condition would ever make them suspicious, which is exactly why it
+      # needs a number.
+      Storage.Mock.seed("exports/no-deadline-here.json", "{}")
+
+      :telemetry.attach(
+        "export-undated-test",
+        [:stacks, :gdpr, :export, :undated],
+        fn _event, measurements, _meta, pid -> send(pid, {:undated, measurements}) end,
+        self()
+      )
+
+      on_exit(fn -> :telemetry.detach("export-undated-test") end)
+
+      ExportDelivery.sweep_expired()
+
+      assert_received {:undated, %{count: count}}
+
+      assert count >= 1,
+             "the undated object raised no telemetry, so an export that can never be swept is " <>
+               "invisible outside a log line nobody reads"
+    end
   end
 
   describe "delete_user_exports/1" do

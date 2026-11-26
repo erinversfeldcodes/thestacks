@@ -248,7 +248,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${NEON_API_KEY:-}" || -z "${NEON_PROJECT_ID:-}" ]]; then
-            echo "::error::NEON_API_KEY and NEON_PROJECT_ID must be set as GitHub repo secrets. See issue #137 'Required secrets (new)' for the staging procedure." >&2
+            echo "::error::NEON_API_KEY and NEON_PROJECT_ID must be set as GitHub repo secrets. Set them from the Neon console's staging project before running this workflow." >&2
             exit 1
           fi
 
@@ -335,7 +335,7 @@ jobs:
           github-token: ${{ github.token }}
           origin-remote: ${{ github.server_url }}/${{ github.repository }}.git
 
-      - name: Write rollback-record.json — durable rollback record (Issue #170 F)
+      - name: Write rollback-record.json — durable rollback record
         if: ${{ always() && steps.rollback.outcome != 'skipped' }}
         env:
           ROLLBACK_STEP_OUTCOME: ${{ steps.rollback.outcome }}

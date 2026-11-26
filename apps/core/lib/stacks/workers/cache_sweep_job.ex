@@ -7,7 +7,7 @@ defmodule Stacks.Workers.CacheSweepJob do
       `expires_at`, so it stays cheap as the tables grow.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

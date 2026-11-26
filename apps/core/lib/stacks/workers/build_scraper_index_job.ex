@@ -11,7 +11,7 @@ defmodule Stacks.Workers.BuildScraperIndexJob do
       scrape. Runs from cron and on `IndexRequired`.
   """
 
-  use Oban.Worker, queue: :scraper, max_attempts: 2
+  use Stacks.Worker, scope: :system, queue: :scraper, max_attempts: 2
 
   require Logger
 

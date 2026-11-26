@@ -31,10 +31,10 @@ suite =
 
 start : ProgramTest.ProgramTest AuditLog.Model AuditLog.Msg (SimulatedEffect AuditLog.Msg)
 start =
-    ProgramTest.start () (program (Just "test-token"))
+    ProgramTest.start () (program (Just (TestHelpers.creds "test-token")))
 
 
-program : Maybe String -> ProgramDefinition () AuditLog.Model AuditLog.Msg (SimulatedEffect AuditLog.Msg)
+program : Maybe Api.Credentials -> ProgramDefinition () AuditLog.Model AuditLog.Msg (SimulatedEffect AuditLog.Msg)
 program maybeToken =
     ProgramTest.createElement
         { init =
@@ -56,7 +56,7 @@ program maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-initEffects : Maybe String -> SimulatedEffect AuditLog.Msg
+initEffects : Maybe Api.Credentials -> SimulatedEffect AuditLog.Msg
 initEffects maybeToken =
     case maybeToken of
         Just token ->
@@ -115,7 +115,7 @@ showsLoadingState =
         \() ->
             start
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Loading your audit log..." ]
+                    [ Selector.exactText "Loading your audit log..." ]
 
 
 loadAndDisplayEntries : Test
@@ -127,9 +127,9 @@ loadAndDisplayEntries =
                     "/api/settings/audit-log?page=1"
                     sampleJson
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "user.login" ]
+                    [ Selector.exactText "user.login" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "user.export_requested" ]
+                    [ Selector.exactText "user.export_requested" ]
 
 
 showsErrorState : Test
@@ -141,7 +141,7 @@ showsErrorState =
                     "/api/settings/audit-log?page=1"
                     Http.NetworkError_
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Failed to load your audit log. Please try again." ]
+                    [ Selector.exactText "Failed to load your audit log. Please try again." ]
 
 
 showsEmptyState : Test
@@ -153,4 +153,4 @@ showsEmptyState =
                     "/api/settings/audit-log?page=1"
                     emptyJson
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "No audit entries yet." ]
+                    [ Selector.exactText "No audit entries yet." ]

@@ -4,10 +4,16 @@ defmodule Stacks.Moderation do
       store (resolve ISBNs, store each book as `public`). Age-gating is NOT
       decided here — only a human marks a book adults-only.
 
-      Sidecar contract: POST /classify → `{classification, confidence,
-      model_used}`; POST /extract → `{books: [{title, author, potential_isbns,
-      raw_text, confidence}], model_used}`. Context carries `image_url`
+      Sidecar contract: POST /analyze → `{classification, confidence, books:
+      [{title, author, potential_isbns, raw_text, confidence}], model_used}` —
+      one call answering both questions. Context carries `image_url`
       (preferred, presigned) or `image_b64` (legacy).
+
+      ⚠️ This described two endpoints, `/classify` and `/extract`, until
+      2026-10-15, while the code below already called `"analyze"`. They were
+      superseded for measured reasons — a second HTTP round-trip and a second
+      cold-container start cost 2-4s of the p95 — and deleted with the
+      cover-verification loop.
   """
 
   require Logger
@@ -54,7 +60,12 @@ defmodule Stacks.Moderation do
     potential ISBN if available, otherwise its title).
   """
   @type pipeline_result ::
-          {:ok, %{resolved: [Stacks.Books.Book.t()], rejected: [{String.t(), atom()}]}}
+          {:ok,
+           %{
+             :resolved => [Stacks.Books.Book.t()],
+             :rejected => [{String.t(), atom()}],
+             optional(:cold) => boolean()
+           }}
           | {:error, failure_reason()}
 
   @doc """
@@ -67,12 +78,185 @@ defmodule Stacks.Moderation do
   """
   @spec run_pipeline(map()) :: pipeline_result()
   def run_pipeline(%{image_url: image_url} = context) do
-    analyze(build_payload(%{image_url: image_url}, context), context)
+    dispatch_pipeline(build_payload(%{image_url: image_url}, context), context)
   end
 
   def run_pipeline(%{image_b64: image_b64} = context) do
-    analyze(build_payload(%{image: image_b64}, context), context)
+    dispatch_pipeline(build_payload(%{image: image_b64}, context), context)
   end
+
+  defp dispatch_pipeline(payload, context) do
+    if cpu_first_enabled?() and not retry_with_exclusions?(context) do
+      cpu_first(payload, context)
+    else
+      analyze(payload, context)
+    end
+  end
+
+  # ⬛ A REJECTION IS A MISS. The cascade's rule is "GPU only on a miss", and a
+  # reader rejecting an answer is the strongest miss signal there is — yet the
+  # first live drive watched a partial OCR title ("BOOK of the DEAD") resolve
+  # three different wrong-but-real books across three attempts while the GPU
+  # never woke: the retry re-entered the same cheap tier with one more
+  # exclusion, marching down the catalogue's same-title ranking. So ANY retry
+  # carrying exclusions skips the whole CPU pass — barcode included, by
+  # decision: a rejected barcode answer would be exclusion-filtered anyway,
+  # and one rare extra GPU call is cheaper than a second code path.
+  defp retry_with_exclusions?(context) do
+    Map.get(context, :excluded_isbns, []) != [] or
+      Map.get(context, :excluded_books, []) != []
+  end
+
+  defp cpu_first_enabled? do
+    Application.get_env(:core, :cpu_first_identification, false)
+  end
+
+  # ⬛ THE CPU-FIRST CASCADE ORDER (`:cpu_first_identification`): one cpu_only
+  # call answers with whatever the CPU tiers read, and the GPU wakes ONLY for
+  # images the CPU could not resolve. A cpu_only response makes no
+  # classification claim (the classify guard is a GPU step), so it is never
+  # routed through the book/not-book branch — the two outcomes read here are
+  # structural: a checksum'd barcode ISBN, or a cover-text read the catalogue
+  # search resolves and the ISBN gate verifies. Both produce FINAL answers;
+  # everything else falls through to the full (GPU) analyze with the same
+  # payload. The old single-call order stays reachable with the flag off for
+  # one release, then this branch becomes the only one.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_OCR — a cpu_only
+  # response never carries it: the sidecar answers tier UNSPECIFIED on a read
+  # (OCR appears only when the full-path short-circuit answers), and any
+  # non-barcode tier flows through the generic read/escalate clause by design.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_VLM_CLASSIFY — no
+  # GPU runs on a cpu_only request, so a VLM tier here is structurally
+  # impossible; the catch-all clause escalates safely if the contract drifts.
+  # proto-enum-coverage: AnalysisTier ignore ANALYSIS_TIER_VLM_EXTRACT — same:
+  # a cpu_only response cannot carry a VLM tier; drift lands in the catch-all.
+  defp cpu_first(payload, context) do
+    case AIClient.call_vision("analyze", Map.put(payload, :cpu_only, true)) do
+      {:ok, %{"tier" => "ANALYSIS_TIER_BARCODE", "books" => books} = resp}
+      when is_list(books) and books != [] ->
+        cpu_barcode_answer(books, resp, payload, context)
+
+      {:ok, resp} ->
+        cpu_read_answer(resp, payload, context)
+
+      {:error, reason} ->
+        # The CPU pass is an optimisation; its failure must not cost the
+        # reader an identification the GPU path could still deliver.
+        Logger.warning(
+          "Moderation: cpu_only pass failed (#{inspect(reason)}); running full analyze"
+        )
+
+        analyze(payload, context)
+    end
+  end
+
+  defp cpu_barcode_answer(books, resp, payload, context) do
+    ctx = Map.put(context, :vision_model_used, Map.get(resp, "model_used"))
+
+    case resolve_and_store_all(books, ctx) do
+      {:ok, _} = resolved ->
+        # A checksum-valid, catalogue-resolved barcode IS a book determination,
+        # counted here (the classifier never ran) so classification outcomes stay
+        # comparable across cascade orders. ONLY on the success branch: on a miss
+        # the escalated analyze/2 emits its own classification, so emitting here
+        # too would double-count one image, defeating that very comparison.
+        emit_classification(:book)
+        put_cold(resolved, resp)
+
+      _miss ->
+        # A checksum-valid barcode that no catalogue resolves is a CPU MISS,
+        # not a terminal rejection — the GPU may still read the cover. The
+        # single-call order had no later tier to try; this one does, and
+        # falling through is its whole point.
+        analyze(payload, context)
+    end
+  end
+
+  defp cpu_read_answer(resp, payload, context) do
+    # ⛔ OFF BY DEFAULT, measured not assumed: the first full cascade eval
+    # (2026-11-20) scored cpu-title-as-FINAL net-negative — clear_cover fell
+    # 22/22 → 6/22 (easy OCR intercepts the model's best stratum with
+    # wrong-but-real books) and three NEGATIVES were identified as books
+    # (a CPU-final answer never meets the classify guard). The same run
+    # proved the tier's promise — illegible rose 1/10 → 8/10 — so the flag
+    # stays, and flips back when the acceptance design can tell a partial
+    # title from an identification (the improve-first sequence the owner
+    # ruled). Barcode answers are untouched: a checksum is identity, a
+    # resolved title is only existence.
+    with true <- cpu_title_resolution_enabled?(),
+         [_ | _] = candidates <- cpu_read_candidates(resp) do
+      ctx = Map.put(context, :vision_model_used, cpu_engine(resp))
+      cpu_resolve_or_escalate(candidates, ctx, resp, payload, context)
+    else
+      _ -> analyze(payload, context)
+    end
+  end
+
+  defp cpu_title_resolution_enabled? do
+    Application.get_env(:core, :cpu_title_resolution, false)
+  end
+
+  defp cpu_resolve_or_escalate(candidates, ctx, resp, payload, context) do
+    case resolve_and_store_all(candidates, ctx) do
+      {:ok, _} = resolved ->
+        # The classifier never ran, but a catalogue-resolved, ISBN-verified
+        # read IS a book determination — counted so the classification
+        # outcomes stay comparable across cascade orders.
+        emit_classification(:book)
+        put_cold(resolved, resp)
+
+      _miss ->
+        analyze(payload, context)
+    end
+  end
+
+  # The read becomes ONE candidate for the existing resolution seam — the same
+  # seam VLM candidates pass through, so the checksum, the ISBN/title
+  # cross-check, the scorer's plausibility floor and the ISBN hard gate all
+  # apply unchanged. Bag-of-words by shape: `raw_text` carries every word the
+  # engine read, and the resolver builds keyword queries from it even when no
+  # title line was picked out.
+  #
+  # ⚖️ Deliberately NO "confidence" key: `check_confidence/2` would gate it on
+  # `enrichment_confidence_threshold`, and a model-confidence threshold is
+  # exactly the gate vocabulary the cascade ruling bans — the measured 0.95
+  # that was read off the wrong object. Acceptance here is structural only.
+  defp cpu_read_candidates(%{"ocr_attempt" => %{"raw_text" => raw} = attempt})
+       when is_binary(raw) and raw != "" do
+    [
+      %{
+        "title" => Map.get(attempt, "title"),
+        "author" => Map.get(attempt, "author"),
+        "raw_text" => raw,
+        "potential_isbns" => []
+      }
+    ]
+  end
+
+  defp cpu_read_candidates(_), do: []
+
+  defp cpu_engine(%{"ocr_attempt" => %{"engine" => engine}})
+       when is_binary(engine) and engine != "",
+       do: engine
+
+  defp cpu_engine(_), do: "cpu_only"
+
+  # ⬛ THE WARM/COLD FACT, carried on the answer. `cold: true` means a GPU
+  # container on this answer's path reported a cold start — the fact the
+  # ruled warm p95 ≤ 10s threshold conditions on. GPU dispatches ONLY, never
+  # `sidecar_cold` (the client's cost telemetry documents why: a restarted
+  # FastAPI container owes no GPU tail), so a CPU-resolved answer is warm by
+  # definition — there is no GPU physics in it. Added as a subset key so every
+  # existing `%{resolved: _, rejected: _}` match keeps working.
+  defp put_cold({:ok, summary}, resp) when is_map(summary),
+    do: {:ok, Map.put(summary, :cold, gpu_cold?(resp))}
+
+  defp put_cold(other, _resp), do: other
+
+  defp gpu_cold?(%{"gpu_dispatches" => dispatches}) when is_list(dispatches),
+    do: Enum.any?(dispatches, &(Map.get(&1, "cold") == true))
+
+  defp gpu_cold?(_resp), do: false
 
   defp build_payload(base, context) do
     case Map.get(context, :excluded_books) do
@@ -95,7 +279,7 @@ defmodule Stacks.Moderation do
         context_with_source =
           Map.put(context, :vision_model_used, Map.get(resp, "model_used"))
 
-        resolve_and_store_all(books, context_with_source)
+        books |> resolve_and_store_all(context_with_source) |> put_cold(resp)
 
       {:ok, %{"classification" => classification}} ->
         emit_classification(classification_outcome(classification))
@@ -322,10 +506,65 @@ defmodule Stacks.Moderation do
   defp store_failure_reason(reason) when is_atom(reason), do: reason
   defp store_failure_reason(_), do: :store_failed
 
-  defp resolve_candidate(%{"potential_isbns" => [isbn | _]} = _candidate, idx, _context)
+  # ⛔ CANONICALISED AND CHECK-DIGIT VALIDATED AT THE SEAM, because this is
+  # where a MODEL-READ ISBN enters the system. The extract prompt now asks the
+  # VLM to read the digits printed beside a barcode — those survive glare,
+  # curvature and a covering thumb where the bar pattern pyzbar needs does
+  # not — and a model that reads digits can misread them.
+  #
+  # ⚖️ `canonical_isbn13/1` returns nil for anything whose check digit does
+  # not hold, so a misread falls through to the title search below rather than
+  # resolving as a different book. That is the whole safety argument for
+  # asking a generative model for an identifier at all: the checksum is a
+  # verifier the model does not control. A 10-digit ISBN converts here too,
+  # which is what `normalise_edition_isbn10` had to correct retroactively.
+  defp resolve_candidate(%{"potential_isbns" => [isbn | _]} = candidate, idx, context)
        when is_binary(isbn) and isbn != "" do
-    Logger.info("Moderation: candidate #{idx} has direct ISBN #{isbn}")
-    {:ok, isbn, nil}
+    # ⚠️ TWO FUNCTIONS, TWO JOBS, AND THEY ARE NOT INTERCHANGEABLE.
+    # `canonical_isbn13/1` is a COMPARISON normaliser — its own doc says
+    # "anything else returns stripped/upcased unchanged", so a checksum-invalid
+    # ISBN-13 passes straight through it. Using it alone here looked like
+    # validation and was not: a test asserting the misread never reached the
+    # resolver failed on the first run that could actually tell.
+    #
+    # ⬛ `valid_isbn_checksum?/1` is the validator, and its doc already names
+    # this caller: "publicly exposed so callers (e.g. Stacks.Moderation) can
+    # trust a scanner-decoded ISBN without a round-trip to Open Library".
+    # Validate first, canonicalise second.
+    stripped = String.replace(isbn, ~r/[\s-]/, "")
+
+    case ISBN.valid_isbn_checksum?(stripped) and ISBN.canonical_isbn13(stripped) do
+      false ->
+        Logger.info(
+          "Moderation: candidate #{idx} offered ISBN #{inspect(isbn)} that fails its own " <>
+            "check digit — falling through to title search rather than trusting it"
+        )
+
+        resolve_candidate(Map.delete(candidate, "potential_isbns"), idx, context)
+
+      canonical ->
+        # ⛔ CROSS-CHECK THE ISBN AGAINST THE TITLE THE MODEL READ, because a
+        # well-formed hallucination defeats every other guard here. The prompt
+        # template briefly carried a real ISBN as an example and the model
+        # copied it onto 10 of 16 unrelated books — a value whose check digit
+        # holds and which resolves against Open Library, so both the checksum
+        # and the ISBN hard gate passed it. A reader photographing one book
+        # would have been given another.
+        #
+        # ⚖️ The two readings are independent: the digits come off the barcode
+        # area, the title off the cover. Agreement is weak evidence; DISAGREEMENT
+        # is strong evidence that one of them is invented. Preferring the title
+        # search on disagreement costs a cheap lookup and converts a silently
+        # wrong identification into a correct one or none.
+        case cross_check_isbn_title(canonical, candidate, idx) do
+          :ok ->
+            Logger.info("Moderation: candidate #{idx} has direct ISBN #{canonical}")
+            {:ok, canonical, nil}
+
+          :disagrees ->
+            resolve_candidate(Map.delete(candidate, "potential_isbns"), idx, context)
+        end
+    end
   end
 
   defp resolve_candidate(candidate, idx, context) do
@@ -336,7 +575,8 @@ defmodule Stacks.Moderation do
     excluded_descriptors = Map.get(context, :excluded_books, [])
 
     Logger.info(
-      "Moderation: candidate #{idx} has no ISBN, searching (title=#{inspect(title)}, author=#{inspect(author)}, raw_text=#{inspect(raw_text)})"
+      "Moderation: candidate #{idx} has no ISBN, searching (title=#{inspect(title)}, " <>
+        "author=#{inspect(author)}, raw_text=#{ocr_shape(raw_text)})"
     )
 
     case title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors) do
@@ -346,6 +586,53 @@ defmodule Stacks.Moderation do
   end
 
   @nullish_author_values ["null", "none", "n/a", "unknown", ""]
+
+  # ⚠️ Absent evidence is NOT disagreement. When the model read no title, or
+  # the resolver returns no title for the ISBN, there is nothing to compare and
+  # the ISBN stands on its checksum alone — the behaviour before this check
+  # existed. Treating "cannot tell" as "disagrees" would reject the barcode
+  # tier's own answers, which carry no title at all.
+  defp cross_check_isbn_title(isbn, candidate, idx) do
+    read_title = normalise_nullish_text(candidate["title"])
+
+    with true <- is_binary(read_title) and read_title != "",
+         {:ok, resolved} <- ISBNResolver.resolve(isbn),
+         # ⚠️ ATOM key. `build_open_library_metadata/1` returns %{title: ...},
+         # not a string-keyed map — reading "title" here silently matched
+         # nothing and the cross-check passed everything.
+         resolved_title when is_binary(resolved_title) <- Map.get(resolved, :title) do
+      if titles_agree?(read_title, resolved_title) do
+        :ok
+      else
+        Logger.warning(
+          "Moderation: candidate #{idx} offered ISBN #{isbn}, which resolves to " <>
+            "#{inspect(resolved_title)} while the cover reads #{inspect(read_title)} — " <>
+            "treating the ISBN as unread and searching on the title instead"
+        )
+
+        :disagrees
+      end
+    else
+      _ -> :ok
+    end
+  end
+
+  # ⬛ Containment on normalised text, matching how the eval scores a title: a
+  # cover prints "Flyboys: A True Story of Courage" where the catalogue holds
+  # "Flyboys". Equality would reject almost every correct pair.
+  defp titles_agree?(a, b) do
+    na = normalise_title_for_match(a)
+    nb = normalise_title_for_match(b)
+    na != "" and nb != "" and (String.contains?(na, nb) or String.contains?(nb, na))
+  end
+
+  defp normalise_title_for_match(s) do
+    s
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, " ")
+    |> String.trim()
+  end
 
   defp normalise_author(value) when is_binary(value) do
     if String.downcase(String.trim(value)) in @nullish_author_values, do: nil, else: value
@@ -359,23 +646,34 @@ defmodule Stacks.Moderation do
 
   defp normalise_nullish_text(_), do: nil
 
+  # Bag-of-words: no title line was picked out, but the engine read words.
+  # The resolver builds keyword queries from `raw_text` alone; the scorer's
+  # plausibility floor and the ISBN hard gate still decide acceptance.
+  defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors)
+       when (is_nil(title) or title == "") and is_binary(raw_text) and raw_text != "" do
+    do_title_search(nil, author, raw_text, excluded_isbns, excluded_descriptors)
+  end
+
   defp title_fallback(nil, _author, _raw_text, _excluded_isbns, _excluded_descriptors),
     do: {:error, :isbn_not_found}
 
   defp title_fallback("", _author, _raw_text, _excluded_isbns, _excluded_descriptors),
     do: {:error, :isbn_not_found}
 
-  defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors) do
+  defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors),
+    do: do_title_search(title, author, raw_text, excluded_isbns, excluded_descriptors)
+
+  defp do_title_search(title, author, raw_text, excluded_isbns, excluded_descriptors) do
     case ISBNResolver.search_by_title(title, author, raw_text,
            excluded_isbns: excluded_isbns,
            excluded_book_descriptors: excluded_descriptors
          ) do
       {:ok, isbn, metadata} ->
-        Logger.info("Moderation: title search found ISBN #{isbn} for '#{title}'")
+        Logger.info("Moderation: title search found ISBN #{isbn} for #{inspect(title)}")
         {:ok, isbn, metadata}
 
       {:error, :not_found} ->
-        Logger.warning("Moderation: title search found no results for '#{title}'")
+        Logger.warning("Moderation: title search found no results for #{inspect(title)}")
         {:error, :isbn_not_found}
 
       {:error, :unavailable} ->
@@ -500,5 +798,40 @@ defmodule Stacks.Moderation do
       )
 
       :ok
+  end
+
+  # A SHAPE, never the text. `raw_text` is the vision model's raw OCR of a region
+  # of a user's uploaded photograph, and this line used to `inspect/1` it whole
+  # at :info.
+  #
+  # The architecture doc names the risk this realises in terms — a reader
+  # photographing a bookshelf may capture other people who never consented to
+  # being processed by a vision model, and whatever text is in frame with them —
+  # and its stated mitigation, that the service returns no raw OCR, was never
+  # true: `raw_text` is a declared proto field populated from the model.
+  #
+  # ⚠️ Deliberately NOT a redactor. An off-the-shelf PII redactor detects named
+  # entities and emits everything it does not classify, which on arbitrary OCR
+  # means most of the text still reaches the log and the failure mode is a
+  # confident miss. What the diagnostic actually needs is "was there text, how
+  # much, and did it contain anything ISBN-shaped" — which is a summary, not a
+  # redaction, and is deterministic rather than probabilistic.
+  #
+  # The exposure was logs only: `raw_text` is in-memory, with no Ecto schema,
+  # dbt model or `persisted.exs` entry, so erasure never had anything to reach.
+  #
+  # Only `nil | binary()` can arrive: the sole caller passes the result of
+  # `normalise_nullish_text/1`, whose catch-all collapses every other term to
+  # `nil`. A fourth defensive clause here looked like belt-and-braces and was
+  # the opposite — dialyzer proved it unreachable, and had anything reached it,
+  # `other.__struct__` would have raised on any non-struct, turning a log line
+  # into an exception inside the caller. The narrowing belongs upstream, where
+  # it already is.
+  defp ocr_shape(nil), do: "none"
+  defp ocr_shape(""), do: "empty"
+
+  defp ocr_shape(text) when is_binary(text) do
+    digit_runs = Regex.scan(~r/\d{10}|\d{13}/, text) |> length()
+    "#{byte_size(text)}B/#{digit_runs}isbn-shaped"
   end
 end

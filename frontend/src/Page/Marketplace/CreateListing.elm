@@ -20,6 +20,7 @@ Activate button.
 -}
 
 import Api
+import Effect
 import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text, textarea)
 import Html.Attributes exposing (class, disabled, for, id, name, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -48,6 +49,8 @@ type alias Model =
 
 type Msg
     = PlacementsReceived (Result Http.Error (List Placement))
+    | SessionExpiryDetected
+    | ComposeSessionExpired
     | BookSelected String
     | ConditionSelected String
     | PricingModeSelected String
@@ -85,13 +88,26 @@ type alias Draft =
     }
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         ( placementsState, cmd ) =
             case maybeToken of
                 Just token ->
-                    ( Loading, Api.getMyPlacements token PlacementsReceived )
+                    ( Loading
+                    , Effect.perform
+                        (Effect.authed Api.myPlacementsRequest
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson
+                                    (Decode.field "placements"
+                                        (Decode.list Types.Placement.placementSummaryDecoder)
+                                    )
+                                    >> PlacementsReceived
+                            }
+                        )
+                    )
 
                 Nothing ->
                     ( NotAsked, Cmd.none )
@@ -111,9 +127,21 @@ init maybeToken =
     )
 
 
-update : Msg -> Model -> Maybe String -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken maybeUserId =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
+        ComposeSessionExpired ->
+            -- The session expired on the submit itself, so there is an
+            -- in-progress draft to carry out: park it and let the login page
+            -- promise it survives, then restore it when the reader returns.
+            ( model
+            , Cmd.none
+            , SessionExpiredWithDraft (encodeDraft (toDraft model maybeUserId))
+            )
+
         PlacementsReceived result ->
             case result of
                 Ok placements ->
@@ -168,7 +196,15 @@ update msg model maybeToken maybeUserId =
                             }
                     in
                     ( { model | submitState = Loading }
-                    , Api.createListing params token ListingCreated
+                    , Effect.perform
+                        (Effect.authed (Api.createListingRequest params)
+                            token
+                            { onExpired = ComposeSessionExpired
+                            , onResponse =
+                                Api.resolveJson (Decode.field "listing" Types.Listing.listingDecoder)
+                                    >> ListingCreated
+                            }
+                        )
                     , NoOut
                     )
 
@@ -184,20 +220,29 @@ update msg model maybeToken maybeUserId =
                     )
 
                 Err err ->
-                    if Api.isUnauthorized err then
-                        ( model
-                        , Cmd.none
-                        , SessionExpiredWithDraft (encodeDraft (toDraft model maybeUserId))
-                        )
-
-                    else
-                        ( { model | submitState = Failure err }, Cmd.none, NoOut )
+                    -- A *readable* 401 means expiry and is claimed upstream by
+                    -- `onExpired` (ComposeSessionExpired) before it reaches here.
+                    -- An *unreadable* 401 still arrives (interceptExpiry's
+                    -- ReasonUnreadable falls through to onResponse) — a proxy blip,
+                    -- not an expiry — so surfacing it as a retryable failure is
+                    -- exactly right; parking a draft and bouncing to /login here
+                    -- would be the mid-journey sign-out that case exists to avoid.
+                    ( { model | submitState = Failure err }, Cmd.none, NoOut )
 
         ActivateListing listingId ->
             case maybeToken of
                 Just token ->
                     ( { model | submitState = Loading }
-                    , Api.activateListing listingId token ListingActivated
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.listingTransitionRequest listingId Api.ActivateListing)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "listing" Types.Listing.listingDecoder)
+                                    >> ListingActivated
+                            }
+                        )
                     , NoOut
                     )
 

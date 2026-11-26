@@ -71,8 +71,26 @@ defmodule Stacks.Enrichment.EventExtractor do
 
   defp parse_start(value) when is_binary(value) do
     case DateTime.from_iso8601(value) do
-      {:ok, dt, _offset} -> dt
-      {:error, _} -> parse_bare_date(value)
+      {:ok, dt, _offset} ->
+        dt
+
+      # A NAIVE local datetime — "2027-03-14T18:00:00", the common real-world
+      # schema.org form. Both other tiers decline it: `DateTime.from_iso8601/1`
+      # returns `:missing_offset`, and `parse_bare_date/1` fails too because
+      # `Date.from_iso8601/1` rejects the time portion. So the whole date was
+      # discarded over an unknown timezone.
+      #
+      # Refusing to guess the offset is right; throwing away the DAY is not, and the
+      # day is what a reader needs. Keep it at midnight, exactly as a bare date is
+      # already handled, rather than losing the event entirely.
+      {:error, :missing_offset} ->
+        case NaiveDateTime.from_iso8601(value) do
+          {:ok, naive} -> parse_bare_date(Date.to_iso8601(NaiveDateTime.to_date(naive)))
+          _ -> parse_bare_date(value)
+        end
+
+      {:error, _} ->
+        parse_bare_date(value)
     end
   end
 

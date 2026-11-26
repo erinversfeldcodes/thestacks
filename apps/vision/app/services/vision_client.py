@@ -49,6 +49,32 @@ class VisionClient:
             ) from exc
         return result if isinstance(result, dict) else {"books": []}
 
+    async def analyze(
+        self,
+        image: str,
+        excluded_books: list[str] | None = None,
+    ) -> dict[str, object]:
+        """One dispatch: classify + conditional extract on a single GPU
+        container (R0). Returns ``{"classify": {...}, "extract": {...} | None}``
+        — the front door re-parses the classification authoritatively and uses
+        ``extract`` only for a book.
+        """
+        try:
+            model = self._modal_cls()
+            result = await asyncio.wait_for(
+                model.analyze.remote.aio(image, excluded_books or []),
+                timeout=float(settings.request_timeout_seconds),
+            )
+        except TimeoutError as exc:
+            raise HTTPException(status_code=504, detail="Vision model request timed out") from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Vision model request failed: {exc}"
+            ) from exc
+        if not isinstance(result, dict):
+            return {"classify": {"classification": "ambiguous", "confidence": 0.0}, "extract": None}
+        return result
+
     async def classify(self, image: str) -> dict[str, object]:
         try:
             model = self._modal_cls()

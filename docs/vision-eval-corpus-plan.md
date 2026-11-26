@@ -1,5 +1,12 @@
 # The vision eval corpus: what a real one looks like
 
+> **Status (2026-11-20): largely DELIVERED, and the plan's own trigger fired.** The
+> stratified corpus exists (122 images, 11 strata, owner-authored provenance throughout);
+> the model swap §6 anticipated happened (T4 + Qwen3-VL-4B, ruled 2026-11-17), and the gate
+> survived it via the two-baseline protocol rather than the overwrite §5 warned against.
+> §7 below reconciles each prediction with what shipped. The spine stratum remains the one
+> open sourcing item (armed, owner photographs pending).
+
 **Status:** plan only. Ruled 2026-08-19: do **not** expand the corpus yet. Build the
 harness against today's fixtures with a no-regression gate, and treat this document as
 the specification for the expansion when it is worth the owner's time.
@@ -55,7 +62,11 @@ stratum become defensible.
 
 The corpus must mirror the **cascade**, because a single blended accuracy number hides
 exactly the regression that matters — a cheap tier silently degrading and pushing load
-onto an expensive one. The cascade runs barcode → cover-embedding → OCR → VLM fallback.
+onto an expensive one. (As shipped, the cascade runs barcode → GPU-on-miss, with the
+cover-text read as shadow evidence — its answering role was measured net-negative and
+demoted pending an acceptance design — and the embedding tier relocated by the accuracy
+program to the reader's-own-library role. The strata below still mirror the FULL intended
+cascade, which is the point: the corpus outlives any one ordering.)
 
 | Stratum | Target n | What it proves | Cascade tier under test |
 |---|---:|---|---|
@@ -148,8 +159,23 @@ have.
 
 ## 6. When to do this
 
-The trigger is **any change to the vision model, the cascade's ordering, or the
-provider** — at that moment the no-regression gate becomes untrustworthy, because
-"no regression against a baseline recorded on the previous model" is not a claim the
-baseline can support. Until then the six fixtures plus a no-regression gate are an
-honest instrument, and this document is the plan for when they stop being one.
+The trigger was **any change to the vision model, the cascade's ordering, or the
+provider** — and it fired: the 2026-11-17 ruling changed both model and ordering. The
+answer shipped as the TWO-BASELINE protocol: `--record` writes the model-stamped DROP-IN
+baseline; the 7B per-stratum reference (`vision_baseline_7b_reference.json`) is preserved
+write-guarded as the END-STATE bar the full cascade answers to across swaps, with the
+ruling's concessions named and an expiry switch. This section stands as the record of why.
+
+## 7. What was delivered against this plan (2026-11-20)
+
+| §5 prediction | Delivered as |
+|---|---|
+| Per-stratum, never blended | Both harnesses print per-stratum; the gates compare per-stratum only |
+| CPU tier gated in CI | Barcode/OCR unit suites CPU-only in every verify; `mix eval.resolver` gates the post-model half in `lint-elixir` |
+| VLM gated post-deploy | `mix eval.vision` is the deploy gate (refused a real regression live, 2026-11-20); `mix eval.cascade` scores the PRODUCTION path (sandboxed, model-transcendent bar) — the layer the sidecar eval structurally cannot see, proven necessary by a live wrong-book drive |
+| Rejection tightest | `negative` is its own line everywhere; the cascade's cpu-title demotion was forced partly by three negative false-accepts |
+| Baseline per model, old number kept | The two-baseline protocol above, with an unbypassable write-guard on the reference |
+
+Measured state at delivery: sidecar 84/122 (three identical passes); cascade 91/122
+(complete, no non-conceded stratum below the 7B reference's 86/122); the gate's own
+refusals each yielded a production fix before it passed.

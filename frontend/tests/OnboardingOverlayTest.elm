@@ -16,9 +16,10 @@ import Test exposing (Test, describe, test)
 import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 
 
-noToken : Maybe String
+noToken : Maybe Api.Credentials
 noToken =
     Nothing
 
@@ -139,7 +140,7 @@ dataDrivenStepsOracle =
                         q
                             |> Query.findAll [ Selector.class "onboarding-overlay__dot--active" ]
                             |> Query.count (Expect.equal 1)
-                    , \q -> Query.has [ Selector.text "Welcome to The Stacks" ] q
+                    , \q -> Query.has [ Selector.exactText "Welcome to The Stacks" ] q
                     ]
                     rendered
         , test "currentStep is List lookup, not a branch — reorder puts UploadFirstBook at index 0" <|
@@ -402,7 +403,7 @@ embeddedSurfaces =
     describe "embedded real surfaces"
         [ test "the Upload step renders the real upload surface, not a prompt" <|
             \_ ->
-                Overlay.view { init | currentIndex = uploadIx } (Just "tok")
+                Overlay.view { init | currentIndex = uploadIx } (Just (TestHelpers.creds "tok"))
                     |> Query.fromHtml
                     |> Query.has
                         [ byTestId "onboarding-upload-embed"

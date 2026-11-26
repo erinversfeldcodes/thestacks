@@ -16,13 +16,20 @@ defmodule Stacks.DataCorrection.Registry do
     NormaliseEditionIsbn10,
     SeedEditionVerificationSource,
     StaleSeedEditionIsbn,
-    UnmergeEdition
+    UnmergeEdition,
+    UnrunnableImageJob
   }
 
   @corrections [
     NormaliseEditionIsbn10,
     StaleSeedEditionIsbn,
-    SeedEditionVerificationSource
+    SeedEditionVerificationSource,
+    # ⚠️ Ordering is load-bearing against `Oban.Plugins.Lifeline`, which rescues
+    # a job interrupted by a machine suspend back to `available`. This discards
+    # the image jobs that can never succeed, so running it on the deploy path
+    # keeps Lifeline from resurrecting 70 of them to fail one attempt at a time.
+    # Last in the list because it depends on nothing above it.
+    UnrunnableImageJob
   ]
 
   @targeted [

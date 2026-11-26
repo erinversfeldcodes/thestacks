@@ -145,17 +145,102 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
   end
 
   describe "enqueue shape (Stacks.Email -> EmailDeliveryJob)" do
-    test "registration_confirmation enqueues a job whose args.params.token is present" do
+    test "no enqueued job carries a usable credential in its args" do
+      # ⚠️ This test used to assert the OPPOSITE — that `args.params.token` was
+      # present and non-empty. It was pinning a defect.
+      #
+      # `oban_jobs.args` is an ordinary queryable table with no erasure path.
+      # A confirmation or reset token sitting there is a live credential: the
+      # reset token verifies for 24 hours and the confirmation tokens are
+      # compared straight against the user row with no expiry at all, so they
+      # work until consumed. The job never needed the token — it loads the user
+      # row anyway and can read the live one at delivery.
+      #
+      # Raising the Oban pruner from 60 seconds to 7 days is what made this
+      # urgent rather than merely wrong: the same credential, readable for
+      # 10,080× longer.
       user = user_with_confirmation_token()
 
       assert {:ok, _user} = Email.send_registration_confirmation(user)
-
       assert_enqueued(worker: EmailDeliveryJob, args: %{"user_id" => user.id})
 
       [job] = all_enqueued(worker: EmailDeliveryJob)
       assert job.args["template"] == "registration_confirmation"
-      assert is_binary(job.args["params"]["token"])
-      assert job.args["params"]["token"] != ""
+
+      refute Map.has_key?(job.args["params"], "token"),
+             "a raw token reached oban_jobs.args: #{inspect(job.args["params"])}. The worker " <>
+               "resolves the live token from the user row — nothing needs to carry it through " <>
+               "the queue."
+
+      assert job.args["user_id"] == user.id,
+             "the args must still identify the user, or the worker cannot resolve the token"
+    end
+
+    test "a job enqueued before the args shape changed still delivers" do
+      # ⚠️ `build_email/3`'s clauses are hard matches on params keys, so a job
+      # already in the queue when the shape changed finds no matching head and
+      # dies on FunctionClauseError — retrying until discarded. The seven-day
+      # pruner window makes that population LARGER across a deploy, not smaller.
+      #
+      # These are the two shapes this branch changed. Both must still deliver.
+      user = insert(:user, notify_wishlist_availability: true, notify_group_invitations: true)
+
+      assert :ok =
+               EmailDeliveryJob.perform(%Oban.Job{
+                 args: %{
+                   "template" => "wishlist_available",
+                   "user_id" => user.id,
+                   "params" => %{
+                     "book_title" => "An Older Book",
+                     "author_name" => "A. Writer",
+                     "price_zar" => "120.00",
+                     "seller_name" => "A Seller"
+                   }
+                 }
+               })
+
+      assert_email_sent(fn email -> email.html_body =~ "An Older Book" end)
+
+      assert :ok =
+               EmailDeliveryJob.perform(%Oban.Job{
+                 args: %{
+                   "template" => "group_invitation",
+                   "user_id" => user.id,
+                   "params" => %{
+                     "inviter_name" => "An Older Inviter",
+                     "group_name" => "An Older Group",
+                     "accept_url" => "/groups/invitations/abc/accept"
+                   }
+                 }
+               })
+
+      assert_email_sent(fn email -> email.html_body =~ "An Older Inviter" end)
+    end
+
+    test "the email-change pair carries a DIGEST, which cannot be used as a token" do
+      # The two templates that genuinely need something from the enqueue: the
+      # worker compares against the user row to detect a change that has been
+      # settled or superseded since. A SHA-256 digest answers that question and
+      # is useless to anyone reading the table.
+      user = user_mid_change()
+
+      assert {:ok, _} = Email.send_email_change_pair(user)
+
+      jobs = all_enqueued(worker: EmailDeliveryJob)
+      confirmation = Enum.find(jobs, &(&1.args["template"] == "email_change_confirmation"))
+
+      refute is_nil(confirmation), "the confirmation letter was not enqueued"
+
+      digest = confirmation.args["params"]["token_digest"]
+
+      assert is_binary(digest) and byte_size(digest) == 64,
+             "expected a hex SHA-256 digest, got #{inspect(digest)}"
+
+      refute digest == user.pending_email_token,
+             "the digest is the token itself — hashing did not happen"
+
+      assert digest == EmailDeliveryJob.digest_of(user.pending_email_token),
+             "the digest must be of the token it supersedes, or staleness cannot be judged"
     end
   end
 
@@ -167,7 +252,13 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
         assert {:ok, _user} = Email.send_registration_confirmation(user)
       end
 
-      assert {:error, :rate_limited} = Email.send_registration_confirmation(user)
+      # ⛔ The LIMB, not just the refusal. This test already saturated the
+      # per-user bucket specifically, so the distinction was observable here all
+      # along and was being thrown away — both limbs asserted the same
+      # undifferentiated value, which is what let a caller attribute one as the
+      # other.
+      assert {:error, {:rate_limited, :per_user}} =
+               Email.send_registration_confirmation(user)
 
       assert length(all_enqueued(worker: EmailDeliveryJob)) == 10
     end
@@ -183,7 +274,12 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
       end
 
       fresh_user = insert(:user)
-      assert {:error, :rate_limited} = Email.send_registration_confirmation(fresh_user)
+      # ⚖️ The discriminating half: this user has sent NOTHING, so only the
+      # stack-wide total can be refusing. On a test stack that limb is filled by
+      # the suite itself, which is why an E2E gate must skip on it rather than
+      # enforce delivery against it.
+      assert {:error, {:rate_limited, :global}} =
+               Email.send_registration_confirmation(fresh_user)
     end
   end
 
@@ -313,9 +409,10 @@ defmodule Stacks.Workers.EmailDeliveryJobTest do
 
   describe "delivery counter" do
     # The public cost page's email line is derived from this counter. It used to
-    # be derived by counting rows in `oban_jobs`, which the pruner deletes about
-    # a minute after a job completes, so the month-to-date figure only ever saw
-    # the last minute of sends.
+    # be derived by counting rows in `oban_jobs`, which are pruned — so the
+    # month-to-date figure only ever saw the retention window. That window was
+    # sixty seconds then and is seven days now, which changes the size of the
+    # error and not its existence: seven days is not a month either.
     test "a delivered email emits the counted event, tagged with its template" do
       ref = :telemetry_test.attach_event_handlers(self(), [[:stacks, :email, :delivered]])
       user = insert(:user, recipient_opts())

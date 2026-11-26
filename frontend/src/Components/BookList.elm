@@ -100,6 +100,7 @@ viewRow onBookClicked placement =
                     , editionCount = 0
                     , subjects = []
                     , visibilityTier = Types.Book.Public
+                    , communityReadCount = 0
                     }
     in
     tr

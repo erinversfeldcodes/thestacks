@@ -40,6 +40,7 @@ type alias Model =
 type Msg
     = EndSession
     | Ended (Http.Response String)
+    | AlreadyRevoked
 
 
 {-| What the chrome needs `Main` to do. The chrome cannot drop the admin token
@@ -59,7 +60,7 @@ init =
 
 {-| `updateWithEffect` composed with `Effect.perform`.
 -}
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model adminToken =
     let
         ( newModel, effect, out ) =
@@ -75,10 +76,11 @@ decides on rather than deciding a second time by hand.
 revoke that never landed is the ORIGINAL defect wearing a button: the operator
 would be told the session had ended while it stayed open server-side for the
 rest of its window. A 401 is the one failure that does end it — the token is
-already gone — so it re-gates rather than nagging.
+already gone — so it re-gates rather than nagging, and the plan routes it to
+`AlreadyRevoked` without `Ended` having to re-read the status.
 
 -}
-updateWithEffect : Msg -> Model -> Maybe String -> ( Model, Effect Msg, OutMsg )
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
 updateWithEffect msg model adminToken =
     case msg of
         EndSession ->
@@ -88,7 +90,11 @@ updateWithEffect msg model adminToken =
 
                 ( False, Just token ) ->
                     ( { model | ending = True, error = Nothing }
-                    , Effect.authed Api.adminLogoutRequest token Ended
+                    , Effect.authed Api.adminLogoutRequest
+                        token
+                        { onExpired = AlreadyRevoked
+                        , onResponse = Ended
+                        }
                     , NoOut
                     )
 
@@ -98,20 +104,28 @@ updateWithEffect msg model adminToken =
                     -- sending an unauthenticated request that would 401.
                     ( init, Effect.none, SessionEnded )
 
+        AlreadyRevoked ->
+            -- The one failure that still ends the session: a 401 means the
+            -- token this request carried is already gone, so there is nothing
+            -- left to revoke and nothing to tell the operator to retry.
+            --
+            -- ⚠️ This used to be a branch inside `Ended`, reading the status
+            -- code a second time. The plan now claims the 401 before the
+            -- response reaches `Ended` at all, so the branch could not have
+            -- fired — and a status check that cannot run is a statement nobody
+            -- is checking.
+            ( init, Effect.none, SessionEnded )
+
         Ended response ->
             case response of
                 Http.GoodStatus_ _ _ ->
                     ( init, Effect.none, SessionEnded )
 
-                Http.BadStatus_ metadata _ ->
-                    if metadata.statusCode == 401 then
-                        ( init, Effect.none, SessionEnded )
-
-                    else
-                        ( { model | ending = False, error = Just serverRefused }
-                        , Effect.none
-                        , NoOut
-                        )
+                Http.BadStatus_ _ _ ->
+                    ( { model | ending = False, error = Just serverRefused }
+                    , Effect.none
+                    , NoOut
+                    )
 
                 _ ->
                     ( { model | ending = False, error = Just didNotArrive }

@@ -146,7 +146,7 @@ N/A
 
 ## 11. dbt Model Dependencies
 
-Same as US-2.5.1 — geographic discoveries feed into the same `int_source_approval_rate` and `int_source_health` models.
+Same as US-2.5.1 — geographic discoveries feed into `int_source_approval_rate`. (`int_source_health` was deleted 2026-10-15; the health data itself lives on the `op.source_health_checks` table.)
 
 ---
 
@@ -176,7 +176,7 @@ N/A — discovered sources appear on existing pages after approval.
 - **Brave Search API call counts**: up to 5 queries per geographic sweep — significant budget impact (67/day limit). Track daily budget consumption vs geographic sweep frequency.
 - **SearXNG fallback rate**: percentage of geographic queries that fall back to SearXNG due to Brave budget exhaustion
 - **Event handler execution times**: `LocationUpdatedHandler` latency from `user.location_updated` to `GeographicDiscoveryJob` enqueue
-- **dbt refresh job duration**: same models as US-2.5.1 (`int_source_approval_rate`, `int_source_health`)
+- **dbt refresh job duration**: same model as US-2.5.1 (`int_source_approval_rate`)
 
 ---
 

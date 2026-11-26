@@ -41,12 +41,15 @@ defmodule Stacks.GDPRTest do
     "audit_log" => :audit_trail,
     "blog_assistant_sessions" => :writing_assistant_sessions,
     "blog_posts" => :blog_posts,
+    "bookshelf_placements" => :placements,
     "bookshelves" => :bookshelves,
+    "corpus_annotations" => :corpus_annotations,
     "embeddings" => :embeddings_summary,
     "feedback_entries" => :feedback,
     "group_invitations" => :reading_group_invitations,
     "group_members" => :reading_group_memberships,
     "groups" => :reading_groups,
+    "imported_works" => :imported_works,
     "invite_codes" => :invitations,
     "library_imports" => :library_imports,
     "listings" => :marketplace_listings,
@@ -185,7 +188,7 @@ defmodule Stacks.GDPRTest do
       refute Map.has_key?(row, :operator_session_id)
     end
 
-    test "payload contains all 25 documented keys" do
+    test "payload contains all 27 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -200,6 +203,8 @@ defmodule Stacks.GDPRTest do
                  :writing_assistant_sessions,
                  :writing_assistant_feedback,
                  :embeddings_summary,
+                 :imported_works,
+                 :corpus_annotations,
                  :uploaded_images,
                  :blog_posts,
                  :blog_comments,
@@ -288,7 +293,7 @@ defmodule Stacks.GDPRTest do
         title: "The Name of the Rose",
         shelf: "library",
         content_date: ~U[2026-01-02 03:04:05.000000Z],
-        embedding: Pgvector.new(vector)
+        embedding: vector
       )
 
       assert {:ok, export} = Export.export_user_data(user.id)
@@ -365,6 +370,51 @@ defmodule Stacks.GDPRTest do
                "Add each to Export.export_user_data/2's user map, or add it to " <>
                "@export_excluded_fields WITH a written rationale if it is a secret, " <>
                "account-security mechanic, or internal UX flag."
+    end
+
+    test "and every EXCLUDED field stays out of it" do
+      # ⚠️ The sweep above asserts one direction only: that nothing personal is
+      # MISSING. It skips the excluded fields entirely, so it cannot notice one
+      # of them being PRESENT — adding `password_hash: user.password_hash` to the
+      # export map passes it, because the field is on the exclusion list and the
+      # loop therefore never looks at it.
+      #
+      # That is the half that matters most here. The first direction protects the
+      # reader's right of access; this one protects their credentials, and the
+      # whole point of excluding a password hash or a reset token is that handing
+      # it to anyone holding the export defeats the thing it secures. An
+      # exclusion list asserted in one direction is a list of fields nobody
+      # checks.
+      user = insert(:user)
+      {:ok, export} = Export.export_user_data(user.id)
+
+      exported_keys = MapSet.new(Map.keys(export.user))
+
+      leaked =
+        for field <- @export_excluded_fields,
+            MapSet.member?(exported_keys, field),
+            do: field
+
+      assert leaked == [],
+             "these fields are on @export_excluded_fields and were exported anyway: " <>
+               "#{inspect(leaked)}. Either the exclusion was wrong and the rationale needs " <>
+               "rewriting, or a credential is being handed to whoever holds this export."
+
+      # `:password` is virtual, so it is absent from `__schema__(:fields)` and no
+      # schema-derived loop can reach it. Named explicitly for that reason.
+      refute MapSet.member?(exported_keys, :password)
+
+      # And the values, not only the key names: a secret smuggled out under a
+      # different key would satisfy every assertion above.
+      serialised = inspect(export.user)
+
+      for {label, secret} <- [
+            {"password hash", user.password_hash},
+            {"confirmation token", user.email_confirmation_token}
+          ],
+          is_binary(secret) and secret != "" do
+        refute serialised =~ secret, "the #{label} appears in the export payload by value"
+      end
     end
   end
 
@@ -665,15 +715,48 @@ defmodule Stacks.GDPRTest do
       assert {:ok, preview} = Deletion.preview_user_data(user.id)
       assert preview.library_imports == 1
 
+      # Captured BEFORE erasure, because afterwards there is no path back to
+      # these rows except their own ids — which is the whole point.
+      row_ids =
+        Repo.all(
+          from(r in Stacks.Imports.LibraryImportRow,
+            where: r.import_id == ^import.id,
+            select: r.id
+          )
+        )
+
+      assert row_ids != [], "the import parsed no rows, so this test would assert nothing"
+
       assert {:ok, result} = Deletion.delete_user_data(user.id)
       assert result.delete_library_imports == 1
 
       assert nil == Repo.get(Stacks.Imports.LibraryImport, import.id)
 
-      assert [] ==
-               Repo.all(
-                 from(r in Stacks.Imports.LibraryImportRow, where: r.import_id == ^import.id)
-               )
+      # ⚠️ Asserted by ROW ID, not by `where import_id == ^import.id`.
+      #
+      # That was the previous assertion, and it could not tell the two outcomes
+      # apart: a row whose `import_id` was NULLED no longer matches the filter
+      # either, so a detached row full of the reader's review and private notes
+      # returned `[]` exactly like a deleted one. The invariant this test is
+      # named for — free text must be DELETED, never author-nulled, because
+      # nulling removes the reference and keeps the content — was the one thing
+      # it could not observe. It is the `post_comments.body` defect class, in
+      # the test written to catch it.
+      #
+      # Fetching by the ids captured before erasure distinguishes them: a
+      # detached row is still found by its own id.
+      remaining =
+        Repo.all(
+          from(r in Stacks.Imports.LibraryImportRow,
+            where: r.id in ^row_ids,
+            select: {r.id, r.raw_review, r.raw_notes}
+          )
+        )
+
+      assert remaining == [],
+             "raw import rows survived erasure. If `import_id` is nil on these they were " <>
+               "DETACHED rather than deleted, which leaves the reader's review and private " <>
+               "notes in the table after they asked to be forgotten: " <> inspect(remaining)
     end
   end
 
@@ -692,6 +775,37 @@ defmodule Stacks.GDPRTest do
       assert {:ok, updated} = Consent.revoke_consent(user.id)
       assert updated.consent_analytics == false
     end
+
+    # ⛔ A revoke STAMPS `_at` with the withdrawal time; it does not leave the
+    # grant time in place and does not clear it. Driven from a user whose grant
+    # timestamp is in the past, so a revoke that failed to re-stamp (`_at` left
+    # at the grant time) is `:eq` to the past and fails here — `:gt` is only
+    # reachable by writing the withdrawal time. A NULL would also fail, guarding
+    # the "clear it" option the issue explicitly rejected.
+    test "stamps the withdrawal time onto consent_analytics_at (not the grant time, not NULL)" do
+      past = ~U[2020-01-01 00:00:00Z]
+      user = insert(:user, consent_analytics: true, consent_analytics_at: past)
+
+      assert {:ok, revoked} = Consent.revoke_consent(user.id)
+      assert revoked.consent_analytics == false
+      assert revoked.consent_analytics_at != nil
+      assert DateTime.compare(revoked.consent_analytics_at, past) == :gt
+    end
+
+    test "stamps the withdrawal time onto consent_writing_assistant_at too" do
+      past = ~U[2020-01-01 00:00:00Z]
+
+      user =
+        insert(:user,
+          consent_writing_assistant: true,
+          consent_writing_assistant_at: past
+        )
+
+      assert {:ok, revoked} = Consent.revoke_consent(user.id, "writing_assistant")
+      assert revoked.consent_writing_assistant == false
+      assert revoked.consent_writing_assistant_at != nil
+      assert DateTime.compare(revoked.consent_writing_assistant_at, past) == :gt
+    end
   end
 
   describe "Consent.check_consent/2" do
@@ -707,6 +821,40 @@ defmodule Stacks.GDPRTest do
 
     test "returns false for unknown user" do
       assert Consent.check_consent(Ecto.UUID.generate()) == false
+    end
+  end
+
+  describe "Consent — search_indexing (the public-indexing opt-in)" do
+    test "defaults off: a fresh user has not opted in, so public content stays noindex" do
+      user = insert(:user)
+      assert user.consent_search_indexing == false
+      assert Consent.check_consent(user.id, "search_indexing") == false
+    end
+
+    test "grant sets the flag + a timestamp; revoke clears the flag" do
+      user = insert(:user)
+
+      assert {:ok, granted} = Consent.grant_consent(user.id, "search_indexing")
+      assert granted.consent_search_indexing == true
+      assert granted.consent_search_indexing_at != nil
+      assert Consent.check_consent(user.id, "search_indexing") == true
+
+      assert {:ok, revoked} = Consent.revoke_consent(user.id, "search_indexing")
+      assert revoked.consent_search_indexing == false
+      assert Consent.check_consent(user.id, "search_indexing") == false
+    end
+
+    test "search_indexing is independent of analytics (no clause fall-through)" do
+      user = insert(:user, consent_analytics: true)
+
+      assert {:ok, _} = Consent.grant_consent(user.id, "search_indexing")
+      assert Consent.check_consent(user.id, "search_indexing") == true
+      # granting/one feature must not be read as, or disturb, another
+      assert Consent.check_consent(user.id, "analytics") == true
+
+      assert {:ok, _} = Consent.revoke_consent(user.id, "search_indexing")
+      assert Consent.check_consent(user.id, "search_indexing") == false
+      assert Consent.check_consent(user.id, "analytics") == true
     end
   end
 

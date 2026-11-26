@@ -1,8 +1,10 @@
-"""Modal app: Qwen2.5-VL-7B-Instruct vision inference for The Stacks.
+"""Modal app: Qwen3-VL-4B-Instruct vision inference for The Stacks.
 
-Stack: HF Transformers + accelerate (no vLLM), bf16 on an A10G — the
-empirically-clean dfef1333 baseline; no vLLM/H100 without an eval
-framework. One inference per container (sync @modal.method calls,
+Stack: HF Transformers + accelerate (no vLLM), fp16 on a T4 — the ruled
+production architecture (owner-accepted 2026-11-17: the measured 84/122
+config; L4 + Qwen2.5-VL-7B bf16 is the recorded zero-accuracy-risk
+fallback, reachable via the VISION_* env knobs without a source edit).
+No vLLM/H100 without an eval framework. One inference per container (sync @modal.method calls,
 serialised); scale by container count, not in-process concurrency.
 300s function timeout — core's client timeout is DERIVED from this
 number and must never be below it (350).
@@ -17,7 +19,85 @@ from typing import Any
 import modal
 
 MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
-MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
+# ⚖️ THE FOUR KNOBS AN EXPERIMENT VARIES, READ FROM THE ENVIRONMENT SO THAT A
+# VARIANT IS A DEPLOY RATHER THAN A SOURCE EDIT. Every default below is the
+# value that was deployed and measured before this block existed, so an
+# unparameterised deploy is byte-identical in behaviour — which is the only way
+# the baseline stays a baseline while variants are being tried against it.
+#
+# ⚠️ Modal evaluates the decorators at DEPLOY time, so these are fixed when the
+# app is pushed, not per request. That is what makes a run attributable: one
+# deployment, one configuration, one artefact.
+# ⬛ THE DEFAULTS ARE THE RULED PRODUCTION ARCHITECTURE, deliberately moved
+# from the 7B/A10G/bf16 baseline the experiment series was scored against:
+# T4 + Qwen3-VL-4B-Instruct (apache-2.0, licence re-read at swap) in fp16 —
+# the T4 has no usable bf16, and fp16 is the exact configuration the 84/122
+# score was measured on. The 4B-keyed eval baseline is recorded WITH this
+# swap, and the 7B 86/122 per-stratum reference stays the end-state bar for
+# the full cascade. Experiments still override via env, never by editing
+# these lines.
+MODEL_NAME = os.environ.get("VISION_MODEL_NAME", "Qwen/Qwen3-VL-4B-Instruct")
+VISION_GPU = os.environ.get("VISION_GPU", "T4")
+VISION_DTYPE = os.environ.get("VISION_DTYPE", "float16")
+
+# `None` means "whatever the processor's own config says", which is what ran
+# before this knob existed. An explicit value caps the image tokens the vision
+# encoder emits, and so both the latency and the GPU seconds a photograph costs.
+_max_px = os.environ.get("VISION_MAX_PIXELS")
+VISION_MAX_PIXELS = int(_max_px) if _max_px else None
+
+# ⛔ DECORATOR ARGUMENTS BIND AT DEPLOY TIME; FUNCTION BODIES DO NOT. Modal
+# re-imports this module inside the build and runtime containers, where the
+# VISION_* variables above re-resolve against a container environment that
+# never had them — so `gpu=VISION_GPU` honoured the experiment while
+# MODEL_NAME, VISION_DTYPE and VISION_MAX_PIXELS silently fell back to their
+# defaults in the container. A max_pixels experiment deployed this way runs a
+# byte-identical copy of the baseline and reports it as a variant. The
+# overrides are therefore baked into the image env — but ONLY when set, so an
+# unparameterised deploy keeps the exact image hash the baseline was measured
+# on.
+_ENV_OVERRIDES = {
+    k: v
+    for k, v in (
+        ("VISION_MODEL_NAME", os.environ.get("VISION_MODEL_NAME")),
+        ("VISION_DTYPE", os.environ.get("VISION_DTYPE")),
+        ("VISION_MAX_PIXELS", os.environ.get("VISION_MAX_PIXELS")),
+        # ⛔ VISION_GPU IS BAKED TOO, FOR THE LOAD LINE'S HONESTY. It drives the
+        # `gpu=` decorator at deploy time (correct hardware either way), but the
+        # runtime print reads it from the container env — unbaked, that printed
+        # `gpu=A10G` for a container actually on a T4, which is precisely the
+        # lying-instrument failure the print exists to prevent.
+        ("VISION_GPU", os.environ.get("VISION_GPU")),
+        # R0 flag — the CPU FRONT DOOR reads VISION_SINGLE_DISPATCH through its
+        # pydantic Settings, so it is baked into the front-door image too (see
+        # `_fastapi_image` below), not only the GPU model's image. Baking it only
+        # into the GPU image left a deploy-time VISION_SINGLE_DISPATCH=0 inert on
+        # the front door — the documented two-call fallback silently did nothing.
+        ("VISION_SINGLE_DISPATCH", os.environ.get("VISION_SINGLE_DISPATCH")),
+    )
+    if v
+}
+
+# Extra packages a variant needs that the baseline must not carry: an AWQ
+# checkpoint needs `autoawq`, for example. (Qwen3-VL once needed a newer
+# transformers than the baseline pin and rode in here; it is the default now
+# and the baseline floor carries it.) Comma-separated pip specs; empty by
+# default, and an empty list adds no layer, so the default image hash is
+# again untouched.
+_EXTRA_PIPS = [s.strip() for s in os.environ.get("VISION_EXTRA_PIPS", "").split(",") if s.strip()]
+
+
+def _model_class_name(model_name: str) -> str:
+    """Which transformers class loads this checkpoint.
+
+    ⚖️ Returns the NAME, not the class, so the mapping is testable in an
+    environment without transformers installed. Qwen3-VL shipped a new model
+    class; an -AWQ checkpoint of 2.5-VL is still a 2.5-VL — its quantisation
+    rides in the checkpoint's own config, not in the loader.
+    """
+    if "qwen3-vl" in model_name.lower():
+        return "Qwen3VLForConditionalGeneration"
+    return "Qwen2_5_VLForConditionalGeneration"
 
 
 def _download_model() -> None:
@@ -27,26 +107,65 @@ def _download_model() -> None:
     The downloaded weights are cached in the image layer — every subsequent
     container start loads from local disk rather than re-downloading.
     """
-    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    import transformers
 
-    AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
-    Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_NAME, torch_dtype="bfloat16")
+    cls = getattr(transformers, _model_class_name(MODEL_NAME))
+    transformers.AutoProcessor.from_pretrained(MODEL_NAME)
+    cls.from_pretrained(MODEL_NAME, torch_dtype="auto")
 
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("libzbar0")
+    .apt_install("libzbar0", "tesseract-ocr", "tesseract-ocr-eng")
     .pip_install(
-        "transformers>=4.50.0",
+        # ⚖️ 4.57.0 is where Qwen3VLForConditionalGeneration landed (the model
+        # card pins exactly that version) — the floor that makes the DEFAULT
+        # image able to load the DEFAULT model. 2.5-VL checkpoints (the L4+7B
+        # fallback) load fine on it too, so no variant needs a lower floor.
+        "transformers>=4.57.0",
         "qwen-vl-utils>=0.0.10",
         "torch>=2.4.0",
         "torchvision",
         "accelerate>=0.34.0",
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
+        "pytesseract>=0.3.13",
     )
-    .run_function(_download_model)
 )
+
+
+def _image_plan() -> list[tuple[str, object]]:
+    """The variant layers this deploy adds, as data.
+
+    ⬛ AS DATA BECAUSE THE WIRING IS WHAT FAILED A PROBE. A first version
+    tested that the overrides dict was *captured* and inlined the `image.env`
+    call — deleting that call left every test green, which is a guard that
+    cannot fire. The conditional and ordering logic now lives here where a
+    test can red on it; the loop below that consumes it is deliberately too
+    dumb to get wrong.
+
+    Layer order is load-bearing: the env must exist BEFORE the weight bake,
+    or _download_model resolves MODEL_NAME to the default inside the build
+    container and bakes the wrong weights into a variant's image. And with
+    no overrides and no extra pips the plan holds only the bake, so the
+    default image hashes identically to the one the baseline was measured on.
+    """
+    steps: list[tuple[str, object]] = []
+    if _EXTRA_PIPS:
+        steps.append(("pip_install", tuple(_EXTRA_PIPS)))
+    if _ENV_OVERRIDES:
+        steps.append(("env", dict(_ENV_OVERRIDES)))
+    steps.append(("run_function", "_download_model"))
+    return steps
+
+
+for _step, _arg in _image_plan():
+    if _step == "pip_install" and isinstance(_arg, tuple):
+        image = image.pip_install(*_arg)
+    elif _step == "env" and isinstance(_arg, dict):
+        image = image.env(_arg)
+    else:
+        image = image.run_function(_download_model)
 
 app = modal.App(MODAL_APP_NAME)
 
@@ -76,6 +195,16 @@ _CLASSIFY_PROMPT = (
     ' "reasoning": "one sentence explaining your decision"}'
 )
 
+# ⚖️ The classify answer is JSON with a verdict, a confidence, and the one
+# reasoning sentence the prompt itself demands — ~40-70 tokens all in.
+# Generating under a 512-token window billed GPU seconds for headroom the
+# answer never uses. 128 is deliberately generous (about twice the longest honest
+# answer) so the JSON can never be truncated mid-structure — a too-tight cap
+# would flip real books into parse failures, which `_parse_classification`
+# treats as non-answers. ⚠️ Proven harmless by the next slice-gate run, not
+# assumed: per-stratum scores must be identical to the uncapped baseline.
+_CLASSIFY_MAX_TOKENS = 128
+
 _EXTRACT_PROMPT = (
     "You are a book identification assistant with expertise in OCR and cover recognition.\n\n"
     "Extract all books visible or mentioned in this image. For EACH book:\n"
@@ -98,6 +227,30 @@ _EXTRACT_PROMPT = (
     "the same name. Authors should be people, not production companies "
     '(e.g. "Discovery Communications", "Warner Bros.", "Productions, Inc.") '
     "— if the only plausible author is an organisation/brand, return books:[].\n\n"
+    # ⚠️ THE ISBN IS DELIBERATELY NOT ASKED FOR HERE, AND THAT WAS MEASURED.
+    #
+    # Measurement showed the VLM returning `is_book=true, isbns=[]` on 6 of 6
+    # hostile-barcode photographs — it had never been asked. Adding an
+    # instruction to read the printed digits, plus a hard prohibition on
+    # inferring them, was tried on 2026-11-13 and reverted the same day:
+    #
+    #   * `clear_cover` collapsed from 20/22 to 2/22. The model stopped
+    #     returning titles AT ALL — `[]` where it had read "A Cageful of
+    #     Butterflies" and "DREAMING THE KAROO" correctly. The caution
+    #     generalised from the ISBN field to the whole response.
+    #   * `hostile_barcode` moved only 3/20 to 4/20, and the template's own
+    #     example ISBN was copied verbatim onto 10 of 16 unrelated books.
+    #
+    # ⛔ A PROMPT IS GLOBAL STATE. The change was measured on the stratum it
+    # was meant to help, which showed a small gain and was structurally blind
+    # to a 91%-to-9% regression elsewhere. Any future attempt must be scored
+    # on the WHOLE corpus before it is believed.
+    #
+    # ⚖️ The two seam guards that change bought are kept, because they are
+    # right whatever produces an ISBN: `Moderation` validates the check digit
+    # before trusting a model-read ISBN, and cross-checks it against the title
+    # the cover reads — a well-formed ISBN for the wrong book defeats both the
+    # checksum and the hard gate, and only disagreement catches it.
     "Reasoning approach:\n"
     "1. Transcribe all readable text verbatim (including fragments), noting any orientation "
     "issues.\n"
@@ -117,6 +270,20 @@ _EXTRACT_PROMPT = (
     "}]}\n"
     'If no books can be identified: {"books": []}'
 )
+
+
+def _classification_is_book(classify_parsed: dict[str, Any]) -> bool:
+    """Whether the classify output means "extract this one".
+
+    ⛔ THE BUNNY-SCREENSHOT GUARD, now sidecar-side. `analyze` extracts ONLY
+    when this is true, so a non-book (a screenshot, a bare barcode photo) never
+    reaches the extract prompt — the regression that once surfaced BOOK with no
+    books. Kept as a pure module function, NOT inlined in the @app.cls method,
+    precisely so it is unit-testable: the Modal-wrapped class method is not.
+    `"book"` is the single raw value `main.py._ML_TO_CLASSIFICATION` maps to a
+    book; this must agree with that mapping, which a test pins.
+    """
+    return str(classify_parsed.get("classification", "")).strip().lower() == "book"
 
 
 def _build_extract_prompt(excluded_books: list[str] | None) -> str:
@@ -145,31 +312,81 @@ def _build_extract_prompt(excluded_books: list[str] | None) -> str:
     return _EXTRACT_PROMPT + constraint
 
 
+def container_dispatch(inferences_since_load: int, container_id: str) -> dict[str, object]:
+    """The `_container` reading a dispatch is built from — extracted so it is testable.
+
+    ⛔ THIS LIVED INSIDE THE @app.cls-DECORATED METHOD AND THEREFORE HAD NO TEST
+    THAT COULD FAIL. `VisionModel` is wrapped by Modal into a `Cls` object, not
+    a plain type, so a test cannot instantiate it; every sidecar test mocks
+    `classify`/`extract` wholesale and receives `_container` ready-made. A probe
+    that hard-coded `cold = False` left the suite at 119 passed — the reading
+    the entire idle-GPU cost is derived from was unguarded.
+
+    ⚖️ A module-level function rather than a method, because the rule is
+    arithmetic about container lifetime and needs none of the model: cold means
+    this container has not yet ANSWERED, so the caller increments only after a
+    successful inference. Read-then-increment at the top of `_infer` let a
+    raised first inference consume the cold start, under-counting billed
+    lifetimes in the direction that flatters the GPU.
+    """
+    return {"cold": inferences_since_load == 0, "container_id": container_id}
+
+
+# ⚖️ GPU MEMORY SNAPSHOT, GATED BEHIND A KNOB (U2). Modal's snapshot feature
+# restores CUDA/import state instead of re-running it, targeting the ~15s
+# warm-up layer that dominates this cold start (NOT the ~4s weight load). ⚠️
+# UNCONFIRMED ON TURING/T4 by any source — every Modal benchmark is
+# A10G/H100/A100 — so this is a TEST, off by default. VISION_GPU_SNAPSHOT=1
+# enables it and flips `@modal.enter` to run under the snapshot (snap=True).
+_SNAPSHOT = bool(os.environ.get("VISION_GPU_SNAPSHOT"))
+_cls_kwargs: dict[str, Any] = {}
+if _SNAPSHOT:
+    _cls_kwargs["enable_memory_snapshot"] = True
+    _cls_kwargs["experimental_options"] = {"enable_gpu_snapshot": True}
+
+
 @app.cls(
-    gpu="A10G",
+    gpu=VISION_GPU,
     image=image,
     max_containers=10,
     timeout=300,
-    # 300s, cut from 1200s against a measured gap rather than a guess.
+    **_cls_kwargs,
+    # ⛔ 60s, CUT FROM 300s AGAINST A MEASURED COST DECOMPOSITION. This is how
+    # long an idle A10G keeps billing after its last request, and measurement
+    # put it at **98.1% of what a lone identification costs**: 9.18c of idle
+    # against 0.198c of inference. Halving the model's speed would save 1% of
+    # that bill; this literal saves 73%.
     #
-    # This is how long an idle A10G keeps billing after the last request, so the
-    # question is whether anything actually needs a container warm for longer.
-    # Two things drive this GPU and both are far tighter than 300s:
+    # ⚖️ WHAT THE WINDOW IS ACTUALLY PROTECTING, now that it has been measured.
+    # Not a batch: the `vision` Oban queue runs at concurrency 20 against
+    # `max_containers=10` below, deliberately, so uploads in one session arrive
+    # back-to-back and the gap between them is effectively zero. The window
+    # only ever rescues a reader who uploads, leaves, and RETURNS — and a
+    # simulated month at 12 uploads/day puts the cold-start rate at 95% with a
+    # 300s window and 99% with 60s. Four points of rescue, for four times the
+    # idle bill.
     #
-    #   * a real upload batch — the `vision` Oban queue runs at concurrency 20
-    #     against max_containers=10, so a batch arrives back-to-back and the gap
-    #     between requests is effectively zero;
-    #   * the production probe — `scripts/probe-production.sh` fires every 15s
-    #     for a 600s window.
+    # ⚠️ The latency cost is therefore near zero where the product actually
+    # sits today, and real only above ~10 uploads/hour, where p50 drops from
+    # 30s to 9.7s because containers stay warm between readers. At that traffic
+    # the A10G is already several times over the $50/month budget on ANY
+    # window, so the window is not the knob that gets there — a cheaper GPU is,
+    # and the two compound.
     #
-    # 300s is twenty times the larger of those. What it does cost: a reader who
-    # uploads one image, walks away for 5-20 minutes, and comes back now pays one
-    # cold start (15-30s) that the old window would have absorbed. That is the
-    # trade being made, and it is deliberate.
-    scaledown_window=300,
+    # ⬛ Why 60 and not 30: 30s saves a further ~35% but stops spanning a human
+    # cadence. If the queue is drained and a reader is framing books by hand at
+    # ~45s apart, a 30s window leaves 37% of them cold against 22% at 60s. The
+    # queue makes that the uncommon path, not the impossible one.
+    #
+    # The arithmetic is `scripts/characterise/scaledown-frontier.py`, validated
+    # against both measured extremes — 0.378c simulated vs 0.429c measured
+    # back-to-back, and 9.97c vs 9.34c for a lone cold identification.
+    scaledown_window=60,
 )
 class VisionModel:
-    @modal.enter()
+    # snap=True makes the load run DURING snapshot creation when enabled, so the
+    # restored container skips it. `snap` is harmless when snapshots are off.
+    @modal.enter(snap=_SNAPSHOT)
     def load(self) -> None:
         """Load the Qwen2.5-VL processor + model via HF Transformers.
 
@@ -182,19 +399,113 @@ class VisionModel:
         ``_infer``); concurrency is bounded by ``max_containers`` rather
         than continuous batching.
         """
-        import torch
-        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+        import uuid
 
-        self.processor = AutoProcessor.from_pretrained(MODEL_NAME)  # type: ignore[no-untyped-call]
-        self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            MODEL_NAME,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
+        # ⛔ THE GPU'S OWN COLD START, WHICH IS THE ONE THAT COSTS MONEY.
+        #
+        # `@modal.enter` runs once per GPU container, so the first inference
+        # after it is the cold one. The sidecar cannot know this: its FastAPI
+        # `lifespan` tracks a different container whose warmth is, by this
+        # file's own reckoning, independent of the GPU's — and an idle A10G is
+        # roughly two orders of magnitude more expensive per second than an
+        # idle CPU container.
+        #
+        # ⛔ NO TIMESTAMP ANY MORE. This recorded `_loaded_at` so `_infer`
+        # could report a container AGE, and a reviewer showed that age's only
+        # possible consumer would have double-counted a term the inference cost
+        # line already bills — so the field had no reader and is gone, here and
+        # on the wire. What remains is the one fact that is load-bearing: this
+        # container has not inferred yet, so the next inference pays the load.
+        self._inferences_since_load = 0
+
+        # ⛔ AN IDENTITY FOR THE BILLED WINDOW, which the age alone cannot give.
+        #
+        # `gpu_container_age_s` is sampled only when an inference runs, so a
+        # container that wakes, serves one request and then idles out the rest
+        # of its scaledown window reports `age ~ 0` and nothing afterwards —
+        # and the idle seconds are precisely the ones with no request attached.
+        # Summing observed ages therefore UNDER-counts, in the direction that
+        # makes the GPU look cheap, which is the direction that would wrongly
+        # settle the architecture question.
+        #
+        # ⚖️ With an id, a reader can take the MAXIMUM age seen per container
+        # and add the scaledown window — the tail Modal bills after the last
+        # request. That is derivable from what already crosses the wire, needs
+        # no `modal.Dict` and no second channel out of the GPU, and does not
+        # depend on `@modal.exit` firing (a container killed by the platform
+        # may never run it).
+        self._container_id = uuid.uuid4().hex
+
+        import torch
+        import transformers
+
+        # ⚖️ `max_pixels` caps what the vision encoder emits per image, and so
+        # both the latency and the GPU seconds a photograph costs. Left unset it
+        # is the processor's own default, which is what ran before this was a
+        # knob — passing `None` would OVERRIDE that default with nothing, so the
+        # argument is omitted entirely rather than passed as None.
+        proc_kwargs = {}
+        if VISION_MAX_PIXELS:
+            proc_kwargs["max_pixels"] = VISION_MAX_PIXELS
+
+        self.processor = transformers.AutoProcessor.from_pretrained(MODEL_NAME, **proc_kwargs)
+
+        # ⛔ T4 IS TURING AND HAS NO BF16. Loading bf16 weights there either
+        # fails outright or silently upcasts, and a silent upcast would double
+        # the memory of a model that already barely fits 16GB — so the dtype is
+        # part of the experiment, not an invariant. int8 is a different shape
+        # again: it is a quantisation config rather than a dtype, which is why
+        # it branches here rather than being another `torch.<name>` lookup.
+        load_kwargs: dict[str, Any] = {"device_map": "auto"}
+
+        if VISION_DTYPE == "int8":
+            from transformers import BitsAndBytesConfig
+
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            load_kwargs["torch_dtype"] = getattr(torch, VISION_DTYPE)
+
+        model_cls = getattr(transformers, _model_class_name(MODEL_NAME))
+        self.model = model_cls.from_pretrained(MODEL_NAME, **load_kwargs)
+
+        # ⬛ REPORTED, NOT ASSUMED — AND PRINTED, NOT LOGGED. The first version
+        # of this line used `logger.info` with no handler configured in the
+        # container, so it never emitted anywhere: the one observability line
+        # the series depended on was dead on arrival, and the CPU offload was
+        # only discovered because transformers prints its own warning
+        # directly. A measurement line must not depend on logging
+        # configuration to exist.
+        #
+        # ⛔ `devices` is the most load-bearing field. On a 16GB card,
+        # `device_map="auto"` does not fail when the model is too big — it
+        # silently offloads layers to CPU and shuttles weights every forward
+        # pass, which "works" at a latency that breaks every caller timeout.
+        # A result whose devices include `cpu` measures the offload, not the
+        # GPU.
+        if hasattr(self.model, "hf_device_map"):
+            devices = sorted({str(d) for d in self.model.hf_device_map.values()})
+        else:
+            # ⚠️ The Qwen3-VL loader does not set hf_device_map, so the first
+            # T4+4B deploy printed devices=['unknown'] — the no-offload probe
+            # went blind exactly when the ruling's fit claim needed it. The
+            # parameters themselves always know where they live; a CPU entry
+            # in this set IS offload, visible instead of unknowable.
+            try:
+                devices = sorted({str(p.device) for p in self.model.parameters()})
+            except Exception:
+                devices = ["unknown"]
+        print(
+            f"vision model loaded: name={MODEL_NAME} gpu={VISION_GPU} "
+            f"requested_dtype={VISION_DTYPE} "
+            f"actual_dtype={getattr(self.model, 'dtype', 'unknown')} "
+            f"max_pixels={VISION_MAX_PIXELS or 'processor default'} "
+            f"devices={devices}",
+            flush=True,
         )
 
     @modal.method()
     def classify(self, image_b64: str) -> dict[str, Any]:
-        return self._infer(image_b64, _CLASSIFY_PROMPT)
+        return self._infer(image_b64, _CLASSIFY_PROMPT, max_new_tokens=_CLASSIFY_MAX_TOKENS)
 
     @modal.method()
     def extract(
@@ -207,9 +518,74 @@ class VisionModel:
         prompt = _build_extract_prompt(excluded_books)
         return self._infer(images_b64[0], prompt)
 
-    def _infer(self, image_b64: str, prompt: str) -> dict[str, Any]:
+    @modal.method()
+    def analyze(
+        self,
+        image_b64: str,
+        excluded_books: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Classify, then extract ONLY if it is a book — on ONE container, ONE
+        dispatch, one loaded model.
+
+        ⬛ THIS IS R0. The front door used to call `classify` then `extract` as
+        two independent `.remote()` dispatches, which under the vision queue's
+        concurrency could land on DIFFERENT containers — risking a SECOND cold
+        start and a ~52s p95 tail on a cold book. Collapsing them into one
+        method guarantees one container: at most one cold start, and the
+        extract runs on the model the classify just warmed.
+
+        ⚠️ The book-decision duplicates exactly ONE string compare against the
+        single raw value main.py's `_ML_TO_CLASSIFICATION` maps to a book
+        (`"book"`). Kept trivial on purpose: a richer rule on this side could
+        drift from the front door's and extract for a non-book (wasted GPU) or
+        skip a book (missed identification). The front door still re-parses the
+        classification authoritatively from the returned `classify` payload.
+        """
+        classify_parsed = self._infer(
+            image_b64, _CLASSIFY_PROMPT, max_new_tokens=_CLASSIFY_MAX_TOKENS
+        )
+        extract_parsed: dict[str, Any] | None = None
+        if _classification_is_book(classify_parsed):
+            extract_parsed = self._infer(image_b64, _build_extract_prompt(excluded_books))
+        # ⬛ THE CONTAINER NAMES ITS OWN MODEL. The front door used to report its
+        # configured model_name instead, and the two defaults diverged — the
+        # response said 7B while this container ran the 4B, and a recorded
+        # eval baseline inherited the lie. The loader's name is the truth.
+        return {"classify": classify_parsed, "extract": extract_parsed, "model": MODEL_NAME}
+
+    def _infer(self, image_b64: str, prompt: str, max_new_tokens: int = 512) -> dict[str, Any]:
         import torch
         from qwen_vl_utils import process_vision_info
+
+        # ⛔ NO getattr DEFAULTS HERE ANY MORE. These read
+        # `getattr(self, "_loaded_at", 0.0)`, and a reviewer measured what that
+        # fabricates when it fires: `monotonic()`'s epoch is arbitrary, so the
+        # "age" came out as 281,885s — a plausible-looking number in the
+        # OVER-counting direction, against a cost model whose own docs say a
+        # figure above the invoice means the model is wrong.
+        #
+        # ⚖️ `@modal.enter` runs before any input is served, so if these are
+        # missing the container is in a state this code cannot describe. An
+        # AttributeError says so; a default invents a measurement.
+        # ⛔ CAPTURE THE COUNT, DO NOT DECIDE HERE. This line used to be
+        # `gpu_cold = self._inferences_since_load == 0`, and the dispatch below
+        # was then called with `0 if gpu_cold else …` — which made
+        # `container_dispatch` a TAUTOLOGY: its answer was derived from the
+        # predicate it was supposed to encode, so it could never disagree.
+        # Extracting the function had moved the rule, not tested it: hard-coding
+        # this flag left 123 tests green and lint clean, exactly as the
+        # untestable original did. One holder of the rule, not two.
+        #
+        # ⚠️ RESIDUAL, STATED RATHER THAN IMPLIED: what is left here is still
+        # undrivable — VisionModel is wrapped by @app.cls() into a Modal Cls, so
+        # no test can instantiate it. Replacing this line with a literal still
+        # passes 123 tests. The RULE is tested (tests/test_container_cold_counter.py
+        # probes container_dispatch directly and reds 2 when defeated), but a wrong
+        # CAPTURE here would not be caught. Two lines with no branching is a far
+        # smaller unguarded surface than a predicate was; shrinking it further
+        # means making the method drivable via a plain base class the @app.cls
+        # inherits, which is a larger change than this correction.
+        inferences_before = self._inferences_since_load
 
         messages = [
             {
@@ -236,7 +612,7 @@ class VisionModel:
         with torch.no_grad():
             generated_ids = self.model.generate(
                 **inputs,
-                max_new_tokens=512,
+                max_new_tokens=max_new_tokens,
                 do_sample=False,
                 temperature=None,
                 top_p=None,
@@ -246,7 +622,32 @@ class VisionModel:
             out[len(inp) :] for out, inp in zip(generated_ids, inputs.input_ids, strict=False)
         ]
         response = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-        return _parse_json(response)
+        parsed = _parse_json(response)
+
+        # ⚖️ Under a reserved key rather than merged flat, so a model that ever
+        # emits a field called `gpu_cold` cannot overwrite the measurement —
+        # and so a reader can tell the model's answer from the container's
+        # telemetry at a glance.
+        #
+        # ⛔ This is the cold start that costs money. The sidecar's own flag
+        # tracks a CPU container whose warmth is independent of this one's; an
+        # idle A10G is roughly two orders of magnitude more expensive per
+        # second. Without this the expensive cold start was unmeasured.
+        # ⛔ INCREMENTED HERE, AFTER THE INFERENCE SUCCEEDED, NOT BEFORE IT.
+        # Read-then-increment at the top of this method meant a first inference
+        # that RAISED — OOM, a generation error, a decode failure — still moved
+        # the counter to 1, so no dispatch on that container ever reported its
+        # cold start. That under-counts billed container lifetimes, in the same
+        # flattering direction as the defect this measurement was built to
+        # correct.
+        #
+        # ⚖️ Safe to defer: this class serves one input at a time (no
+        # `@modal.concurrent`), which is the same invariant `GpuDispatch.cold`
+        # already relies on to mean "this container's first answer".
+        self._inferences_since_load += 1
+
+        parsed["_container"] = container_dispatch(inferences_before, self._container_id)
+        return parsed
 
 
 def _parse_json(text: str) -> dict[str, Any]:
@@ -276,7 +677,7 @@ _VISION_DIR = Path(__file__).parent
 
 _fastapi_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("libzbar0")
+    .apt_install("libzbar0", "tesseract-ocr", "tesseract-ocr-eng")
     .pip_install(
         "fastapi==0.139.0",
         "starlette==1.3.1",
@@ -288,9 +689,40 @@ _fastapi_image = (
         "modal>=0.73.0",
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
+        "pytesseract>=0.3.13",
+        # ⬛ THE TEXT-EMBEDDING BACKEND RUNS ON THIS CPU FRONT DOOR, not the GPU
+        # class — the writing-assistant corpus is embedded with bge-m3 on the
+        # always-warm container, no GPU wake. `sentence-transformers` pulls
+        # torch + transformers; the weights (~2.3GB) are NOT baked, they are
+        # fetched on the first /embed call and cached for the container's life
+        # (see app/services/text_embed.py — lazy, first-use, off the event
+        # loop), so container start stays fast and a front door that never
+        # embeds never pays for the model.
+        "sentence-transformers==3.3.1",
+        # ⬛ DOCUMENT PARSERS FOR /extract-document, CPU-ONLY, NO TORCH. The
+        # writing-assistant ingests the author's own PDF/ePub/DOCX/Markdown on
+        # this warm front door, parsed to plain text with no GPU wake. Each is a
+        # self-contained parser: `pymupdf` is a ~22MB binary wheel (the lean 1.x
+        # line — the 2.x metapackage drags onnxruntime, which text extraction
+        # never needs), `python-docx` and `ebooklib` pull only `lxml`. They are
+        # imported lazily inside app/services/document_extract.py, so a front
+        # door that never extracts a document never pays to load them.
+        "pymupdf==1.26.7",
+        "python-docx==1.2.0",
+        "ebooklib==0.21",
     )
     .add_local_dir(str(_VISION_DIR / "app"), remote_path="/app/app")
 )
+
+# The front door runs in THIS image, and reads VISION_SINGLE_DISPATCH /
+# VISION_MODEL_NAME through its pydantic Settings — so the deploy-time overrides
+# must be baked into it too, not only the GPU model's image. Without this a
+# deploy-time knob (e.g. VISION_SINGLE_DISPATCH=0) resolved to the config default
+# in the front-door container and the documented fallback was inert. The extra
+# GPU-only keys (VISION_GPU/DTYPE/MAX_PIXELS) are harmless here — the front door
+# does not read them.
+if _ENV_OVERRIDES:
+    _fastapi_image = _fastapi_image.env(dict(_ENV_OVERRIDES))
 
 
 @app.function(

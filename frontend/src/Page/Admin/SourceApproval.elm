@@ -17,11 +17,14 @@ or reject pending sources.
 -}
 
 import Api exposing (AdminSource, AdminSourcesResponse)
+import Effect
 import Html exposing (Html, button, div, h1, p, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, disabled)
 import Html.Events exposing (onClick)
 import Http
+import Json.Decode as Decode
 import Types.RemoteData exposing (RemoteData(..))
+import Util.Label as Label
 import Util.TestId exposing (testId)
 
 
@@ -43,6 +46,7 @@ type alias Model =
 
 type Msg
     = SourcesReceived (Result Http.Error AdminSourcesResponse)
+    | SessionExpiryDetected
     | SetStatusFilter StatusFilter
     | PageChanged Int
     | ApproveClicked String
@@ -56,7 +60,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Maybe String -> ( Model, Cmd Msg )
+init : Maybe Api.Credentials -> ( Model, Cmd Msg )
 init maybeToken =
     let
         model =
@@ -70,16 +74,19 @@ init maybeToken =
     ( model, fetchSources model maybeToken )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         SourcesReceived result ->
             case result of
                 Ok response ->
                     ( { model | sources = Success response }, Cmd.none, NoOut )
 
                 Err err ->
-                    if Api.isUnauthorized err then
+                    if Api.needsAdminElevation err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
@@ -103,7 +110,15 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | actionInProgress = Just sourceId }
-                    , Api.approveSource sourceId token (ApproveCompleted sourceId)
+                    , Effect.perform
+                        (Effect.authed (Api.approveSourceRequest sourceId)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "source" Api.adminSourceDecoder)
+                                    >> ApproveCompleted sourceId
+                            }
+                        )
                     , NoOut
                     )
 
@@ -114,7 +129,15 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | actionInProgress = Just sourceId }
-                    , Api.rejectSource sourceId token (RejectCompleted sourceId)
+                    , Effect.perform
+                        (Effect.authed (Api.rejectSourceRequest sourceId)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse =
+                                Api.resolveJson (Decode.field "source" Api.adminSourceDecoder)
+                                    >> RejectCompleted sourceId
+                            }
+                        )
                     , NoOut
                     )
 
@@ -156,23 +179,29 @@ handleActionResult model sourceId result =
             ( { model | sources = updatedSources, actionInProgress = Nothing, actionError = Nothing }, Cmd.none, NoOut )
 
         Err err ->
-            if Api.isUnauthorized err then
+            if Api.needsAdminElevation err then
                 ( model, Cmd.none, SessionExpired )
 
             else
                 ( { model | actionInProgress = Nothing, actionError = Just "Action failed. Please try again." }, Cmd.none, NoOut )
 
 
-fetchSources : Model -> Maybe String -> Cmd Msg
+fetchSources : Model -> Maybe Api.Credentials -> Cmd Msg
 fetchSources model maybeToken =
     case maybeToken of
         Just token ->
-            Api.getAdminSources
-                { status = statusFilterToString model.statusFilter
-                , page = model.page
-                }
-                token
-                SourcesReceived
+            Effect.perform
+                (Effect.authed
+                    (Api.adminSourcesRequest
+                        { status = statusFilterToString model.statusFilter
+                        , page = model.page
+                        }
+                    )
+                    token
+                    { onExpired = SessionExpiryDetected
+                    , onResponse = Api.resolveJson Api.adminSourcesResponseDecoder >> SourcesReceived
+                    }
+                )
 
         Nothing ->
             Cmd.none
@@ -287,7 +316,7 @@ viewSourceRow actionInProgress source =
         [ td [] [ text source.name ]
         , td [ class "admin__url-cell" ] [ text source.url ]
         , td [] [ text source.sourceType ]
-        , td [] [ text (String.fromFloat source.confidenceScore) ]
+        , td [] [ text (confidenceLabel source.confidenceScore) ]
         , td [] [ viewStatusBadge source.status ]
         , td []
             (if source.status == "pending_review" then
@@ -313,6 +342,20 @@ viewSourceRow actionInProgress source =
         ]
 
 
+{-| A source's confidence as copy: the score when it has one, an em-dash when it
+has never been scored. Without this a null reads as a real 0 and an unscored
+source looks as if discovery rated it worthless.
+-}
+confidenceLabel : Maybe Float -> String
+confidenceLabel score =
+    case score of
+        Just value ->
+            String.fromFloat value
+
+        Nothing ->
+            "—"
+
+
 viewStatusBadge : String -> Html Msg
 viewStatusBadge status =
     let
@@ -324,13 +367,13 @@ viewStatusBadge status =
                 "rejected" ->
                     "status-badge--broken"
 
-                "pending" ->
+                "pending_review" ->
                     "status-badge--degraded"
 
                 _ ->
                     ""
     in
-    span [ class ("status-badge " ++ badgeClass) ] [ text status ]
+    span [ class ("status-badge " ++ badgeClass) ] [ text (Label.humanize status) ]
 
 
 viewPagination : AdminSourcesResponse -> Html Msg

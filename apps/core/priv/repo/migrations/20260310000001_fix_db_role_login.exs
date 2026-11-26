@@ -11,16 +11,36 @@ defmodule Core.Repo.Migrations.FixDbRoleLogin do
   use Ecto.Migration
 
   def up do
-    app_password = System.get_env("STACKS_APP_DB_PASSWORD")
-    dbt_password = System.get_env("STACKS_DBT_DB_PASSWORD")
+    # The passwords travel as bound parameters into transaction-local GUCs, and
+    # the ALTER is assembled server-side with `format(%L)`. An earlier version
+    # interpolated them straight into the SQL string, which a password holding a
+    # quote could break or escape, and left the secret sitting in the statement
+    # text. An empty GUC (the secret is unset) falls back to LOGIN without a
+    # password, exactly as before. Both statements run in this migration's
+    # transaction, so the GUCs set by the first are visible to the second.
+    repo().query!(
+      "SELECT set_config('stacks.mig_app_pw', $1, true), set_config('stacks.mig_dbt_pw', $2, true)",
+      [
+        System.get_env("STACKS_APP_DB_PASSWORD") || "",
+        System.get_env("STACKS_DBT_DB_PASSWORD") || ""
+      ]
+    )
 
-    execute("""
+    repo().query!("""
     DO $$ BEGIN
       IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_app') THEN
-        #{if app_password, do: "ALTER ROLE stacks_app LOGIN PASSWORD '#{app_password}';", else: "ALTER ROLE stacks_app LOGIN;"}
+        IF current_setting('stacks.mig_app_pw') <> '' THEN
+          EXECUTE format('ALTER ROLE stacks_app LOGIN PASSWORD %L', current_setting('stacks.mig_app_pw'));
+        ELSE
+          ALTER ROLE stacks_app LOGIN;
+        END IF;
       END IF;
       IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'stacks_dbt') THEN
-        #{if dbt_password, do: "ALTER ROLE stacks_dbt LOGIN PASSWORD '#{dbt_password}';", else: "ALTER ROLE stacks_dbt LOGIN;"}
+        IF current_setting('stacks.mig_dbt_pw') <> '' THEN
+          EXECUTE format('ALTER ROLE stacks_dbt LOGIN PASSWORD %L', current_setting('stacks.mig_dbt_pw'));
+        ELSE
+          ALTER ROLE stacks_dbt LOGIN;
+        END IF;
         GRANT USAGE ON SCHEMA audit TO stacks_dbt;
         GRANT SELECT ON ALL TABLES IN SCHEMA audit TO stacks_dbt;
       END IF;

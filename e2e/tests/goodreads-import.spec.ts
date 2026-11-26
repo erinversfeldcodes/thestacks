@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import * as path from "path";
 import { mintSession, injectSession, uniqueEmail, type MintedSession } from "./helpers";

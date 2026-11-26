@@ -10,10 +10,12 @@ module Page.Blog.Editor exposing
 
 import Api
 import Components.SaveButton as SaveButton
-import Html exposing (Html, div, h1, label, option, p, select, text, textarea)
-import Html.Attributes exposing (class, placeholder, rows, selected, value)
+import Effect
+import Html exposing (Html, a, div, h1, label, option, p, select, text, textarea)
+import Html.Attributes exposing (class, href, placeholder, rows, selected, value)
 import Html.Events exposing (onInput)
 import Http
+import Json.Decode as Decode
 import Types.BlogPost exposing (BlogPost, Visibility(..), visibilityToString)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -31,17 +33,23 @@ type alias Model =
     , saving : RemoteData Http.Error ()
     , publishing : RemoteData Http.Error ()
     , loading : RemoteData Http.Error ()
+
+    -- Set to `Just postId` on a successful publish so the view can offer a
+    -- "View post" link to /blog/:id. Kept separate from `publishing` (which
+    -- stays `()`) so the SaveButton's state type is untouched.
+    , publishedId : Maybe String
     }
 
 
 type Msg
     = SetTitle String
+    | SessionExpiryDetected
     | SetBody String
     | SetVisibility String
     | SaveDraft
     | Publish
     | SaveCompleted (Result Http.Error String)
-    | PublishCompleted (Result Http.Error ())
+    | PublishCompleted String (Result Http.Error ())
     | PostLoaded (Result Http.Error BlogPost)
 
 
@@ -50,7 +58,7 @@ type OutMsg
     | SessionExpired
 
 
-init : Mode -> Maybe String -> ( Model, Cmd Msg )
+init : Mode -> Maybe Api.Credentials -> ( Model, Cmd Msg )
 init mode maybeToken =
     let
         baseModel =
@@ -61,12 +69,21 @@ init mode maybeToken =
             , saving = NotAsked
             , publishing = NotAsked
             , loading = NotAsked
+            , publishedId = Nothing
             }
 
         cmd =
             case mode of
                 Edit postId ->
-                    Api.getBlogPost postId maybeToken PostLoaded
+                    Effect.perform
+                        (Effect.public (Api.blogPostRequest postId)
+                            maybeToken
+                            Nothing
+                            (Api.resolveJson
+                                (Decode.field "post" Types.BlogPost.blogPostDecoder)
+                                >> PostLoaded
+                            )
+                        )
 
                 New ->
                     Cmd.none
@@ -81,9 +98,12 @@ init mode maybeToken =
     )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         SetTitle val ->
             ( { model | title = val, saving = NotAsked }, Cmd.none, NoOut )
 
@@ -121,10 +141,28 @@ update msg model maybeToken =
                         cmd =
                             case model.mode of
                                 New ->
-                                    Api.createBlogPost postData token SaveCompleted
+                                    Effect.perform
+                                        (Effect.authed (Api.createBlogPostRequest postData)
+                                            token
+                                            { onExpired = SessionExpiryDetected
+                                            , onResponse =
+                                                Api.resolveJson
+                                                    (Decode.at [ "post", "id" ] Decode.string)
+                                                    >> SaveCompleted
+                                            }
+                                        )
 
                                 Edit postId ->
-                                    Api.updateBlogPost postId postData token SaveCompleted
+                                    Effect.perform
+                                        (Effect.authed (Api.updateBlogPostRequest postId postData)
+                                            token
+                                            { onExpired = SessionExpiryDetected
+                                            , onResponse =
+                                                Api.resolveJson
+                                                    (Decode.at [ "post", "id" ] Decode.string)
+                                                    >> SaveCompleted
+                                            }
+                                        )
                     in
                     ( { model | saving = Loading }, cmd, NoOut )
 
@@ -144,13 +182,29 @@ update msg model maybeToken =
                     case model.mode of
                         Edit postId ->
                             ( { model | publishing = Loading, saving = Loading }
-                            , Api.updateBlogPost postId postData token SaveCompleted
+                            , Effect.perform
+                                (Effect.authed (Api.updateBlogPostRequest postId postData)
+                                    token
+                                    { onExpired = SessionExpiryDetected
+                                    , onResponse =
+                                        Api.resolveJson (Decode.at [ "post", "id" ] Decode.string)
+                                            >> SaveCompleted
+                                    }
+                                )
                             , NoOut
                             )
 
                         New ->
                             ( { model | publishing = Loading, saving = Loading }
-                            , Api.createBlogPost postData token SaveCompleted
+                            , Effect.perform
+                                (Effect.authed (Api.createBlogPostRequest postData)
+                                    token
+                                    { onExpired = SessionExpiryDetected
+                                    , onResponse =
+                                        Api.resolveJson (Decode.at [ "post", "id" ] Decode.string)
+                                            >> SaveCompleted
+                                    }
+                                )
                             , NoOut
                             )
 
@@ -181,7 +235,14 @@ update msg model maybeToken =
                             if model.publishing == Loading then
                                 case maybeToken of
                                     Just token ->
-                                        Api.publishBlogPost postId token PublishCompleted
+                                        Effect.perform
+                                            (Effect.authed (Api.publishBlogPostRequest postId)
+                                                token
+                                                { onExpired = SessionExpiryDetected
+                                                , onResponse =
+                                                    Api.resolveWhatever >> PublishCompleted postId
+                                                }
+                                            )
 
                                     Nothing ->
                                         Cmd.none
@@ -195,23 +256,41 @@ update msg model maybeToken =
                     )
 
                 Err err ->
+                    let
+                        -- ⛔ SETTLED BEFORE the error is classified. The 401 arm
+                        -- used to return `model` untouched, leaving `saving` on
+                        -- `Loading` — a disabled Save with no response ever
+                        -- coming — and `SessionExpired` does not guarantee the
+                        -- reader leaves this page: the deferred expiry net adopts
+                        -- a token another tab refreshed and cancels the logout.
+                        settled =
+                            { model | saving = Failure err, publishing = NotAsked }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( settled, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | saving = Failure err, publishing = NotAsked }, Cmd.none, NoOut )
+                        ( settled, Cmd.none, NoOut )
 
-        PublishCompleted result ->
+        PublishCompleted postId result ->
             case result of
                 Ok _ ->
-                    ( { model | publishing = Success () }, Cmd.none, NoOut )
+                    ( { model | publishing = Success (), publishedId = Just postId }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err err ->
+                    let
+                        -- Settled before classification, as above.
+                        settled =
+                            { model | publishing = Failure err }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( settled, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | publishing = Failure err }, Cmd.none, NoOut )
+                        ( settled, Cmd.none, NoOut )
 
         PostLoaded result ->
             case result of
@@ -227,11 +306,18 @@ update msg model maybeToken =
                     )
 
                 Err err ->
+                    let
+                        -- Settled before classification, as above. On this arm
+                        -- the stuck state is a spinner rather than a disabled
+                        -- button, which is quieter and no more correct.
+                        settled =
+                            { model | loading = Failure err }
+                    in
                     if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
+                        ( settled, Cmd.none, SessionExpired )
 
                     else
-                        ( { model | loading = Failure err }, Cmd.none, NoOut )
+                        ( settled, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg
@@ -348,5 +434,16 @@ viewFeedback model =
                 p [ class "error" ] [ text "Could not publish post. Please try again." ]
 
             _ ->
+                text ""
+
+        -- After a successful publish, offer a way to the published post. Before
+        -- this the editor showed "Published!" and left the reader stranded on
+        -- /blog/new with no route to what they just published.
+        , case model.publishedId of
+            Just postId ->
+                p [ class "blog-editor__published" ]
+                    [ a [ href ("/blog/" ++ postId) ] [ text "View post" ] ]
+
+            Nothing ->
                 text ""
         ]

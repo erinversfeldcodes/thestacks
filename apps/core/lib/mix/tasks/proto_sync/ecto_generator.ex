@@ -33,15 +33,19 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
       - `associations: [{:has_many, name, module, opts}]` in table entry for has_many
       - Standard field generation with type mapping and defaults
   """
+
+  alias Mix.Tasks.ProtoSync.FieldOverrides
+
   def generate(table, fields) do
     overrides = Map.get(table, :field_overrides, %{})
     module_name = inspect(table.ecto_module)
-    ts_fields = timestamp_field_names(table)
+    ts_fields = FieldOverrides.timestamp_field_names(table)
 
     {belongs_to_lines, field_lines} =
       fields
       |> Enum.reject(fn field ->
-        field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
+        field.name == "id" or field.name in ts_fields or
+          FieldOverrides.api_only?(field, overrides)
       end)
       |> Enum.reduce({[], []}, fn field, {bt_acc, f_acc} ->
         field_name = String.to_atom(field.name)
@@ -83,7 +87,7 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
         @primary_key {:id, :binary_id, autogenerate: true}
         @foreign_key_type :binary_id
         @schema_prefix "#{table.schema_prefix}"
-        @type t :: %__MODULE__{}#{derive_jason_line(table)}
+        @type t :: %__MODULE__{}#{derive_jason_line(table)}#{derive_inspect_line(table)}
 
         schema "#{table.table_name}" do
       #{schema_body}#{timestamps_line}#{virtual_lines}
@@ -162,18 +166,25 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
 
   defp timestamps_block(_), do: ""
 
-  defp api_only_field?(field, overrides) do
-    field_name = String.to_atom(field.name)
-    override = Map.get(overrides, field_name, %{})
-    Map.get(override, :api_only, false)
-  end
-
   defp derive_jason_line(%{derive_jason: fields}) when is_list(fields) do
     field_list = Enum.map_join(fields, ", ", &":#{&1}")
     "\n  @derive {Jason.Encoder, only: [#{field_list}]}"
   end
 
   defp derive_jason_line(_), do: ""
+
+  # Redacts sensitive fields from `inspect/2` on the struct, via `@derive` so the
+  # consolidated Inspect protocol carries it reliably (a standalone `defimpl`
+  # does not re-consolidate in an incremental build). The listed fields are shown
+  # as omitted, never with their value — closing the path by which a `%User{}`
+  # argument dumped a password hash and email into a log and `oban_jobs.errors`.
+  defp derive_inspect_line(%{derive_inspect_except: fields})
+       when is_list(fields) and fields != [] do
+    field_list = Enum.map_join(fields, ", ", &":#{&1}")
+    "\n  @derive {Inspect, except: [#{field_list}]}"
+  end
+
+  defp derive_inspect_line(_), do: ""
 
   defp virtual_fields_block(table) do
     virtuals = Map.get(table, :virtual_fields, [])
@@ -191,9 +202,4 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
         "\n#{lines}"
     end
   end
-
-  defp timestamp_field_names(%{timestamps: :standard}), do: ~w(created_at updated_at)
-  defp timestamp_field_names(%{timestamps: {:standard, updated_at: false}}), do: ~w(created_at)
-  defp timestamp_field_names(%{timestamps: false}), do: []
-  defp timestamp_field_names(_), do: ~w(created_at updated_at)
 end

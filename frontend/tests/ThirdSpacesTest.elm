@@ -11,6 +11,7 @@ import Expect
 import Http
 import Page.ThirdSpaces as ThirdSpaces exposing (Msg(..), ThirdSpace, ThirdSpaceEvent)
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -53,7 +54,7 @@ thirdSpacesInit : ThirdSpaces.Model
 thirdSpacesInit =
     let
         ( m, _ ) =
-            ThirdSpaces.init (Just "test-token")
+            ThirdSpaces.init (Just (TestHelpers.creds "test-token"))
     in
     m
 

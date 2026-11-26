@@ -9,6 +9,7 @@ module Page.Settings.Password exposing
 
 import Api
 import Components.SaveButton as SaveButton
+import Effect exposing (Effect)
 import Html exposing (Html, div, h1, h2, input, label, p, text)
 import Html.Attributes exposing (class, placeholder, type_, value)
 import Html.Events exposing (onInput)
@@ -76,52 +77,62 @@ validate model =
         Nothing
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
+    let
+        ( newModel, effect, out ) =
+            updateWithEffect msg model maybeToken
+    in
+    ( newModel, Effect.perform effect, out )
+
+
+updateWithEffect : Msg -> Model -> Maybe Api.Credentials -> ( Model, Effect Msg, OutMsg )
+updateWithEffect msg model maybeToken =
     case msg of
         SetCurrentPassword val ->
-            ( { model | currentPassword = val, saving = NotAsked }, Cmd.none, NoOut )
+            ( { model | currentPassword = val, saving = NotAsked }, Effect.None, NoOut )
 
         SetNewPassword val ->
-            ( { model | newPassword = val, saving = NotAsked }, Cmd.none, NoOut )
+            ( { model | newPassword = val, saving = NotAsked }, Effect.None, NoOut )
 
         SetConfirmPassword val ->
-            ( { model | confirmPassword = val, saving = NotAsked }, Cmd.none, NoOut )
+            ( { model | confirmPassword = val, saving = NotAsked }, Effect.None, NoOut )
 
         SavePassword ->
             case validate model of
                 Just _ ->
-                    ( model, Cmd.none, NoOut )
+                    ( model, Effect.None, NoOut )
 
                 Nothing ->
                     case maybeToken of
                         Just token ->
                             ( { model | saving = Loading }
-                            , Api.updatePassword
-                                { currentPassword = model.currentPassword
-                                , newPassword = model.newPassword
-                                }
-                                (Api.authed token
-                                    { onExpired = SessionExpiryDetected
-                                    , onResult = SaveCompleted
+                            , Effect.authed
+                                (Api.updatePasswordRequest
+                                    { currentPassword = model.currentPassword
+                                    , newPassword = model.newPassword
                                     }
                                 )
+                                token
+                                { onExpired = SessionExpiryDetected
+                                , onResponse = Api.resolveWhatever >> SaveCompleted
+                                }
                             , NoOut
                             )
 
                         Nothing ->
-                            ( model, Cmd.none, NoOut )
+                            ( model, Effect.None, NoOut )
 
         SaveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { init | saving = Success () }, Cmd.none, NoOut )
+                    ( { init | saving = Success () }, Effect.None, NoOut )
 
                 Err err ->
-                    ( { model | saving = Failure err }, Cmd.none, NoOut )
+                    ( { model | saving = Failure err }, Effect.None, NoOut )
 
         SessionExpiryDetected ->
-            ( model, Cmd.none, SessionExpired )
+            ( model, Effect.None, SessionExpired )
 
 
 view : Model -> Html Msg

@@ -9,7 +9,13 @@ if ! command -v buf &>/dev/null; then
     exit 1
 fi
 
-if ! find "$REPO_ROOT/proto" -name "*.proto" -print -quit 2>/dev/null | grep -q .; then
+# `find … -quit | grep -q .` is safe only because `-quit` makes find exit after
+# the first path, so it is never still writing when grep leaves. That is a
+# property of the flags rather than of the form, and the next edit to this line
+# will not know it — so capture instead, and the safety stops depending on a
+# reader noticing `-quit`.
+_first_proto="$(find "$REPO_ROOT/proto" -name "*.proto" -print -quit 2>/dev/null || true)"
+if [[ -z "$_first_proto" ]]; then
     echo "No .proto files found in proto/ — skipping."
     exit 0
 fi
@@ -19,11 +25,61 @@ fi
 if [[ "${BUF_BREAKING_SKIP:-}" == "1" ]]; then
     echo "BUF_BREAKING_SKIP=1 — skipping buf breaking check (intentional migration)."
 elif git rev-parse --verify origin/main &>/dev/null 2>&1; then
-    if git ls-tree -r origin/main --name-only 2>/dev/null | grep -q '\.proto$'; then
-        (cd "$REPO_ROOT/proto" && buf breaking --against '../.git#branch=origin/main,subdir=proto')
+    # Captured first: `git ls-tree | grep -q` returns 141 under `pipefail` once
+    # the tree listing is bigger than the pipe buffer and a .proto path matches
+    # before git finishes writing. That would take the else branch and SKIP
+    # `buf breaking` — losing contract protection without saying so.
+    _main_tree="$(git ls-tree -r origin/main --name-only 2>/dev/null || true)"
+    if grep -q '\.proto$' <<< "${_main_tree}"; then
+        # ⛔ GIT_LFS_SKIP_SMUDGE=1 BECAUSE THIS CLONE PULLS FILES buf NEVER
+        # READS. `--against '../.git#...'` makes buf clone the local repository
+        # and check out `origin/main`, and that checkout runs the LFS smudge
+        # filter over everything `.gitattributes` tracks — `concepts/**/*.png`
+        # and `frontend/public/textures/*.png`. CI checks out with `lfs: false`,
+        # so those paths are pointer files with no objects behind them, the
+        # smudge filter fails, and the clone dies with
+        # "external filter 'git-lfs filter-process' failed" — taking the whole
+        # contract check with it for want of an image.
+        #
+        # ⚖️ Skipping the smudge is correct rather than a workaround: buf reads
+        # `subdir=proto`, and no `.proto` is LFS-tracked. The pointer files are
+        # exactly as useful to it as the images would be. The alternative —
+        # `lfs: true` on checkout — would download megabytes of textures on
+        # every proto lint to satisfy a filter whose output is discarded.
+        #
+        # ⚠️ Scoped to this command, not exported: a repo-wide skip would make
+        # a genuinely missing LFS object look like a successful checkout
+        # somewhere it matters.
+        (cd "$REPO_ROOT/proto" && GIT_LFS_SKIP_SMUDGE=1 buf breaking --against '../.git#branch=origin/main,subdir=proto')
     else
         echo "No .proto files on origin/main — skipping buf breaking check."
     fi
+
+    # A suppression that suppresses nothing is a standing allowance for its
+    # whole file. Run straight after the check it polices, so the two cannot
+    # drift apart.
+    bash "$REPO_ROOT/scripts/check-breaking-suppressions-are-spent.sh"
+else
+    # ⛔ THIS BRANCH USED NOT TO EXIST, and its absence meant `buf breaking` had
+    # NEVER RUN IN CI.
+    #
+    # The `lint-proto` job checks out with the default `fetch-depth`, so it gets
+    # a shallow clone with no `origin/main` ref. `git rev-parse --verify
+    # origin/main` then fails, the `elif` is false, and with no `else` the whole
+    # construct fell through in silence — no check, no skip notice, lane green.
+    # This repo's own Elixir lane states the rule being broken: "Nothing in here
+    # may print SKIP. A gate that cannot run is a failure."
+    #
+    # Failing loudly rather than skipping, because the alternative is what was
+    # already happening.
+    echo "FAIL lint-proto: origin/main is not available, so buf breaking cannot run." >&2
+    echo "       The contract gate compares against the default branch; without that ref" >&2
+    echo "       there is nothing to compare and NOTHING WAS CHECKED." >&2
+    echo "" >&2
+    echo "       In CI: give the job 'fetch-depth: 0', or fetch the branch explicitly." >&2
+    echo "       Locally: git fetch origin main" >&2
+    echo "       Deliberately migrating the contract? BUF_BREAKING_SKIP=1 says so out loud." >&2
+    exit 1
 fi
 
 python3 "$REPO_ROOT/scripts/check-enum-coverage.py"

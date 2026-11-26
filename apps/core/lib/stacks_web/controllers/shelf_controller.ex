@@ -39,7 +39,7 @@ defmodule StacksWeb.ShelfController do
 
       case bookshelf do
         nil ->
-          conn |> put_status(404) |> json(%{error: "bookshelf not found"})
+          conn |> put_status(404) |> json(%{error: "bookshelf_not_found"})
 
         bs ->
           do_create_shelf(conn, bs.id, user.id)
@@ -58,7 +58,7 @@ defmodule StacksWeb.ShelfController do
         json(conn, %{ok: true})
 
       {:error, :not_found} ->
-        conn |> put_status(404) |> json(%{error: "not found"})
+        conn |> put_status(404) |> json(%{error: "not_found"})
 
       {:error, :unauthorized} ->
         conn |> put_status(403) |> json(%{error: "forbidden"})
@@ -77,7 +77,7 @@ defmodule StacksWeb.ShelfController do
 
       case bookshelf do
         nil ->
-          conn |> put_status(404) |> json(%{error: "bookshelf not found"})
+          conn |> put_status(404) |> json(%{error: "bookshelf_not_found"})
 
         bs ->
           do_reorder_shelves(conn, bs.id, user.id, shelf_ids)

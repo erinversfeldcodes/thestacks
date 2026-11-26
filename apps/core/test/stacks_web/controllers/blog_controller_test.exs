@@ -6,6 +6,8 @@ defmodule StacksWeb.BlogControllerTest do
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Blog
+  alias Stacks.Blog.Syndication
 
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
@@ -160,6 +162,58 @@ defmodule StacksWeb.BlogControllerTest do
 
       assert %{"posts" => posts} = json_response(conn, 200)
       refute own_draft.id in Enum.map(posts, & &1["id"])
+    end
+
+    test "the discovery feed hands back a cursor that reaches the next page", %{conn: conn} do
+      # The HTTP half of the paging fix: `next_cursor` out, `?after=` back in.
+      # The context tests cover the keyset itself; this one is about the wire,
+      # because a cursor the endpoint never emits is a cursor no client can use.
+      author = insert(:user, profile_visibility: "public")
+      at = DateTime.utc_now()
+
+      # One more than the endpoint's window, so there is a second page to reach.
+      for n <- 1..51 do
+        insert(:post,
+          user: author,
+          visibility: "public",
+          published_at: DateTime.add(at, -n, :second)
+        )
+      end
+
+      conn = get(conn, "/api/blog/posts")
+      assert %{"posts" => first, "next_cursor" => cursor} = json_response(conn, 200)
+      assert length(first) == 50
+      assert is_binary(cursor)
+
+      second_conn = get(CoreWeb.ConnCase.proven_conn(), "/api/blog/posts", %{after: cursor})
+      assert %{"posts" => second, "next_cursor" => nil} = json_response(second_conn, 200)
+      assert length(second) == 1
+
+      first_ids = Enum.map(first, & &1["id"])
+
+      refute Enum.any?(second, &(&1["id"] in first_ids)),
+             "the second page repeated a post from the first"
+    end
+
+    test "the single-author archive carries no cursor, because it does not page", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      insert(:post, user: author, visibility: "public", published_at: DateTime.utc_now())
+
+      conn = get(conn, "/api/blog/posts", %{user_id: author.id})
+
+      # Absent, not null: the author branch has no window and no tail, so a
+      # cursor field there would invite a client to page something that does not.
+      assert %{"posts" => [_]} = body = json_response(conn, 200)
+      refute Map.has_key?(body, "next_cursor")
+    end
+
+    test "a malformed cursor is a 400, not the first page again", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      insert(:post, user: author, visibility: "public", published_at: DateTime.utc_now())
+
+      conn = get(conn, "/api/blog/posts", %{after: "obviously-not-a-cursor"})
+
+      assert %{"error" => _} = json_response(conn, 400)
     end
   end
 
@@ -475,6 +529,278 @@ defmodule StacksWeb.BlogControllerTest do
         |> put("/api/blog/posts/#{blog_post.id}/associations/#{Ecto.UUID.generate()}/dismiss")
 
       assert json_response(conn, 404)
+    end
+  end
+
+  describe "GET /api/blog/posts/:id/syndications" do
+    # The read half of POSSE. `Syndication.list_syndications/1` shipped with a @spec
+    # and zero callers, so a recorded backlink survived in the database and could
+    # never be shown again: the panel forgot it on reload, and the field for entering
+    # one disappeared with it. These tests exist so the route cannot go missing again.
+    defp published(user) do
+      insert(:post, user: user, visibility: "public", published_at: DateTime.utc_now())
+    end
+
+    test "returns what has been syndicated, oldest first", %{conn: conn} do
+      user = insert(:user)
+      blog_post = published(user)
+
+      {:ok, first} = Syndication.record(blog_post, "export")
+      {:ok, _} = Syndication.set_syndicated_url(first, "https://example.test/post")
+      {:ok, _second} = Syndication.record(blog_post, "rss")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{blog_post.id}/syndications")
+
+      assert %{"syndications" => [one, two]} = json_response(conn, 200)
+      assert one["method"] == "export"
+      assert one["syndicated_url"] == "https://example.test/post"
+      assert two["method"] == "rss"
+    end
+
+    test "returns an empty list for a post never syndicated", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{published(user).id}/syndications")
+
+      assert %{"syndications" => []} = json_response(conn, 200)
+    end
+
+    test "refuses another writer's post", %{conn: conn} do
+      owner = insert(:user)
+      other = insert(:user)
+      blog_post = published(owner)
+
+      conn =
+        conn
+        |> auth_conn(other)
+        |> get("/api/blog/posts/#{blog_post.id}/syndications")
+
+      # 403 rather than 404, which is what `check_ownership/2` returns for every
+      # sibling syndication endpoint. It confirms the post exists to someone who may
+      # not read it; the campaign's contract review has a separate open finding about
+      # the 404-not-403 property, so this route stays consistent with its siblings
+      # rather than diverging on its own.
+      assert %{"error" => "forbidden"} = json_response(conn, 403)
+    end
+  end
+
+  describe "the association outcome on GET /api/blog/posts/:id" do
+    # ⛔ THE AUTHOR WAS NEVER TOLD. Every terminal path in the association
+    # worker counts itself under telemetry, which reaches a dashboard and
+    # reaches the author not at all — so a post whose pass failed was
+    # indistinguishable from one that was never tried.
+    test "the owner is told how the last finished pass ended", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+
+      insert(:llm_call_log, post_id: post.id, outcome: "llm_error")
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert body["association_outcome"] == "llm_error"
+    end
+
+    # ⚠️ THE LATEST ROW, because the worker is retryable: an earlier failure
+    # followed by a successful retry must not keep reporting the failure.
+    test "a successful retry supersedes the earlier failure", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+
+      insert(:llm_call_log, post_id: post.id, outcome: "llm_error")
+      insert(:llm_call_log, post_id: post.id, outcome: "associated")
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert body["association_outcome"] == "associated",
+             "the stale failure is still being reported — the worker is retryable, " <>
+               "so the author would be told about an error that has since succeeded"
+    end
+
+    # ⛔ SCOPED TO THIS POST, AND NOTHING PINNED THAT. A probe making
+    # `latest_association_outcome/1` ignore its `post_id` left 114 tests green,
+    # because every test inserted rows for exactly one post. In production
+    # `op.llm_call_log` holds every author's rows, so the unscoped version shows
+    # author A the outcome of author B's pass — the precise disclosure the
+    # owner-only gate exists to prevent, reached by a different route.
+    test "another post's outcome is not reported as this one's", %{conn: conn} do
+      user = insert(:user)
+      mine = insert(:post, user: user)
+      theirs = insert(:post, user: insert(:user))
+
+      insert(:llm_call_log, post_id: mine.id, outcome: "no_books_found")
+
+      # Newer, so an unscoped `order_by desc … limit 1` would return THIS one.
+      insert(:llm_call_log, post_id: theirs.id, outcome: "llm_error")
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{mine.id}")
+        |> json_response(200)
+
+      assert body["association_outcome"] == "no_books_found",
+             "the response carried another post's outcome — in production that is " <>
+               "another author's"
+    end
+
+    # ⚖️ ABSENT, not "no_books_found". A post nobody has scanned and a scan that
+    # found nothing are different facts, and reporting the second when the first
+    # is true tells the author something false about their own post.
+    test "a post with no finished pass carries no outcome", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      # ⛔ THE KEY IS ABSENT, asserted exactly — not `in [nil, ""]`.
+      #
+      # The hedge was defensible while this was a proto3 `string`, where `""`
+      # was the genuine zero value. Now that it is an `enum`, **`""` is
+      # contract-invalid** — it is not one of the six declared values — and so
+      # is `null`. A hedge that accepts three shapes cannot tell which one the
+      # server sends, which is how `null` shipped while the contract promised
+      # UNSPECIFIED.
+      refute Map.has_key?(body, "association_outcome"),
+             "an owner whose post has no finished pass must get NO key — `null` is not " <>
+               "one of the enum's six values, and it decoded only because the client's " <>
+               "`oneOf` swallowed a decode failure"
+    end
+
+    # ⛔ NOT TOLD TO ANYONE ELSE. A reader has no use for "we could not link
+    # books to this post", and it would disclose that the author ran the
+    # assistant at all.
+    test "a reader who is not the author is not told", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      reader = insert(:user)
+
+      post =
+        insert(:post,
+          user: author,
+          visibility: "public",
+          published_at: DateTime.utc_now()
+        )
+
+      insert(:llm_call_log, post_id: post.id, outcome: "llm_error")
+
+      body =
+        conn
+        |> auth_conn(reader)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      refute Map.has_key?(body, "association_outcome"),
+             "another reader was told how the author's association pass went — and the " <>
+               "key must be ABSENT rather than `null`, which is not a value the enum declares"
+    end
+  end
+
+  describe "the associations the show response carries" do
+    # ⛔ NOTHING ASSERTED THE SIBLING KEY AT ALL, and the SPA was not reading it.
+    #
+    # `GET /api/blog/posts/:id` answers `{post: …, associations: […]}`, and the
+    # post serializer's take-list deliberately excludes `associations` — the
+    # envelope's copies carry `book_title` and an owner-gated `reasoning` that
+    # the post serializer cannot know. But no test checked the envelope, so when
+    # the client read `post.associations` instead and silently got `[]`, both
+    # halves were green and the component rendered nothing in the running app.
+    test "a visible association reaches the owner, with its title", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+      book = insert(:book, title: "Piranesi")
+
+      {:ok, _} = Blog.associate_book(post, book.id, %{visible: true, confidence: 0.9})
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert [assoc] = body["associations"]
+      assert assoc["book_id"] == book.id
+      assert assoc["book_title"] == "Piranesi"
+      assert assoc["status"] == "confirmed"
+    end
+
+    # ⚖️ THE OWNER SEES A DISMISSED ONE; A READER DOES NOT. This is the filter
+    # `is_owner || a.visible` in the controller, and it had no test — which also
+    # means the component's "the author dismissed every one of them" comment was
+    # describing a state nobody had checked the system produces.
+    test "a dismissed association is still the owner's to see", %{conn: conn} do
+      user = insert(:user)
+      post = insert(:post, user: user)
+      book = insert(:book)
+
+      {:ok, _} = Blog.associate_book(post, book.id, %{visible: false, confidence: 0.4})
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert [%{"status" => "dismissed"}] = body["associations"]
+    end
+
+    test "but a reader is not shown it", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      reader = insert(:user)
+      post = insert(:post, user: author, visibility: "public", published_at: DateTime.utc_now())
+      book = insert(:book)
+
+      {:ok, _} = Blog.associate_book(post, book.id, %{visible: false, confidence: 0.4})
+
+      body =
+        conn
+        |> auth_conn(reader)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert body["associations"] == []
+    end
+
+    # ⚠️ `reasoning` is the author's to read. The controller DELETES the key for
+    # a non-owner rather than blanking it, and the client decodes it optionally
+    # because of that.
+    test "reasoning is withheld from a reader", %{conn: conn} do
+      author = insert(:user, profile_visibility: "public")
+      reader = insert(:user)
+      post = insert(:post, user: author, visibility: "public", published_at: DateTime.utc_now())
+      book = insert(:book)
+
+      {:ok, _} =
+        Blog.associate_book(post, book.id, %{
+          visible: true,
+          confidence: 0.9,
+          reasoning: "named in the second paragraph"
+        })
+
+      reader_body =
+        conn
+        |> auth_conn(reader)
+        |> get("/api/blog/posts/#{post.id}")
+        |> json_response(200)
+
+      assert [assoc] = reader_body["associations"]
+      refute Map.has_key?(assoc, "reasoning")
     end
   end
 end

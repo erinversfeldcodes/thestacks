@@ -104,7 +104,7 @@ No handlers are registered for `image.rejected` in `Stacks.Events.Registry`. The
   1. Fetches presigned URL from `Storage.get_image_url/1`
   2. Calls `Moderation.run_pipeline/1`
   3. Pipeline successfully classifies image as a book (`check_is_book_url` returns `{:ok, :is_book}`)
-  4. Pipeline calls vision sidecar `POST /extract` -- gets candidates
+  4. The same `POST /analyze` call that classified the image also returns the candidates
   5. `resolve_and_store_all/2` iterates candidates:
      - For candidates with `potential_isbns`: tries `ISBNResolver.resolve/1` for each ISBN
      - For candidates with title/author only: tries `ISBNResolver.search_by_title/3`
@@ -119,11 +119,12 @@ The use of `{:cancel, ...}` (rather than `{:error, ...}`) is deliberate: ISBN-no
 
 ## 8. External Service Calls
 
-### Vision Sidecar -- Extraction
+### Vision Sidecar -- Classification and Extraction (one call)
 - **Service**: Modal vision sidecar
-- **Endpoint**: `POST /extract`
-- **Client module**: `Stacks.AI.Client` via `call_vision("extract_isbn", payload)`
-- **Response**: Returns candidates, but their `potential_isbns` either don't resolve or are empty
+- **Endpoint**: `POST /analyze`
+- **Client module**: `Stacks.AI.Client` via `call_vision("analyze", payload)`
+- **Response**: Returns candidates alongside the classification, but their `potential_isbns` either don't resolve or are empty
+- ⚠️ `POST /extract` and `POST /classify` were deleted on 2026-10-15; `POST /analyze` answers both in one call. The pipeline already used the fused call, so this is a documentation correction, not a behaviour change.
 
 ### Open Library + Google Books (parallel race)
 - **Service**: Open Library and Google Books
@@ -271,7 +272,7 @@ Note: ISBN rejection does NOT trigger fuse melts. The vision sidecar responded s
 - **Dashboard**: Upload pipeline section
 
 - **Metric name**: Vision extraction time (before rejection)
-- **How measured**: Duration of `Stacks.AI.Client.call_vision("extract_isbn", ...)`. Not yet instrumented separately from the Oban job duration.
+- **How measured**: Duration of `Stacks.AI.Client.call_vision("analyze", ...)`. Not yet instrumented separately from the Oban job duration, and extraction is not separable from classification — they share one call.
 - **Target/SLA**: p50 < 5s, p95 < 15s
 - **Dashboard**: Vision pipeline section
 
@@ -320,7 +321,7 @@ Note: ISBN rejection does NOT trigger fuse melts. The vision sidecar responded s
 
 ### Vision Extraction (Modal GPU)
 - **Service**: Modal (same GPU instance)
-- **Trigger**: `IdentifyBookJob` calls `Stacks.AI.Client.call_vision("extract_isbn", ...)` — extraction runs and returns candidates, but none resolve to valid ISBNs
+- **Trigger**: `IdentifyBookJob` calls `Stacks.AI.Client.call_vision("analyze", ...)` — extraction runs inside that call and returns candidates, but none resolve to valid ISBNs
 - **Unit cost**: Included in classification call cost (same Modal container session)
 - **Volume estimate**: 1 call per upload that passes classification
 - **Tracked by**: `Stacks.AI.BudgetTracker` (combined under `:modal`)

@@ -32,17 +32,26 @@ defmodule CoreWeb.RobotsTxtTest do
       assert body =~ "User-agent:"
     end
 
-    test "keeps user-scoped paths out of search results", %{conn: conn} do
+    test "keeps non-profile user paths out of search results", %{conn: conn} do
       body = get(conn, "/robots.txt").resp_body
 
-      for path <- ~w(/api/ /u/ /shelf/ /post/ /listing/) do
+      for path <- ~w(/api/ /shelf/ /post/ /listing/) do
         assert body =~ "Disallow: #{path}",
                "the `*` group no longer disallows #{path}"
       end
     end
 
+    test "lets search engines crawl profiles so the per-user opt-in header governs",
+         %{conn: conn} do
+      body = get(conn, "/robots.txt").resp_body
+
+      refute body =~ "Disallow: /u/",
+             "/u/ must be crawlable — indexing is decided per profile by the " <>
+               "x-robots-tag header (fail-closed noindex), not blanket-blocked here"
+    end
+
     test "opts the site out of AI training crawlers" do
-      body = get(build_conn(), "/robots.txt").resp_body
+      body = get(CoreWeb.ConnCase.proven_conn(), "/robots.txt").resp_body
 
       for agent <- ~w(GPTBot ClaudeBot CCBot Bytespider PerplexityBot Google-Extended) do
         assert body =~ "User-agent: #{agent}",
@@ -51,7 +60,7 @@ defmodule CoreWeb.RobotsTxtTest do
     end
 
     test "each AI crawler group actually disallows something" do
-      body = get(build_conn(), "/robots.txt").resp_body
+      body = get(CoreWeb.ConnCase.proven_conn(), "/robots.txt").resp_body
 
       for agent <- ~w(GPTBot ClaudeBot CCBot Bytespider PerplexityBot Google-Extended) do
         assert directives_for(body, agent) == ["Disallow: /"],

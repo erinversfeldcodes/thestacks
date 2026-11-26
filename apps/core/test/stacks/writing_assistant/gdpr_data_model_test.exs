@@ -1,8 +1,9 @@
 defmodule Stacks.WritingAssistant.GdprDataModelTest do
   @moduledoc """
       — GDPR data-model foundation. Proves the writing-assistant /
-      embeddings tables exist with the correct ownership + FK-cascade behaviour and
-      the personal-vs-shared erasure invariant that depends on.
+      embeddings tables exist with the correct ownership + FK-cascade behaviour,
+      the §4b.2 at-rest encryption posture (the vector is ciphertext at rest),
+      and the personal-vs-shared erasure invariant that depends on them.
   """
   use Core.DataCase, async: false
 
@@ -12,7 +13,9 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
 
   alias Stacks.WritingAssistant.{
     BookContentChunk,
+    CorpusAnnotation,
     Embedding,
+    ImportedWork,
     RetrievalLog,
     Session,
     TurnFeedback,
@@ -48,14 +51,30 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
   defp seed_graph(user, book) do
     session = Repo.insert!(%Session{user_id: user.id, status: "active"})
 
+    work =
+      Repo.insert!(%ImportedWork{
+        user_id: user.id,
+        title: "Manuscript",
+        source_format: "txt",
+        imported_at: DateTime.utc_now()
+      })
+
     %{
       session: session,
+      work: work,
+      annotation:
+        Repo.insert!(%CorpusAnnotation{
+          user_id: user.id,
+          work_id: work.id,
+          tags: ["exemplar"],
+          note: "a private note"
+        }),
       embedding:
         Repo.insert!(%Embedding{
           user_id: user.id,
           source_type: "shelf",
           title: "My Shelf",
-          embedding: Pgvector.new(@vec)
+          embedding: @vec
         }),
       feedback: Repo.insert!(%TurnFeedback{session_id: session.id, turn_index: 0, rating: "up"}),
       retrieval: Repo.insert!(%RetrievalLog{session_id: session.id, query: "cottage core"}),
@@ -76,10 +95,23 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
   end
 
   describe "schema" do
-    test "the five personal tables + shared corpus table exist with expected columns" do
+    test "the personal tables + shared corpus table exist with expected columns" do
       assert MapSet.subset?(
-               MapSet.new(~w(id user_id source_type source_id title shelf content_date)),
+               MapSet.new(~w(id user_id source_type source_id title shelf content_date
+                    chunk_text chunk_index char_start char_end model embedding_version)),
                columns("embeddings")
+             )
+
+      assert MapSet.subset?(
+               MapSet.new(~w(id user_id title source_format source_sha256 imported_at)),
+               columns("imported_works")
+             )
+
+      assert MapSet.subset?(
+               MapSet.new(
+                 ~w(id user_id work_id embedding_id tags exemplar_quality do_not_retrieve note)
+               ),
+               columns("corpus_annotations")
              )
 
       assert MapSet.subset?(
@@ -111,36 +143,54 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
     test "book_content_chunks is SHARED, NON-personal: it has NO user_id column" do
       refute MapSet.member?(columns("book_content_chunks"), "user_id")
     end
+
+    test "imported_works and corpus_annotations are PERSONAL: they carry a user_id" do
+      assert MapSet.member?(columns("imported_works"), "user_id")
+      assert MapSet.member?(columns("corpus_annotations"), "user_id")
+    end
   end
 
-  describe "pgvector" do
-    test "the vector extension is installed" do
+  describe "vector storage — encrypted at rest for embeddings" do
+    test "the vector extension is installed (book_content_chunks still uses it)" do
       %{rows: rows} = Repo.query!("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
       assert rows != []
     end
 
-    test "embedding columns are vector(1024) on both embeddings and book_content_chunks" do
-      assert vector_format("embeddings") == "vector(1024)"
+    test "embeddings.embedding is bytea (Cloak-encrypted); book_content_chunks stays vector(1024)" do
+      assert vector_format("embeddings") == "bytea"
       assert vector_format("book_content_chunks") == "vector(1024)"
     end
 
-    test "a 1024-dim vector round-trips through the Pgvector.Ecto.Vector field" do
+    test "the embedding round-trips through EncryptedVector but is CIPHERTEXT at rest" do
       user = insert(:user)
 
       emb =
         Repo.insert!(%Embedding{
           user_id: user.id,
           source_type: "book",
-          embedding: Pgvector.new(@vec)
+          embedding: @vec
         })
 
+      # Decrypts on load — the app sees the vector (float32 round-trips 1.0 exactly).
       loaded = Repo.get!(Embedding, emb.id)
-      assert Pgvector.to_list(loaded.embedding) == @vec
+      assert loaded.embedding == @vec
+
+      # At rest the raw bytea is ciphertext: it neither equals nor contains the
+      # float32 serialisation a plaintext vector column would have held. This is
+      # the leak §4b.2 exists to prevent.
+      plaintext = for component <- @vec, into: <<>>, do: <<component::float-32-little>>
+
+      %{rows: [[raw]]} =
+        Repo.query!("SELECT embedding FROM op.embeddings WHERE id = $1::uuid", [emb.id])
+
+      assert is_binary(raw)
+      refute raw == plaintext
+      assert :binary.match(raw, plaintext) == :nomatch
     end
   end
 
-  describe "erasure — FK cascade (load-bearing for )" do
-    test "deleting the user row cascades to all five personal tables" do
+  describe "erasure — FK cascade" do
+    test "deleting the user row cascades to every personal table" do
       user = insert(:user)
       book = insert(:book)
       g = seed_graph(user, book)
@@ -148,6 +198,8 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
       Repo.delete!(user)
 
       refute Repo.get(Embedding, g.embedding.id)
+      refute Repo.get(ImportedWork, g.work.id)
+      refute Repo.get(CorpusAnnotation, g.annotation.id)
       refute Repo.get(Session, g.session.id)
       refute Repo.get(TurnFeedback, g.feedback.id)
       refute Repo.get(RetrievalLog, g.retrieval.id)
@@ -166,7 +218,7 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
   end
 
   describe "erasure — real GDPR path (Stacks.GDPR.Deletion)" do
-    test "delete_user_data/1 erases the five personal tables and preserves the corpus" do
+    test "delete_user_data/1 erases every personal table and preserves the corpus" do
       user = insert(:user)
       book = insert(:book)
       g = seed_graph(user, book)
@@ -174,6 +226,8 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
       assert {:ok, _} = Deletion.delete_user_data(user.id)
 
       refute Repo.get(Embedding, g.embedding.id)
+      refute Repo.get(ImportedWork, g.work.id)
+      refute Repo.get(CorpusAnnotation, g.annotation.id)
       refute Repo.get(Session, g.session.id)
       refute Repo.get(TurnFeedback, g.feedback.id)
       refute Repo.get(RetrievalLog, g.retrieval.id)

@@ -203,7 +203,7 @@ N/A — `Components.AuthorCard` is a pure view function.
 
 ## 13. Operational Metrics
 
-- **Oban job counts for `FetchAuthorRSSJob`**: enqueued, completed, failed, retried — daily cron, tracked via `mart_job_stats` and Oban telemetry
+- **Oban job counts for `FetchAuthorRSSJob`**: enqueued, completed, failed, retried — daily cron, tracked via Oban telemetry and the `oban_jobs` table (the `mart_job_stats` rollup was deleted 2026-10-15, unread)
 - **Oban job counts for `DiscoverAuthorSourcesJob`**: enqueued per `book.created` event via `AuthorDiscoveryHandler`
 - **Brave Search API call counts**: per-query counts and latencies for author source discovery — tracked via `BraveClient` daily budget counter (`:persistent_term` + `:counters`)
 - **SearXNG call counts**: fallback queries when Brave budget exhausted — self-hosted, no rate limit

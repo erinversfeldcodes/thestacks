@@ -1,16 +1,18 @@
 module Page.BlogEditorTest exposing (suite)
 
+import Api
 import Expect
 import Http
 import Page.Blog.Editor as Editor exposing (Mode(..), Msg(..))
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.BlogPost exposing (Visibility(..))
 import Types.RemoteData exposing (RemoteData(..))
 
 
-token : Maybe String
+token : Maybe Api.Credentials
 token =
-    Just "tok"
+    Just (TestHelpers.creds "tok")
 
 
 newModel : Editor.Model
@@ -21,7 +23,8 @@ newModel =
 suite : Test
 suite =
     describe "Page.Blog.Editor"
-        [ describe "init"
+        [ sessionExpiryStillSettlesTheFlag
+        , describe "init"
             [ test "New mode defaults visibility to Owner" <|
                 \_ ->
                     newModel.visibility |> Expect.equal Owner
@@ -110,14 +113,30 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Editor.update (PublishCompleted (Ok ())) newModel token
+                            Editor.update (PublishCompleted "post-123" (Ok ())) newModel token
                     in
                     model.publishing |> Expect.equal (Success ())
+            , test "PublishCompleted Ok records the post id so the view can link to it" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Editor.update (PublishCompleted "post-123" (Ok ())) newModel token
+                    in
+                    -- The post-publish "View post" link needs /blog/:id; before
+                    -- this the id was discarded and the reader was stranded.
+                    model.publishedId |> Expect.equal (Just "post-123")
+            , test "PublishCompleted Err leaves publishedId unset (no link on failure)" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Editor.update (PublishCompleted "post-123" (Err (Http.BadStatus 500))) newModel token
+                    in
+                    model.publishedId |> Expect.equal Nothing
             , test "PublishCompleted Err sets publishing to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Editor.update (PublishCompleted (Err (Http.BadStatus 500))) newModel token
+                            Editor.update (PublishCompleted "post-123" (Err (Http.BadStatus 500))) newModel token
                     in
                     isFailure model.publishing |> Expect.equal True
             ]
@@ -141,3 +160,81 @@ isFailure rd =
 
         _ ->
             False
+
+
+{-| ⛔ A 401 must settle the in-flight flag, not just hand off the session.
+
+All three completion handlers here returned `model` untouched on a 401 while
+their own `else` branch recorded a `Failure`, so an expired session left
+`saving`, `publishing` or `loading` on `Loading` forever — a disabled button or a
+spinner with no response ever coming.
+
+⚠️ And `SessionExpired` does NOT guarantee the reader is taken away from it.
+`Main.handleSessionExpiry` parks the logout and asks JS for the stored auth; if
+another tab has refreshed the token, `adoptExternalAuth` returns `AdoptAuth` and
+the logout is CANCELLED. The reader stays on this page, which is precisely when
+the stuck flag stops being invisible.
+
+⚠️ Each case asserts the IN-FLIGHT PRECONDITION first. Without that, "the flag
+is no longer Loading" is satisfied by the `NotAsked` a fresh model already
+carries, and the test would pass against the defect it exists to catch — which
+is how the sibling hosts' 401 path went unnoticed while their 500 path was
+covered.
+
+⛔ And each asserts the EXACT settled value, not merely `notEqual Loading`.
+`notEqual Loading` is satisfied by `NotAsked` and by `Success ()` too, so the
+minimal wrong fix — settle the flag, surface nothing — passed all three cases
+while leaving the reader a re-enabled button and a save that had silently
+vanished. "Not stuck" and "says why" are different claims and the weaker one
+was standing in for both.
+
+-}
+sessionExpiryStillSettlesTheFlag : Test
+sessionExpiryStillSettlesTheFlag =
+    describe "a 401 settles the in-flight flag and hands off the session"
+        [ test "SaveCompleted" <|
+            \_ ->
+                let
+                    ( inFlight, _, _ ) =
+                        Editor.update SaveDraft newModel token
+
+                    ( settled, _, out ) =
+                        Editor.update (SaveCompleted (Err (Http.BadStatus 401))) inFlight token
+                in
+                Expect.all
+                    [ \_ -> inFlight.saving |> Expect.equal Loading
+                    , \_ -> settled.saving |> Expect.equal (Failure (Http.BadStatus 401))
+                    , \_ -> out |> Expect.equal Editor.SessionExpired
+                    ]
+                    ()
+        , test "PublishCompleted" <|
+            \_ ->
+                let
+                    ( inFlight, _, _ ) =
+                        Editor.update Publish newModel token
+
+                    ( settled, _, out ) =
+                        Editor.update (PublishCompleted "post-123" (Err (Http.BadStatus 401))) inFlight token
+                in
+                Expect.all
+                    [ \_ -> inFlight.publishing |> Expect.equal Loading
+                    , \_ -> settled.publishing |> Expect.equal (Failure (Http.BadStatus 401))
+                    , \_ -> out |> Expect.equal Editor.SessionExpired
+                    ]
+                    ()
+        , test "PostLoaded" <|
+            \_ ->
+                let
+                    inFlight =
+                        Tuple.first (Editor.init (Edit "post-123") token)
+
+                    ( settled, _, out ) =
+                        Editor.update (PostLoaded (Err (Http.BadStatus 401))) inFlight token
+                in
+                Expect.all
+                    [ \_ -> inFlight.loading |> Expect.equal Loading
+                    , \_ -> settled.loading |> Expect.equal (Failure (Http.BadStatus 401))
+                    , \_ -> out |> Expect.equal Editor.SessionExpired
+                    ]
+                    ()
+        ]

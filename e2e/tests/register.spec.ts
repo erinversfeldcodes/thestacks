@@ -1,6 +1,11 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { ownerAdminToken, suiteEmail, uniqueEmail } from "./helpers";
+import {
+  hasSessionCookie,
+  authenticateOwner,
+  suiteEmail,
+  uniqueEmail,
+} from "./helpers";
 
 /**
  * Registration under the closed-beta gate.
@@ -14,9 +19,8 @@ import { ownerAdminToken, suiteEmail, uniqueEmail } from "./helpers";
 
 /** Mint a fresh single-use invitation via the owner's admin API. */
 async function mintInvite(request: APIRequestContext): Promise<string> {
-  const token = await ownerAdminToken(request);
+  await authenticateOwner(request);
   const created = await request.post("/api/admin/invites", {
-    headers: { Authorization: `Bearer ${token}` },
     data: { note: "register.spec journey" },
   });
   expect(created.status(), "invite create").toBe(201);
@@ -134,12 +138,15 @@ test.describe("Registration → pending (Bug-2/3 invariant)", () => {
 
     await expect(page).toHaveURL(/\/login/);
 
-    // Bug-3 invariant: registration stores NO JWT — the account is inert until
-    // the email is confirmed.
-    const stored = await page.evaluate(() =>
-      localStorage.getItem("stacks-auth")
-    );
-    expect(stored).toBeFalsy();
+    // Bug-3 invariant: registration issues NO SESSION — the account is inert
+    // until the email is confirmed. ⚠️ Asserted on the cookie now, which is the
+    // stronger form: the old assertion could only see whether the SPA had
+    // stored something, and the server is what decides whether a credential
+    // exists.
+    expect(
+      await hasSessionCookie(page),
+      "registration must not issue a session before the email is confirmed"
+    ).toBe(false);
 
     await page.getByTestId("back-to-sign-in").click();
     await expect(page.getByTestId("login-form")).toBeVisible();

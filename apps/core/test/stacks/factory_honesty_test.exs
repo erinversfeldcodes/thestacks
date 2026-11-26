@@ -20,6 +20,8 @@ defmodule Stacks.FactoryHonestyTest do
   alias Stacks.Books.BookEdition
   alias Stacks.Books.ISBN
   alias Stacks.Books.UploadedImage
+  alias Stacks.Costs
+  alias Stacks.Costs.PlatformCost
   alias Stacks.Shelving
   alias Stacks.Shelving.{Placement, Shelf}
 
@@ -320,6 +322,71 @@ defmodule Stacks.FactoryHonestyTest do
       book = insert(:book)
 
       refute insert(:book_edition, book: book).is_primary
+    end
+  end
+
+  describe "probe 9 — a platform cost carries a category the changeset accepts" do
+    test "a factory-built platform cost survives the production changeset" do
+      # The factory defaulted to "infrastructure", which is outside
+      # `@platform_cost_valid_categories` (costs.ex:151) — so every test built on
+      # it asserted against a row the application itself could never write, and
+      # nothing noticed for months. `op.platform_costs.category` has no CHECK
+      # constraint, which is why only the changeset can catch this.
+      cost = build(:platform_cost)
+
+      changeset =
+        Costs.platform_cost_changeset(%PlatformCost{}, %{
+          category: cost.category,
+          service: cost.service,
+          description: cost.description,
+          amount_cents: cost.amount_cents,
+          currency: cost.currency,
+          period_start: cost.period_start,
+          period_end: cost.period_end
+        })
+
+      assert changeset.valid?, inspect(changeset.errors)
+    end
+  end
+
+  describe "probe 10 — the factory refuses a bookshelf above its owner's profile ceiling" do
+    test "a bookshelf more exposed than its owner's profile raises" do
+      # The write path (`set_bookshelf_visibility/3` via
+      # `validate_bookshelf_profile_ceiling`) refuses a bookshelf whose visibility
+      # is less restrictive than its owner's profile; `build/2` bypassed that,
+      # minting a pairing production cannot create and the read path hides.
+      owner = build(:user, profile_visibility: "owner")
+
+      assert_raise ArgumentError, ~r/refused by the write path/, fn ->
+        build(:bookshelf, user: owner, visibility: "public")
+      end
+    end
+
+    test "allow_over_ceiling bypasses the check, for a deliberate refusal probe" do
+      # A test that asserts the impossible pairing is HIDDEN or REFUSED must be
+      # able to build it; the escape is the single explicit way to say so.
+      owner = build(:user, profile_visibility: "owner")
+
+      bookshelf =
+        build(:bookshelf, user: owner, visibility: "public", allow_over_ceiling: true)
+
+      assert bookshelf.visibility == "public"
+    end
+
+    test "a bookshelf at or below its owner's profile is built normally" do
+      owner = build(:user, profile_visibility: "platform")
+
+      assert build(:bookshelf, user: owner, visibility: "platform").visibility == "platform"
+    end
+
+    test "a non-owner profile's MORE-exposed shelf builds without the escape" do
+      # The alignment's point: only an "owner" profile places a ceiling, so a
+      # platform profile's public shelf — a pairing the write path happily
+      # creates — must NOT need `allow_over_ceiling`. Locks the factory against
+      # drifting back above production.
+      owner = build(:user, profile_visibility: "platform")
+
+      assert build(:bookshelf, user: owner, visibility: "public").visibility == "public"
     end
   end
 end

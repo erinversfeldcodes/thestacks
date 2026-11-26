@@ -54,6 +54,7 @@ import Stacks.Api.V1.AuthResponses
 import Stacks.Api.V1.BlogResponses
     exposing
         ( AssociationActionResponse
+        , AssociationOutcome(..)
         , BlogPostListResponse
         , BlogPostResponse
         , BlogPostShowResponse
@@ -69,6 +70,7 @@ import Stacks.Api.V1.BlogResponses
 import Stacks.Api.V1.BookResponses
     exposing
         ( BookDetailResponse
+        , PublicationState(..)
         , decodeBookDetailResponse
         , encodeBookDetailResponse
         )
@@ -125,11 +127,13 @@ import Stacks.Common.V1.Book
         , encodeBook
         , encodeEdition
         )
+import Stacks.Common.V1.Costs exposing (CostBasis(..))
 import Stacks.Common.V1.Listing
     exposing
         ( Listing
         , decodeListing
         , defaultListing
+        , defaultListingSeller
         , encodeListing
         )
 import Stacks.Common.V1.Location
@@ -144,7 +148,7 @@ import Stacks.Common.V1.Location
         , encodeCoordinates
         , encodeCountry
         )
-import Stacks.Common.V1.Placement
+import Stacks.Common.V1.Placement as ProtoPlacement
     exposing
         ( PlacementDetail
         , decodePlacementDetail
@@ -201,7 +205,98 @@ suite =
         , sourceResponseSuite
         , uploadSuite
         , adminSuite
+        , objectGuardSuite
         ]
+
+
+{-| The property that every generated message decoder has a failure mode.
+
+Proto3 gives each field implicit presence and a zero default, so codegen emits
+`D.oneOf [ D.field "k" d, D.succeed <zero> ]` per field — right by the JSON
+mapping, and the very reason it was dangerous: with every field falling back,
+the composed decoder had NO required field, so it succeeded on `null`, on a
+number, on a string, on a list, answering a struct of defaults each time.
+
+The cost was not theoretical. `D.maybe (D.field "placement" decodeBookPlacement)`
+is the generated shape for an optional message field, and against a server
+sending `"placement": null` it produced `Just <all defaults>` — "no placement"
+arriving as a placement with a blank id on a blank bookshelf, which the consumer
+then rendered. The second cost is epistemic: a decoder with no failure mode
+means "it decodes" tells you nothing, which is why hand-rolled decoders grew up
+beside these to work around them.
+
+⚠️ These cases are about the CODEGEN CONTRACT, not about `BookPlacement` — it is
+simply a convenient witness. The guard is emitted once per generated module and
+wraps every message decoder in it.
+
+-}
+objectGuardSuite : Test
+objectGuardSuite =
+    describe "every message decoder requires an object"
+        [ test "an optional message field sent as null decodes to Nothing" <|
+            \_ ->
+                -- The exact generated shape, and the exact defect.
+                D.decodeString
+                    (D.maybe (D.field "placement" ProtoPlacement.decodeBookPlacement))
+                    """{ "placement": null }"""
+                    |> Expect.equal (Ok Nothing)
+        , test "a null is refused outright rather than defaulted" <|
+            \_ ->
+                D.decodeString ProtoPlacement.decodeBookPlacement "null"
+                    |> expectDecodeFailure
+        , test "a number is refused" <|
+            \_ ->
+                D.decodeString ProtoPlacement.decodeBookPlacement "42"
+                    |> expectDecodeFailure
+        , test "a string is refused" <|
+            \_ ->
+                D.decodeString ProtoPlacement.decodeBookPlacement "\"placement\""
+                    |> expectDecodeFailure
+        , test "a list is refused" <|
+            \_ ->
+                D.decodeString ProtoPlacement.decodeBookPlacement "[]"
+                    |> expectDecodeFailure
+        , test "an EMPTY object is still accepted — proto3 defaulting is unchanged" <|
+            \_ ->
+                -- The positive control, and the boundary of the fix. Every field
+                -- has implicit presence, so `{}` is a valid message of all
+                -- defaults and must stay valid; the five refusals above would
+                -- also be satisfied by a decoder that had simply become strict
+                -- about fields, which would break the JSON mapping.
+                D.decodeString ProtoPlacement.decodeBookPlacement "{}"
+                    |> Expect.equal (Ok ProtoPlacement.defaultBookPlacement)
+        , test "a present field is still read, not defaulted away" <|
+            \_ ->
+                D.decodeString
+                    ProtoPlacement.decodeBookPlacement
+                    """{ "id": "p-1", "bookshelf_name": "antilibrary" }"""
+                    |> Result.map (\p -> ( p.id, p.bookshelfName ))
+                    |> Expect.equal (Ok ( "p-1", "antilibrary" ))
+        , test "the guard does NOT tell two message types apart — an object satisfies either" <|
+            \_ ->
+                -- Stated as a test because it is the limit of the fix and the
+                -- reason a hand-rolled `oneOf` over these two still needs a
+                -- discriminator. A PlacementRef-shaped object decodes happily as
+                -- a BookPlacement of defaults; only the contract can separate
+                -- them, not codegen.
+                D.decodeString
+                    ProtoPlacement.decodeBookPlacement
+                    """{ "position": 3, "placed_at": "2026-10-16T00:00:00Z" }"""
+                    |> Expect.equal (Ok ProtoPlacement.defaultBookPlacement)
+        ]
+
+
+expectDecodeFailure : Result D.Error a -> Expect.Expectation
+expectDecodeFailure result =
+    case result of
+        Err _ ->
+            Expect.pass
+
+        Ok _ ->
+            Expect.fail
+                ("decoded successfully, so this decoder has no failure mode — "
+                    ++ "a struct of defaults was invented for a value that is not a message"
+                )
 
 
 locationSuite : Test
@@ -717,6 +812,8 @@ userSuite =
                         , websiteUrl = ""
                         , consentAnalyticsAt = ""
                         , consentWritingAssistantAt = ""
+                        , consentSearchIndexing = False
+                        , consentSearchIndexingAt = ""
                         , onboardingCompleted = False
                         , onboardingSteps = ""
                         , notifyWishlistAvailability = False
@@ -1158,8 +1255,32 @@ responseSuite =
                                 , notes = "Great"
                                 , visibility = "platform"
                                 , bookshelfVisibility = "platform"
+
+                                -- Both absent from the fixture payload below,
+                                -- so both decode to Nothing. That is the
+                                -- distinction the `optional` fields buy: a
+                                -- server that did not send a reading status is
+                                -- not a reader who has not started the book.
+                                , readingStatus = Nothing
+                                , currentPage = Nothing
+
+                                -- started_at/finished_at are `optional` on
+                                -- BookPlacement too; absent in this fixture.
+                                , startedAt = Nothing
+                                , finishedAt = Nothing
                                 }
-                        , myWriting = [ { id = "w-1", title = "Review", publishedAt = "2026-03-20T00:00:00Z" } ]
+                        , myWriting =
+                            [ { id = "w-1"
+                              , title = "Review"
+                              , publishedAt = "2026-03-20T00:00:00Z"
+                              , publicationState = PublicationStatePublished
+                              }
+                            , { id = "w-2"
+                              , title = "Half-written"
+                              , publishedAt = ""
+                              , publicationState = PublicationStateDraft
+                              }
+                            ]
                         , placements = []
                         }
 
@@ -1172,7 +1293,19 @@ responseSuite =
                             [ \r -> Expect.equal original.book.id r.book.id
                             , \r -> Expect.equal original.book.title r.book.title
                             , \r -> Expect.equal (Just "pl-1") (Maybe.map .id r.placement)
-                            , \r -> Expect.equal 1 (List.length r.myWriting)
+                            , \r -> Expect.equal 2 (List.length r.myWriting)
+
+                            -- ⚠️ The states, not just the count. These two
+                            -- entries differ ONLY in `publication_state` once
+                            -- the draft's `published_at` has collapsed to `""`
+                            -- on the wire — which is precisely the collapse the
+                            -- field exists to survive. A length check alone
+                            -- passes against an encoder that drops the state,
+                            -- and that is the defect, not a rounding error.
+                            , \r ->
+                                Expect.equal
+                                    [ PublicationStatePublished, PublicationStateDraft ]
+                                    (List.map .publicationState r.myWriting)
                             ]
                             decoded
 
@@ -1240,6 +1373,8 @@ responseSuite =
                             , websiteUrl = ""
                             , consentAnalyticsAt = ""
                             , consentWritingAssistantAt = ""
+                            , consentSearchIndexing = False
+                            , consentSearchIndexingAt = ""
                             , onboardingCompleted = False
                             , onboardingSteps = ""
                             , notifyWishlistAvailability = False
@@ -1496,7 +1631,7 @@ blogSuite =
                     original =
                         { id = "a-1"
                         , bookId = "b-1"
-                        , confidence = 0.85
+                        , confidence = Just 0.85
                         , source = "llm"
                         , visible = True
                         , reasoning = "title mentioned"
@@ -1514,7 +1649,7 @@ blogSuite =
                         Expect.all
                             [ \a -> Expect.equal original.id a.id
                             , \a -> Expect.equal original.bookId a.bookId
-                            , \a -> Expect.within (Expect.Absolute 0.001) original.confidence a.confidence
+                            , \a -> Expect.equal original.confidence a.confidence
                             , \a -> Expect.equal original.source a.source
                             , \a -> Expect.equal original.visible a.visible
                             , \a -> Expect.equal original.reasoning a.reasoning
@@ -1622,6 +1757,15 @@ listingSuite =
                         , updatedAt = "2026-03-20T00:00:00Z"
                         , bookId = "b-2"
                         , sellerId = "u-2"
+
+                        -- ⛔ The seller embed is now DECLARED in the contract.
+                        -- It was previously emitted by the server and declared
+                        -- nowhere, which is how it came to carry a seller's
+                        -- account email to anonymous callers with no gate
+                        -- looking at it. Declaring it is what makes this
+                        -- fixture need updating — that compile error is the
+                        -- contract doing its job.
+                        , seller = defaultListingSeller
                         }
 
                     result =
@@ -1763,7 +1907,10 @@ blogResponseSuite =
                 let
                     original : BlogPostListResponse
                     original =
-                        { posts = [] }
+                        -- The discovery feed's paging cursor, absent at the end
+                        -- of the corpus and on the single-author archive, which
+                        -- does not page at all.
+                        { posts = [], nextCursor = Just "cursor-1" }
 
                     result =
                         D.decodeValue decodeBlogPostListResponse (encodeBlogPostListResponse original)
@@ -1816,7 +1963,7 @@ blogResponseSuite =
                         , associations =
                             [ { id = "a-1"
                               , bookId = "b-1"
-                              , confidence = 0.85
+                              , confidence = Just 0.85
                               , source = "llm"
                               , visible = True
                               , reasoning = "title mentioned"
@@ -1826,6 +1973,7 @@ blogResponseSuite =
                               , createdAt = ""
                               }
                             ]
+                        , associationOutcome = AssociationOutcomeAssociated
                         }
 
                     result =
@@ -1880,7 +2028,7 @@ blogResponseSuite =
                         { association =
                             { id = "a-2"
                             , bookId = "b-2"
-                            , confidence = 0.75
+                            , confidence = Just 0.75
                             , source = "manual"
                             , visible = False
                             , reasoning = "user linked"
@@ -1899,7 +2047,7 @@ blogResponseSuite =
                         Expect.all
                             [ \r -> Expect.equal original.association.id r.association.id
                             , \r -> Expect.equal original.association.bookId r.association.bookId
-                            , \r -> Expect.within (Expect.Absolute 0.001) original.association.confidence r.association.confidence
+                            , \r -> Expect.equal original.association.confidence r.association.confidence
                             , \r -> Expect.equal original.association.visible r.association.visible
                             ]
                             decoded
@@ -2087,6 +2235,7 @@ sourceResponseSuite =
                               , type_ = "scraper_config"
                               , url = "https://loot.co.za"
                               , confidence = 0.85
+                              , confidenceScored = True
                               , discoveredVia = "crawler"
                               , discoveredAt = "2026-03-20T00:00:00Z"
                               , status = "pending"
@@ -2156,7 +2305,7 @@ sourceResponseSuite =
 
                     Err e ->
                         Expect.fail (D.errorToString e)
-        , test "DiscoveredSource decodes all 10 fields" <|
+        , test "DiscoveredSource decodes all 11 fields" <|
             \_ ->
                 let
                     json =
@@ -2167,6 +2316,7 @@ sourceResponseSuite =
                             "type": "rss_feed",
                             "url": "https://example.com/feed",
                             "confidence": 0.7,
+                            "confidence_scored": true,
                             "discovered_via": "crawler",
                             "discovered_at": "2026-03-20T00:00:00Z",
                             "status": "pending",
@@ -2186,6 +2336,7 @@ sourceResponseSuite =
                             , \s -> Expect.equal "rss_feed" s.type_
                             , \s -> Expect.equal "https://example.com/feed" s.url
                             , \s -> Expect.within (Expect.Absolute 0.001) 0.7 s.confidence
+                            , \s -> Expect.equal True s.confidenceScored
                             , \s -> Expect.equal "crawler" s.discoveredVia
                             , \s -> Expect.equal "pending" s.status
                             , \s -> Expect.equal "" s.approvedAt
@@ -2205,6 +2356,7 @@ sourceResponseSuite =
                         , type_ = "llm_output"
                         , url = ""
                         , confidence = 0.5
+                        , confidenceScored = True
                         , discoveredVia = "manual"
                         , discoveredAt = "2026-03-22T00:00:00Z"
                         , status = "approved"
@@ -2467,6 +2619,13 @@ adminSuite =
                         { service = "Fly.io"
                         , description = "Compute"
                         , amountCents = 15000
+
+                        -- ⚖️ A measured line, so the page may render the
+                        -- amount as money. An `absent` basis means there is no
+                        -- figure for the period and the number must not be
+                        -- shown — the distinction a $0.00 destroyed.
+                        , basis = CostBasisMeasured
+                        , refreshedAt = "2026-11-10T00:00:00Z"
                         }
 
                     result =
@@ -2540,10 +2699,13 @@ adminSuite =
                         , categories =
                             [ { category = "hosting"
                               , totalCents = 15000
+                              , unmeasuredCount = 0
                               , items =
                                     [ { service = "Fly.io"
                                       , description = "VM"
                                       , amountCents = 15000
+                                      , basis = CostBasisMeasured
+                                      , refreshedAt = "2026-11-10T00:00:00Z"
                                       }
                                     ]
                               }

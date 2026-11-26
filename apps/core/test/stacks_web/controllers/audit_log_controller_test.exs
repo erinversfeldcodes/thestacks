@@ -148,7 +148,7 @@ defmodule StacksWeb.AuditLogControllerTest do
       assert [%{"action" => "action.3"}, %{"action" => "action.2"}] = body1["entries"]
 
       conn2 =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(user)
         |> get("/api/settings/audit-log", %{"page" => "2", "per_page" => "2"})
 

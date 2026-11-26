@@ -92,13 +92,33 @@ warm_remote_preview() {
     echo "==> Remote mode: warming the login POST path (${BASE_URL}/api/auth/login)..."
     local deadline=$(( $(date +%s) + 60 ))
     local code=""
+
+    # ⛔ THE PROOF MATTERS EVEN THOUGH THIS CALL IGNORES ITS RESULT, and that is
+    # the subtle part. The loop only checks for a non-502, so a 403 would still
+    # read as "the app served the request" and the warmup would report success.
+    # But a CSRF rejection halts BEFORE the password is hashed — so the one thing
+    # this warmup exists to warm, the Argon2 NimblePool that the settings specs
+    # depend on for their 503 back-pressure contract, would never be touched.
+    # The warmup would pass while warming nothing.
+    local jar proof
+    jar="$(mktemp)"
+    curl -s -o /dev/null --cookie-jar "$jar" --max-time 10 "${BASE_URL}/" || true
+    proof="$(awk '$6 == "stacks_csrf" { print $7 }' "$jar" 2>/dev/null | tail -1)"
+    # RL-473(b): an empty/invalid proof yields a 403, which is non-502 — so the
+    # loop below EXCLUDES 403 from "warm" rather than reporting a CSRF rejection as
+    # a warmed path. A hard exit here would break the best-effort contract the
+    # timeout branch documents (warn and proceed, so Playwright re-checks + retries).
+
     while [[ $(date +%s) -lt $deadline ]]; do
         code="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
             -X POST "${BASE_URL}/api/auth/login" \
+            -b "$jar" \
+            -H "X-CSRF-Token: ${proof}" \
             -H "Content-Type: application/json" \
             -d '{"email":"warmup@thestacks.test","password":"warmup"}' 2>/dev/null || true)"
-        if [[ -n "$code" && "$code" != "502" && "$code" != "000" ]]; then
+        if [[ -n "$code" && "$code" != "502" && "$code" != "000" && "$code" != "403" ]]; then
             echo "  Login POST path warm (HTTP ${code})."
+            rm -f "$jar"
             return 0
         fi
         echo "  Login POST not warm yet (HTTP ${code:-none}) — retrying in 3s..."

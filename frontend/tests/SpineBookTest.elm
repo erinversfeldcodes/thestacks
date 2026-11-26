@@ -38,6 +38,7 @@ suite =
         , readingPileSpineIsSoftened
         , writingRibbonRendering
         , writingSuffixInAriaLabel
+        , arrivingBookCarriesArrivalClass
         ]
 
 
@@ -133,7 +134,39 @@ sampleBook =
         , coverImageUrl = Nothing
         , hidden = False
         , hasWriting = False
+        , arriving = False
         }
+
+
+{-| The one-shot arrival animation is opt-in per spine: a book placed and
+navigated to with `?arrived=<id>` carries `book--arriving` (the keyframe hook),
+and every ordinary spine does not — so only the just-placed book animates in.
+-}
+arrivingBookCarriesArrivalClass : Test
+arrivingBookCarriesArrivalClass =
+    describe "book--arriving is present only when arriving = True"
+        [ test "arriving = True adds the book--arriving class" <|
+            \_ ->
+                book
+                    { pageCount = 400
+                    , wearLevel = Pristine
+                    , texture = Leather
+                    , title = "Moby Dick"
+                    , author = "Herman Melville"
+                    , coverImageUrl = Nothing
+                    , hidden = False
+                    , hasWriting = False
+                    , arriving = True
+                    }
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.class "book--arriving" ]
+        , test "the ordinary spine (arriving = False) has no book--arriving class" <|
+            \_ ->
+                sampleBook
+                    |> Query.fromHtml
+                    |> Query.findAll [ Selector.class "book--arriving" ]
+                    |> Query.count (Expect.equal 0)
+        ]
 
 
 sampleClothBook : Html.Html msg
@@ -147,6 +180,7 @@ sampleClothBook =
         , coverImageUrl = Nothing
         , hidden = False
         , hasWriting = False
+        , arriving = False
         }
 
 
@@ -198,14 +232,14 @@ bookSpineHasTitleAndAuthor =
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "book__spine" ]
                     |> Query.find [ Selector.class "book__title" ]
-                    |> Query.has [ Selector.text "Moby Dick" ]
+                    |> Query.has [ Selector.exactText "Moby Dick" ]
         , test "spine has .book__author with author name" <|
             \_ ->
                 sampleBook
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "book__spine" ]
                     |> Query.find [ Selector.class "book__author" ]
-                    |> Query.has [ Selector.text "Herman Melville" ]
+                    |> Query.has [ Selector.exactText "Herman Melville" ]
         ]
 
 
@@ -258,6 +292,7 @@ softenedHiddenBook =
         , coverImageUrl = Nothing
         , hidden = True
         , hasWriting = False
+        , arriving = False
         }
 
 
@@ -359,7 +394,7 @@ readingPileSpineIsSoftened : Test
 readingPileSpineIsSoftened =
     test "reading pile spines render Softened wear (', well-loved')" <|
         \() ->
-            ProgramTest.start () (readingPileProgram (Just "test-token"))
+            ProgramTest.start () (readingPileProgram (Just (TestHelpers.creds "test-token")))
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/bookshelves/reading_pile"
                     (simulateBookshelfResponse [ namedPlacement "book-rp" "Reading Now" ])
@@ -385,6 +420,7 @@ writingBook =
         , coverImageUrl = Nothing
         , hidden = False
         , hasWriting = True
+        , arriving = False
         }
 
 
@@ -402,6 +438,7 @@ wornWrittenHiddenBook =
         , coverImageUrl = Nothing
         , hidden = True
         , hasWriting = True
+        , arriving = False
         }
 
 

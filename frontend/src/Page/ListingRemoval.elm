@@ -23,6 +23,7 @@ worse failure than telling them it is pending.
 -}
 
 import Api exposing (RemovalOutcome(..))
+import Effect exposing (Effect)
 import Html exposing (Html, a, button, div, form, h1, input, label, p, text, textarea)
 import Html.Attributes exposing (class, disabled, for, href, id, placeholder, rows, type_, value)
 import Html.Events exposing (onInput, onSubmit)
@@ -32,7 +33,11 @@ import Util.TestId exposing (testId)
 
 
 type alias Model =
-    { url : String
+    { -- ⚠️ The same-origin proof. This page performs a state-changing request
+      -- with NO session behind it, so the proof cannot come from a credential —
+      -- it comes from the document, via the boot config.
+      proof : Maybe String
+    , url : String
     , email : String
     , reason : String
     , submitting : RemoteData Http.Error RemovalOutcome
@@ -47,9 +52,10 @@ type Msg
     | Completed (Result Http.Error RemovalOutcome)
 
 
-init : Model
-init =
-    { url = ""
+init : Maybe String -> Model
+init proof =
+    { proof = proof
+    , url = ""
     , email = ""
     , reason = ""
     , submitting = NotAsked
@@ -77,36 +83,56 @@ validate model =
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
+    let
+        ( newModel, effect ) =
+            updateWithEffect msg model
+    in
+    ( newModel, Effect.perform effect )
+
+
+{-| `update`, with its request as data so a harness can answer it.
+
+⛔ The proof token goes to `Effect.public` rather than into a header built here.
+This asker has no session — they are not a reader — so the proof IS what the
+endpoint authenticates against, and it is the one thing that must reach the wire.
+
+-}
+updateWithEffect : Msg -> Model -> ( Model, Effect Msg )
+updateWithEffect msg model =
     case msg of
         SetUrl val ->
-            ( { model | url = val }, Cmd.none )
+            ( { model | url = val }, Effect.none )
 
         SetEmail val ->
-            ( { model | email = val }, Cmd.none )
+            ( { model | email = val }, Effect.none )
 
         SetReason val ->
-            ( { model | reason = val }, Cmd.none )
+            ( { model | reason = val }, Effect.none )
 
         Submit ->
             case validate model of
                 Just _ ->
-                    ( model, Cmd.none )
+                    ( model, Effect.none )
 
                 Nothing ->
                     ( { model | submitting = Loading }
-                    , Api.requestListingRemoval
-                        { url = String.trim model.url
-                        , email = String.trim model.email
-                        , reason = String.trim model.reason
-                        }
-                        Completed
+                    , Effect.public
+                        (Api.requestListingRemovalRequest
+                            { url = String.trim model.url
+                            , email = String.trim model.email
+                            , reason = String.trim model.reason
+                            }
+                        )
+                        Nothing
+                        model.proof
+                        (Api.resolveJson Api.removalOutcomeDecoder >> Completed)
                     )
 
         Completed (Ok outcome) ->
-            ( { model | submitting = Success outcome }, Cmd.none )
+            ( { model | submitting = Success outcome }, Effect.none )
 
         Completed (Err err) ->
-            ( { model | submitting = Failure err }, Cmd.none )
+            ( { model | submitting = Failure err }, Effect.none )
 
 
 view : Model -> Html Msg

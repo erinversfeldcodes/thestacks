@@ -4,7 +4,7 @@ defmodule Stacks.AI.MockClient do
     per endpoint through the process dictionary (isolated, `async: true`-safe);
     unregistered endpoints fall back to the canned default.
 
-        MockClient.put_response("extract_isbn", {:error,:service_unavailable})
+        MockClient.put_response("analyze", {:error,:service_unavailable})
         MockClient.put_response(:any, {:error,:circuit_open})
 
     `:any` steers every endpoint; a specific endpoint registration wins over
@@ -29,8 +29,14 @@ defmodule Stacks.AI.MockClient do
       Register `response` for `endpoint` in the current process.
 
       Later registrations take priority. `endpoint` is a logical endpoint string
-      (`"is_book"`, `"extract_isbn"`, `"analyze"`, `"associate"`) or `:any` to
-      match every endpoint that has no exact registration.
+      (`"is_book"`, `"analyze"`) or `:any` to match every endpoint that has no
+      exact registration.
+
+      ⚠️ Keep this list in step with `Stacks.AI.Client.endpoint_path/1`. It used
+      to include `"extract_isbn"` and `"associate"`, and this mock kept
+      answering both for a while after the real client stopped accepting them —
+      a seam that outlives the thing it stands for will hand a test a cheerful
+      success for an operation that cannot happen in production.
   """
   def put_response(endpoint, response) do
     Process.put(__MODULE__, [{endpoint, response} | Process.get(__MODULE__, [])])
@@ -75,35 +81,70 @@ defmodule Stacks.AI.MockClient do
     end
   end
 
-  defp default_response("is_book", _payload) do
-    {:ok,
-     %{
-       "classification" => "CLASSIFICATION_RESULT_BOOK",
-       "confidence" => 0.9,
-       "model_used" => "mock"
-     }}
-  end
+  # ⚠️ "is_book" answers with the SAME shape as "analyze", and must.
+  #
+  # It used to return a classification-only body — `{classification, confidence,
+  # model_used}`, the response of the `/classify` endpoint. That endpoint was
+  # deleted on 2026-10-15 and `endpoint_path/1` now resolves BOTH operation
+  # names to `/analyze`, so in production a caller asking "is_book" receives an
+  # `AnalyzeResponse` with a `books` key. A mock that kept answering in the old
+  # shape would disagree with the real client about what the same call returns —
+  # which is the failure this module's own moduledoc warns about, and it would
+  # hand a test a confident green for a response production cannot produce.
+  defp default_response("is_book", payload), do: default_response("analyze", payload)
 
-  defp default_response("extract_isbn", payload) do
-    {:ok,
-     %{
-       "books" => [book_result(payload_isbn(payload))],
-       "model_used" => "mock"
-     }}
-  end
-
+  # ⚠️ A cpu_only pass NEVER classifies (the classify guard is a GPU step) and
+  # never carries VLM candidates — the real sidecar answers UNSPECIFIED with
+  # at most an OCR read. A mock that returned the full BOOK body for a
+  # cpu_only payload would hand a test a confident green for a response
+  # production cannot produce — this module's own moduledoc failure. The
+  # default is the MISS shape; steer a richer one per test.
   defp default_response("analyze", payload) do
-    {:ok,
-     %{
-       "classification" => "CLASSIFICATION_RESULT_BOOK",
-       "confidence" => 0.9,
-       "books" => [book_result(payload_isbn(payload))],
-       "model_used" => "mock"
-     }}
+    if cpu_only?(payload) do
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_UNSPECIFIED",
+         "confidence" => 0.0,
+         "books" => [],
+         "model_used" => "cpu_only",
+         "tier" => "ANALYSIS_TIER_UNSPECIFIED",
+         "ocr_attempt" => nil
+       }}
+    else
+      {:ok,
+       %{
+         "classification" => "CLASSIFICATION_RESULT_BOOK",
+         "confidence" => 0.9,
+         "books" => [book_result(payload_isbn(payload))],
+         "model_used" => "mock"
+       }}
+    end
   end
 
-  defp default_response("associate", %{isbn: isbn, edition_id: edition_id}) do
-    {:ok, %{"job_id" => "mock-job-#{isbn}-#{edition_id}"}}
+  defp cpu_only?(payload) when is_map(payload) do
+    Map.get(payload, :cpu_only) == true or Map.get(payload, "cpu_only") == true
+  end
+
+  defp cpu_only?(_payload), do: false
+
+  # /embed — one 1024-dim vector per input text, model-stamped. Deterministic
+  # and non-zero so a round-trip through Stacks.EncryptedVector is observable,
+  # and one-vector-per-text so the producer's length check is exercised.
+  defp default_response("embed", payload) do
+    texts = Map.get(payload, :texts) || Map.get(payload, "texts") || []
+    dim = 1024
+    # 0.5 is exactly representable in float32, so the round-trip through
+    # Stacks.EncryptedVector is lossless and a test can assert it exactly.
+    vectors = Enum.map(texts, fn _ -> %{"values" => List.duplicate(0.5, dim)} end)
+    {:ok, %{"vectors" => vectors, "model" => "bge-m3", "dim" => dim}}
+  end
+
+  # /extract-document — a deterministic extracted text so the ingestion pipeline
+  # is exercised without the real parsers (the real extraction is proven by the
+  # vision sidecar's own suite over the public-domain fixtures).
+  defp default_response("extract_document", _payload) do
+    text = "Shall I compare thee to a summer's day? Thou art more lovely and more temperate."
+    {:ok, %{"text" => text, "char_count" => String.length(text)}}
   end
 
   defp default_response(_endpoint, _payload), do: {:ok, %{}}

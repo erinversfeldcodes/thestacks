@@ -10,6 +10,7 @@ module Page.Settings.Privacy exposing
 
 import Api
 import Components.SaveButton as SaveButton
+import Effect
 import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -58,6 +59,7 @@ type alias ShelfVisibility =
 
 type Msg
     = SetProfileVisibility String
+    | SessionExpiryDetected
     | SetShelfVisibility String String
     | SaveProfileVisibility
     | SaveProfileVisibilityCompleted (Result Http.Error ())
@@ -157,39 +159,56 @@ init =
     , loadingMore = False
     , unblocking = Nothing
     , unblockError = False
-    , consent = Consent.init { analytics = False, writingAssistant = False }
+    , consent = Consent.init { analytics = False, writingAssistant = False, searchIndexing = False }
     , settings = NotAsked
     }
 
 
 {-| Entry point used by `Main` when the Privacy page opens: seeds the model and,
-when authenticated, kicks off the blocked-users fetch. `consentSeed` reflects the
-signed-in user's current consent so the folded-in toggles open showing reality
-(same seeding the standalone consent page used to do). The bare `init` is kept
-for tests and flows that don't need the network.
+when authenticated, kicks off the stored-settings and blocked-users fetches.
+
+⚠️ The consent toggles are NOT seeded from the login payload. They open at
+`init`'s defaults — held locked and rendered as "not yet known" — and the ONLY
+thing that sets what they display is the `GET /api/settings/privacy` response
+(`GotPrivacySettings`), the single source of truth. A login-blob seed would show
+a confident On/Off for a consent nobody has read back yet, which on a consent
+record — and with no confirming Save press — is a manufactured value where it
+matters most. The bare `init` is kept for tests and flows that don't fetch.
+
 -}
-initWithToken : Maybe String -> { analytics : Bool, writingAssistant : Bool } -> ( Model, Cmd Msg )
-initWithToken maybeToken consentSeed =
-    let
-        seeded =
-            { init | consent = Consent.init consentSeed }
-    in
+initWithToken : Maybe Api.Credentials -> ( Model, Cmd Msg )
+initWithToken maybeToken =
     case maybeToken of
         Just token ->
-            ( { seeded | blockedUsers = Loading, settings = Loading }
+            ( { init | blockedUsers = Loading, settings = Loading }
             , Cmd.batch
-                [ Api.getPrivacySettings token GotPrivacySettings
-                , Api.listBlockedUsers token 1 GotBlockedUsers
+                [ Effect.perform
+                    (Effect.authed Api.privacySettingsRequest
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveJson Api.privacySettingsDecoder >> GotPrivacySettings
+                        }
+                    )
+                , Effect.perform
+                    (Effect.authed (Api.blockedUsersRequest 1)
+                        token
+                        { onExpired = SessionExpiryDetected
+                        , onResponse = Api.resolveJson Api.blockedUsersResponseDecoder >> GotBlockedUsers
+                        }
+                    )
                 ]
             )
 
         Nothing ->
-            ( seeded, Cmd.none )
+            ( init, Cmd.none )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
+
         SetProfileVisibility val ->
             ( { model | profileVisibility = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
@@ -212,7 +231,14 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | savingProfile = Loading }
-                    , Api.updateProfileVisibility model.profileVisibility token SaveProfileVisibilityCompleted
+                    , Effect.perform
+                        (Effect.authed
+                            (Api.updateProfileVisibilityRequest model.profileVisibility)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> SaveProfileVisibilityCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -243,7 +269,13 @@ update msg model maybeToken =
                                 |> Maybe.withDefault "platform"
                     in
                     ( { model | savingShelf = Loading }
-                    , Api.updateShelfVisibility shelfName vis token SaveShelfVisibilityCompleted
+                    , Effect.perform
+                        (Effect.authed (Api.updateShelfVisibilityRequest shelfName vis)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> SaveShelfVisibilityCompleted
+                            }
+                        )
                     , NoOut
                     )
 
@@ -266,7 +298,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | exporting = Loading }
-                    , Api.requestExport token GotExportResponse
+                    , Effect.perform
+                        (Effect.authed Api.requestExportRequest
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> GotExportResponse
+                            }
+                        )
                     , NoOut
                     )
 
@@ -310,7 +348,13 @@ update msg model maybeToken =
                 case maybeToken of
                     Just token ->
                         ( { model | deleting = Loading }
-                        , Api.deleteAccount token GotDeleteResponse
+                        , Effect.perform
+                            (Effect.authed Api.deleteAccountRequest
+                                token
+                                { onExpired = SessionExpiryDetected
+                                , onResponse = Api.resolveWhatever >> GotDeleteResponse
+                                }
+                            )
                         , NoOut
                         )
 
@@ -340,16 +384,15 @@ update msg model maybeToken =
                         , profileVisibility = settings.profileVisibility
                         , shelfVisibilities = seedShelves settings.shelves
 
-                        -- hydrate consent from the SERVER, overwriting the
-                        -- login-blob seed. The blob is written only at login /
-                        -- token renewal, so a consent change made in a prior
-                        -- session (or on another device) left the toggles showing
-                        -- a stale value until now. This init fetch is the source
-                        -- of truth for what the toggles display.
+                        -- hydrate consent from the SERVER: this init fetch is the
+                        -- source of truth for what the toggles display. There is
+                        -- no login-payload seed — the toggles open locked in a
+                        -- "not yet known" state and only this answer sets them.
                         , consent =
                             Consent.init
                                 { analytics = settings.consentAnalytics
                                 , writingAssistant = settings.consentWritingAssistant
+                                , searchIndexing = settings.consentSearchIndexing
                                 }
                       }
                     , Cmd.none
@@ -402,7 +445,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | loadingMore = True }
-                    , Api.listBlockedUsers token (model.blockedPage + 1) GotBlockedUsers
+                    , Effect.perform
+                        (Effect.authed (Api.blockedUsersRequest (model.blockedPage + 1))
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveJson Api.blockedUsersResponseDecoder >> GotBlockedUsers
+                            }
+                        )
                     , NoOut
                     )
 
@@ -413,7 +462,13 @@ update msg model maybeToken =
             case maybeToken of
                 Just token ->
                     ( { model | unblocking = Just userId, unblockError = False }
-                    , Api.unblockUser userId token (GotUnblockResponse userId)
+                    , Effect.perform
+                        (Effect.authed (Api.blockRequest userId Api.Unblock)
+                            token
+                            { onExpired = SessionExpiryDetected
+                            , onResponse = Api.resolveWhatever >> GotUnblockResponse userId
+                            }
+                        )
                     , NoOut
                     )
 
@@ -466,7 +521,7 @@ view model =
             , p [ class "settings-section__desc" ]
                 [ text "Control who can discover your profile." ]
             , p [ class "settings-section__note" ]
-                [ text "Your profile and content will never appear in search engine results." ]
+                [ text "By default your profile and content stay out of search engine results. You can opt in to search indexing of your public content below." ]
             , div [ class "form-field" ]
                 [ label [ class "form-field__label" ] [ text "Profile" ]
                 , select

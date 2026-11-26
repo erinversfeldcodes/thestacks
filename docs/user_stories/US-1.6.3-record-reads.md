@@ -151,7 +151,7 @@ N/A
 - **Model**: `stg_bookshelf_placement_history`
 - **Trigger**: `placement.moved` (or `placement.reread` once registered) via `DbtRefreshHandler`
 - **Materialisation**: view
-- **Consumer**: `wh.mart_community_read_count` uses placement history to calculate read counts
+- **Consumer**: `marts.mart_community_read_count` uses placement history to calculate read counts
 
 ---
 

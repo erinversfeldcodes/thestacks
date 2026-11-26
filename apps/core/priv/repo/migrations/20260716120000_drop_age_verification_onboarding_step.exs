@@ -16,6 +16,17 @@ defmodule Core.Repo.Migrations.DropAgeVerificationOnboardingStep do
 
   use Ecto.Migration
 
+  # ⚠️ Attested retrospectively on 2026-10-16, when the linter stopped discarding
+  # SQL that carries string interpolation. This migration's `DROP COLUMN` sits in
+  # an interpolated heredoc, so it had shipped unattested — not because anyone
+  # decided it was fine, but because the gate could not see it.
+  @breaking_ok "Drops and immediately re-adds op.users.onboarding_completed in the same " <>
+                 "statement. It is a GENERATED ALWAYS column, so no stored data is lost — " <>
+                 "the values are recomputed from onboarding_steps, which is untouched. The " <>
+                 "drop-and-re-add is forced by Postgres: a generated column's expression " <>
+                 "cannot be ALTERed in place. N-1 readers see a boolean of the same name " <>
+                 "and type throughout."
+
   @recreate_stg_users_view """
   DO $body$
   BEGIN

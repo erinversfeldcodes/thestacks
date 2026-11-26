@@ -1,5 +1,5 @@
 import path from "path";
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page, newProvenContext} from "./fixtures";
 import { suiteAuthFile } from "./helpers";
 
 const PIPELINE_TIMEOUT = 300_000;
@@ -56,12 +56,7 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
             .poll(
               () =>
                 page.evaluate(async (id) => {
-                  const auth = JSON.parse(
-                    localStorage.getItem("stacks-auth") || "{}"
-                  );
-                  const resp = await fetch(`/api/books/${id}`, {
-                    headers: { Authorization: `Bearer ${auth.token}` },
-                  });
+                  const resp = await fetch(`/api/books/${id}`);
                   if (!resp.ok) return "";
                   const data = await resp.json();
                   return (data.book?.title ?? "") as string;
@@ -156,7 +151,7 @@ test.describe("Upload pipeline — duplicate detection", () => {
   }
 
   test.beforeAll(async ({ browser }) => {
-    const context = await browser.newContext({
+    const context = await newProvenContext(browser, {
       storageState: suiteAuthFile("upload"),
     });
     const page = await context.newPage();
@@ -473,7 +468,7 @@ test.describe("Upload pipeline — manual ISBN entry", () => {
     await expect(complete).toBeVisible({ timeout: 10_000 });
     await expect(complete).toContainText(/Dispossessed/i);
     await expect(complete).toContainText(/Antilibrary/i);
-    await expect(page.getByRole("button", { name: "View on shelf" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "View on bookshelf" })).toBeVisible();
   });
 
   test("valid ISBN-13 is added to the chosen bookshelf", async ({ page }) => {

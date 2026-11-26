@@ -34,6 +34,12 @@ STUB_DIR="$(mktemp -d)"
 INVOCATION_LOG="$STUB_DIR/invocations.log"
 trap 'rm -rf "$STUB_DIR"' EXIT
 
+# ⚠️ stub-provenance says `unknown` because that is the honest answer: this stub
+# was written from its author's memory of the CLI and has never been compared to
+# the real tool. Reading `--version` locally would not change that — it says what
+# is installed, not that this response SHAPE was re-recorded against it. Replace
+# `unknown` with the version and today's date when you drive the real CLI.
+# stub-provenance: fly unknown captured unknown
 cat > "$STUB_DIR/fly" <<'STUB'
 #!/usr/bin/env bash
 echo "$(date +%s.%N) fly $*" >> "$INVOCATION_LOG"
@@ -43,6 +49,12 @@ if [[ "${1:-}" == "image" && "${2:-}" == "show" ]]; then
 fi
 exit "${FLY_STUB_EXIT:-0}"
 STUB
+# ⚠️ stub-provenance says `unknown` because that is the honest answer: this stub
+# was written from its author's memory of the CLI and has never been compared to
+# the real tool. Reading `--version` locally would not change that — it says what
+# is installed, not that this response SHAPE was re-recorded against it. Replace
+# `unknown` with the version and today's date when you drive the real CLI.
+# stub-provenance: modal unknown captured unknown
 cat > "$STUB_DIR/modal" <<'STUB'
 #!/usr/bin/env bash
 echo "$(date +%s.%N) modal $*" >> "$INVOCATION_LOG"

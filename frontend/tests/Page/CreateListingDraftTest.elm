@@ -1,10 +1,12 @@
 module Page.CreateListingDraftTest exposing (suite)
 
 {-| Preserve an in-progress marketplace listing when the session expires
-mid-compose. Seam contract: a 401 on `ListingCreated` bubbles
-`SessionExpiredWithDraft` carrying the encoded draft (six fields +
-`userId`) so Main persists it before the login redirect; on return, the
-saved draft repopulates the form for the SAME user only.
+mid-compose. Seam contract: a 401 on the submit is caught by `Effect.authed`'s
+`onExpired` as `ComposeSessionExpired`, which bubbles `SessionExpiredWithDraft`
+carrying the encoded draft (six fields + `userId`) so Main persists it before
+the login redirect; on return, the saved draft repopulates the form for the
+SAME user only. The 401 never reaches `ListingCreated`, so a response error
+there is a genuine failure to surface, not an expiry to recover from.
 -}
 
 import Expect
@@ -13,6 +15,7 @@ import Json.Decode as Decode
 import Json.Encode
 import Page.Marketplace.CreateListing as CreateListing
 import Test exposing (Test, describe, test)
+import TestHelpers
 import Types.Listing exposing (Condition(..), ListingStatus(..), PricingMode(..))
 
 
@@ -32,7 +35,7 @@ filledModel : CreateListing.Model
 filledModel =
     let
         base =
-            Tuple.first (CreateListing.init (Just "tok"))
+            Tuple.first (CreateListing.init (Just (TestHelpers.creds "tok")))
     in
     { base
         | selectedBookId = Just "plc-1"
@@ -46,7 +49,7 @@ filledModel =
 
 emptyModel : CreateListing.Model
 emptyModel =
-    Tuple.first (CreateListing.init (Just "tok"))
+    Tuple.first (CreateListing.init (Just (TestHelpers.creds "tok")))
 
 
 sampleDraft : CreateListing.Draft
@@ -78,15 +81,15 @@ sampleListing =
 suite : Test
 suite =
     describe "— preserve CreateListing draft on session expiry"
-        [ describe "(a) 401 on ListingCreated → SessionExpiredWithDraft carrying the draft"
+        [ describe "(a) session expiry on the submit (onExpired) → SessionExpiredWithDraft carrying the draft"
             [ test "encoded value round-trips to the six fields + current userId" <|
                 \() ->
                     let
                         ( _, _, outMsg ) =
                             CreateListing.update
-                                (CreateListing.ListingCreated (Err unauthorized))
+                                CreateListing.ComposeSessionExpired
                                 filledModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     case outMsg of
@@ -107,15 +110,26 @@ suite =
                         _ ->
                             Expect.fail "expected SessionExpiredWithDraft"
             ]
-        , describe "(f) NON-401 ListingCreated error does NOT persist a draft"
-            [ test "network error → NoOut (stays local, no SessionExpiredWithDraft)" <|
+        , describe "(f) a response error reaching ListingCreated is a genuine failure, not an expiry"
+            [ test "network error → NoOut (no draft parked)" <|
                 \() ->
                     let
                         ( _, _, outMsg ) =
                             CreateListing.update
                                 (CreateListing.ListingCreated (Err nonAuth))
                                 filledModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
+                                (Just "user-1")
+                    in
+                    outMsg |> Expect.equal CreateListing.NoOut
+            , test "even a 401 here → NoOut: the expiry is caught upstream by onExpired, never special-cased here" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            CreateListing.update
+                                (CreateListing.ListingCreated (Err unauthorized))
+                                filledModel
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     outMsg |> Expect.equal CreateListing.NoOut
@@ -128,7 +142,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.DraftLoaded (CreateListing.encodeDraft sampleDraft))
                                 emptyModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     ( outMsg
@@ -153,7 +167,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.DraftLoaded (CreateListing.encodeDraft sampleDraft))
                                 emptyModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "someone-else")
                     in
                     ( newModel.selectedBookId, newModel.contactInfo, outMsg )
@@ -165,7 +179,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.DraftLoaded (Json.Encode.string "not-a-draft"))
                                 emptyModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     ( newModel.contactInfo, outMsg )
@@ -193,7 +207,7 @@ suite =
                             CreateListing.update
                                 (CreateListing.ListingCreated (Ok sampleListing))
                                 filledModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     ( outMsg, newModel.createdListing )
@@ -207,7 +221,7 @@ suite =
                             CreateListing.update
                                 CreateListing.DiscardDraft
                                 filledModel
-                                (Just "tok")
+                                (Just (TestHelpers.creds "tok"))
                                 (Just "user-1")
                     in
                     ( outMsg

@@ -6,10 +6,24 @@
 # A leaked preview stack once ran 24/7 for three days after its branch merged;
 # this sweep exists so that class of leak has a bounded lifetime.
 #
-# Orphan = a Fly app matching a preview name pattern (or a Neon branch under
-# preview/) that does NOT belong to any OPEN pull request's derived names AND
-# is older than the grace period (protects in-flight CI runs, whose
-# ci-suffixed names are never in the open-PR set).
+# Orphan = a Fly app matching a preview name pattern, a Neon branch under
+# preview/, or a deployed Modal app named thestacks-vision-* that does NOT
+# belong to any OPEN pull request's derived names AND is older than the grace
+# period (protects in-flight CI runs, whose ci-suffixed names are never in the
+# open-PR set).
+#
+# ⛔ A preview deploy creates THREE kinds of resource and this sweep covered two
+# of them. Measured 2026-10-19: 26 Modal apps existed and 24 were orphans, the
+# oldest from 20 July — found by hand, because nothing would ever have collected
+# them. The per-PR teardown's own Modal leg had been failing open for months
+# (fixed separately); even with that fixed, a preview whose PR was never opened
+# has only this sweep. So if a preview ever creates a fourth kind of resource,
+# it owes this script a leg.
+#
+# ⚠️ What the open-PR allowlist does NOT protect, for every leg equally: a
+# preview deployed from a branch with no PR open. That is deliberate — "no open
+# PR owns this" is the whole definition of orphan here — and the grace period is
+# the only cover. Deploy a preview you intend to keep from a branch with a PR.
 #
 # Fails loudly if any listing step fails — a sweep that silently sweeps
 # nothing is how the last leak survived (see the pre-rollback cleanup's
@@ -18,9 +32,13 @@
 # Required env vars:
 #   FLY_API_TOKEN — Fly.io API token
 #   GH_TOKEN      — GitHub token able to list the repo's open PRs
+#   NEON_STAGING_API_KEY / NEON_STAGING_PROJECT_ID — the Neon staging project the
+#     preview branches live under. REQUIRED, not optional: a sweep that cannot
+#     see Neon refuses rather than skipping a whole resource class in silence,
+#     the same refusal the Modal leg already makes. The scheduled workflow sets
+#     both.
 #
 # Optional env vars:
-#   NEON_STAGING_API_KEY / NEON_STAGING_PROJECT_ID — enables the Neon sweep
 #   GRACE_HOURS  — minimum resource age before it is sweepable (default 24)
 #   GH_REPO      — owner/repo to list PRs from (default: derived by gh)
 #
@@ -39,9 +57,117 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/lib/preview-names.sh
 source "${REPO_ROOT}/scripts/lib/preview-names.sh"
 
+# ── Guarantee helpers ─────────────────────────────────────────────────────────
+# Three small guarantees every destructive leg of this sweep must carry. They
+# were worked out on the Modal leg; the Fly and Neon legs predated it and had
+# none of them, which is what carrying these across fixes.
+#
+# ⛔ THREE HELPERS, NOT ONE DISPATCHER. bash 3.2 has no associative arrays, so a
+# single collect_leg taking a lister and a destroyer would pass them as strings
+# and reach the destructive call through eval or indirect invocation — in a
+# script whose worst outcome is destroying the wrong thing. And the legs differ
+# in kind: Fly destroys by name, Neon deletes by id over a REST API while showing
+# a name, Modal stops and cross-references the live-stack set. Each keeps its own
+# lister, matcher and destroy call visible at its own call site; these helpers
+# carry only the parts that are identical across all three.
+REFUSAL="This is a refusal, not a pass"
+TAB=$'\t'
+
+# require_secrets <leg> <var>… — every named var must be non-empty, else REFUSE.
+# A leg that cannot see its resource class must say so and stop. The alternative
+# is the shape that let orphans accumulate: a clean weekly run that collected
+# nothing of a whole class because the credential for it was quietly absent.
+require_secrets() {
+    local leg="$1"
+    shift
+    local var missing=""
+    for var in "$@"; do
+        [[ -n "${!var:-}" ]] || missing="${missing:+$missing }$var"
+    done
+    if [[ -n "$missing" ]]; then
+        echo "FAIL sweep (${leg}): ${REFUSAL} — not set: ${missing}." >&2
+        echo "       This leg collects a whole class of preview resource and must not run" >&2
+        echo "       blind; set it and re-run rather than report a clean pass over a class" >&2
+        echo "       it never looked at." >&2
+        exit 1
+    fi
+}
+
+# parse_or_refuse <leg> <rows> — the Modal leg's two inline checks, lifted so Fly
+# and Neon get them too. REFUSE if the lister's parser flagged a row it could not
+# read (the JSON shape changed, and every verdict below would be made on empty
+# strings), or if it examined nothing at all (every account, project and org
+# holds at least the production resource, so an empty listing is a broken parse
+# reporting itself tidy, not a tidy account). Called as a STATEMENT, never inside
+# a command substitution, so its exit ends the script rather than a subshell.
+parse_or_refuse() {
+    local leg="$1" rows="$2"
+    if grep -q "^UNPARSED${TAB}" <<< "$rows"; then
+        local n
+        n="$(grep "^UNPARSED${TAB}" <<< "$rows" | cut -f2)"
+        echo "FAIL sweep (${leg}): ${REFUSAL} — ${n} row(s) in the listing have no readable" >&2
+        echo "       name. The CLI/API's JSON keys have changed shape; every decision below" >&2
+        echo "       would be made on empty strings, matching nothing, sweeping nothing, and" >&2
+        echo "       reporting success. Refusing instead." >&2
+        exit 1
+    fi
+    local examined
+    examined="$(grep -cvE '^[[:space:]]*$' <<< "$rows")" || examined=0
+    if (( examined == 0 )); then
+        echo "FAIL sweep (${leg}): ${REFUSAL} — examined 0 resources. The production stack" >&2
+        echo "       guarantees at least one, so this is a broken listing or parse reporting" >&2
+        echo "       itself as tidy over an empty set." >&2
+        exit 1
+    fi
+}
+
+# attempt <done-msg> <fail-msg> -- cmd… — run one destructive command with its
+# stderr captured, and report cleanly whether it worked. A failed destroy is a
+# FAILURE, not a silent removal: on success it prints <done-msg> and returns 0;
+# on failure it prints <fail-msg> with the captured error on stderr and returns
+# non-zero, so the caller counts it failed and the run exits non-zero.
+#
+# ⛔ if err="$(cmd 2>&1 >/dev/null)"; then — never cmd && … || …, which hides the
+# failure from set -e and the reader at once, and never a bare assignment, which
+# exits silently under set -e before any handling. The Modal fix got that wrong
+# on its first attempt; one helper would have got it wrong for all three legs.
+attempt() {
+    local done_msg="$1" fail_msg="$2"
+    shift 2
+    [[ "${1:-}" == "--" ]] && shift
+    local err
+    if err="$("$@" 2>&1 >/dev/null)"; then
+        echo "    ${done_msg}"
+        return 0
+    else
+        echo "    ${fail_msg} — ${err}" >&2
+        return 1
+    fi
+}
+
 command -v fly >/dev/null || { echo "FAIL sweep: flyctl not on PATH" >&2; exit 1; }
 command -v gh >/dev/null || { echo "FAIL sweep: gh not on PATH" >&2; exit 1; }
-[[ -n "${FLY_API_TOKEN:-}" ]] || { echo "FAIL sweep: FLY_API_TOKEN not set" >&2; exit 1; }
+require_secrets fly FLY_API_TOKEN
+
+# ⛔ A REFUSAL, not a skip, and the reason is this script's own history. The
+# per-PR Modal teardown swallowed a missing CLI as "already gone" and reported
+# success on every run for months. A sweep that cannot see Modal must say so and
+# stop, because the alternative is a green weekly run that collected nothing.
+#
+# Prefer a `modal` on PATH (what CI installs) and fall back to the module form
+# this repo's other scripts use inside the nix shell.
+if command -v modal >/dev/null 2>&1; then
+    MODAL=(modal)
+elif python3 -m modal --version >/dev/null 2>&1; then
+    MODAL=(python3 -m modal)
+else
+    echo "FAIL sweep: the modal CLI is not available — neither 'modal' on PATH nor" >&2
+    echo "       'python3 -m modal'. A preview deploy creates a Modal vision app and this" >&2
+    echo "       sweep is the only thing that collects one whose PR was never opened, so" >&2
+    echo "       running without it would report success having swept nothing." >&2
+    echo "       Install it (pip install modal) and re-run." >&2
+    exit 1
+fi
 
 # ── Allowlist: every name an OPEN PR's branch derives (suffix-less) ─────────
 open_branches="$(gh pr list ${GH_REPO:+--repo "$GH_REPO"} --state open --limit 200 \
@@ -56,6 +182,7 @@ while IFS= read -r branch; do
     printf '%s\n' \
         "$PREVIEW_CORE_APP" "$PREVIEW_SCRAPER_APP" "$PREVIEW_SEARXNG_APP" \
         "$PREVIEW_VM_APP" "$PREVIEW_GRAFANA_APP" "$PREVIEW_NEON_BRANCH" \
+        "$PREVIEW_MODAL_APP" \
         >> "$ALLOW_FILE"
 done <<< "$open_branches"
 
@@ -91,78 +218,296 @@ echo "==> Sweeping preview orphans (grace: ${GRACE_HOURS}h, dry-run: ${DRY_RUN})
 echo "    Open-PR allowlist entries: $(wc -l < "$ALLOW_FILE" | tr -d ' ')"
 
 # ── Fly apps ────────────────────────────────────────────────────────────────
-apps="$(fly apps list --json | python3 -c "
+# EVERY app is emitted, each tagged with whether it matches the preview pattern,
+# so the whole listing is counted toward the anti-vacuity floor rather than only
+# the previews — the org holds the production stacks at minimum, so examining
+# zero apps means a broken listing, not a tidy org. A row with no name under
+# either JSON key spelling is a refusal, exactly as the Modal leg treats one.
+fly_rows="$(fly apps list --json | python3 -c "
 import json, sys, re
 pattern = re.compile(r'^stacks-(core|scraper|searxng|vm|grafana)-pr-')
+unparsed = 0
 for a in json.load(sys.stdin):
-    if pattern.match(a['Name'] if 'Name' in a else a.get('name', '')):
-        print(a.get('Name') or a.get('name'))
+    name = a.get('Name') or a.get('name') or ''
+    if not name:
+        unparsed += 1
+        continue
+    print('{}\t{}'.format(name, '1' if pattern.match(name) else '0'))
+if unparsed:
+    print('UNPARSED\t{}'.format(unparsed))
 ")" || { echo "FAIL sweep: could not list Fly apps" >&2; exit 1; }
 
-swept=0 kept=0
-while IFS= read -r app; do
+parse_or_refuse fly "$fly_rows"
+
+# ⚠️ Components whose Fly core app this run decided to KEEP. The Modal leg reads
+# it, and that is what makes a preview's three resources behave as one stack.
+#
+# Modal reports no last-deploy time, only creation, so a long-lived branch's
+# vision app looks ancient however recently it was redeployed — while its Fly
+# apps are correctly protected by their newest machine. Without this the sweep
+# would stop the vision half of a stack it had just decided was live, which
+# breaks the upload loop on a preview somebody is using.
+LIVE_FILE="$(mktemp)"
+trap 'rm -f "$ALLOW_FILE" "$LIVE_FILE"' EXIT
+
+note_live_component() {
+    local app="$1"
+    [[ "$app" == stacks-core-pr-* ]] || return 0
+    printf '%s\n' "${app#stacks-core-pr-}" >> "$LIVE_FILE"
+}
+
+swept=0 kept=0 failed=0 fly_examined=0
+while IFS="$TAB" read -r app is_preview; do
     [[ -z "$app" ]] && continue
+    [[ "$app" == "UNPARSED" ]] && continue
+    fly_examined=$(( fly_examined + 1 ))
+    # A non-preview app (the production stacks) is counted toward the floor and
+    # then left alone — it is never a sweep target.
+    [[ "$is_preview" == "1" ]] || continue
     if allowed "$app"; then
         echo "    KEEP ${app} (open PR)"
+        note_live_component "$app"
         kept=$(( kept + 1 ))
         continue
     fi
     if ! app_age_ok "$app"; then
         echo "    KEEP ${app} (younger than ${GRACE_HOURS}h — possibly in-flight CI)"
+        note_live_component "$app"
         kept=$(( kept + 1 ))
         continue
     fi
     if (( DRY_RUN )); then
         echo "    WOULD DESTROY ${app}"
+        swept=$(( swept + 1 ))
     else
-        fly apps destroy "$app" --yes 2>/dev/null \
-            && echo "    DESTROYED ${app}" \
-            || echo "    WARN: failed to destroy ${app}" >&2
+        # ⛔ Through attempt: a destroy that fails is counted as a FAILURE, not a
+        # removal, and its stderr is captured rather than discarded to /dev/null
+        # behind a WARN nobody reads — the two fixes the Modal leg got and this
+        # one did not.
+        if attempt "DESTROYED ${app}" "FAILED to destroy ${app}" -- fly apps destroy "$app" --yes; then
+            swept=$(( swept + 1 ))
+        else
+            failed=$(( failed + 1 ))
+        fi
     fi
-    swept=$(( swept + 1 ))
-done <<< "$apps"
+done <<< "$fly_rows"
+echo "    Fly apps examined: ${fly_examined}"
 
 # ── Neon preview branches (staging project) ─────────────────────────────────
-if [[ -n "${NEON_STAGING_API_KEY:-}" && -n "${NEON_STAGING_PROJECT_ID:-}" ]]; then
-    branches_json="$(curl -sfL \
-        -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
-        "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches")" \
-        || { echo "FAIL sweep: could not list Neon branches" >&2; exit 1; }
+# ⛔ REQUIRED, not skipped. The leg that used to run only `if [[ -n …KEY ]]` and
+# otherwise print `SKIP:` and fall through is the same shape the Modal leg exists
+# to refuse: a run that reports success having never looked at a resource class.
+require_secrets neon NEON_STAGING_API_KEY NEON_STAGING_PROJECT_ID
 
-    while IFS=$'\t' read -r bid bname bcreated; do
-        [[ -z "$bid" || "$bname" != preview/* ]] && continue
-        if allowed "$bname"; then
-            echo "    KEEP neon:${bname} (open PR)"
-            continue
-        fi
-        created_epoch="$(python3 -c "
-import datetime
-ts = '${bcreated}'.split('.')[0].rstrip('Z')
-print(int(datetime.datetime.fromisoformat(ts).replace(tzinfo=datetime.timezone.utc).timestamp()))
-")"
-        if (( now_epoch - created_epoch < grace_seconds )); then
-            echo "    KEEP neon:${bname} (younger than ${GRACE_HOURS}h)"
-            continue
-        fi
-        if (( DRY_RUN )); then
-            echo "    WOULD DELETE neon branch ${bname}"
-        else
-            curl -sf -X DELETE \
-                -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
-                "https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}/branches/${bid}" \
-                >/dev/null \
-                && echo "    DELETED neon branch ${bname}" \
-                || echo "    WARN: failed to delete neon branch ${bname}" >&2
-        fi
-        swept=$(( swept + 1 ))
-    done < <(printf '%s' "$branches_json" | python3 -c "
-import json, sys
+NEON_API="https://console.neon.tech/api/v2/projects/${NEON_STAGING_PROJECT_ID}"
+branches_json="$(curl -sfSL \
+    -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" \
+    "${NEON_API}/branches")" \
+    || { echo "FAIL sweep: could not list Neon branches" >&2; exit 1; }
+
+# ⛔ ONE python pass: id, name and created-epoch per branch, with the date parse
+# INSIDE it. The previous per-row `created_epoch="$(python …)"` was a bare
+# assignment under set -e, so a reformatted created_at exited the whole script
+# silently mid-sweep — after Fly and before Modal — with a success-shaped partial
+# log. Here a per-row try/except keeps an unparseable date local (epoch 0 ⇒ KEEP,
+# never delete on a format change), and an UNPARSED sentinel makes a renamed key
+# a refusal rather than an empty set.
+neon_rows="$(printf '%s' "$branches_json" | python3 -c "
+import json, sys, datetime
+unparsed = 0
 for b in json.load(sys.stdin).get('branches', []):
-    print(f\"{b['id']}\t{b['name']}\t{b['created_at']}\")
-")
-else
-    echo "    SKIP: NEON_STAGING_API_KEY/NEON_STAGING_PROJECT_ID not set — Fly-only sweep."
+    bid = b.get('id') or ''
+    name = b.get('name') or ''
+    if not bid or not name:
+        unparsed += 1
+        continue
+    created = b.get('created_at') or ''
+    try:
+        ts = created.split('.')[0].rstrip('Z')
+        epoch = int(datetime.datetime.fromisoformat(ts).replace(tzinfo=datetime.timezone.utc).timestamp())
+    except (ValueError, AttributeError):
+        epoch = 0
+    print('{}\t{}\t{}'.format(bid, name, epoch))
+if unparsed:
+    print('UNPARSED\t{}\t0'.format(unparsed))
+")" || { echo "FAIL sweep: could not parse the Neon branch listing" >&2; exit 1; }
+
+parse_or_refuse neon "$neon_rows"
+
+while IFS="$TAB" read -r bid bname bepoch; do
+    [[ -z "$bid" ]] && continue
+    [[ "$bid" == "UNPARSED" ]] && continue
+    # A non-preview branch (the project's default branch at minimum) is counted
+    # toward the floor by parse_or_refuse above and then left alone here.
+    [[ "$bname" == preview/* ]] || continue
+    if allowed "$bname"; then
+        echo "    KEEP neon:${bname} (open PR)"
+        kept=$(( kept + 1 ))
+        continue
+    fi
+    if [[ "$bepoch" == "0" ]] || (( now_epoch - bepoch < grace_seconds )); then
+        echo "    KEEP neon:${bname} (younger than ${GRACE_HOURS}h, or undated)"
+        kept=$(( kept + 1 ))
+        continue
+    fi
+    if (( DRY_RUN )); then
+        echo "    WOULD DELETE neon branch ${bname}"
+        swept=$(( swept + 1 ))
+    else
+        # ⛔ Through attempt, like the Fly and Modal destroys: a delete that fails
+        # is a FAILURE, not a removal, and the API's error is captured instead of
+        # thrown away behind a WARN.
+        if attempt "DELETED neon branch ${bname}" "FAILED to delete neon branch ${bname}" -- curl -sfS -X DELETE -H "Authorization: Bearer ${NEON_STAGING_API_KEY}" "${NEON_API}/branches/${bid}"; then
+            swept=$(( swept + 1 ))
+        else
+            failed=$(( failed + 1 ))
+        fi
+    fi
+done <<< "$neon_rows"
+
+# ── Modal vision apps ───────────────────────────────────────────────────────
+#
+# ⚠️ JSON, never the default table. `modal app list` renders a box-drawing table
+# whose column positions are a presentation detail; a parse of that breaks
+# silently and leaves the set difference empty, which reads as "nothing to do" —
+# the same shape as the failure that let 24 orphans accumulate.
+modal_json="$("${MODAL[@]}" app list --json 2>/dev/null)" \
+    || { echo "FAIL sweep: could not list Modal apps" >&2; exit 1; }
+
+# `Created at`, because Modal reports no last-deploy time. An app redeployed
+# today still carries its original creation date, so creation age is a weaker
+# signal than the Fly leg's newest-machine age — it protects a freshly created
+# preview and not a long-lived one. The open-PR allowlist is what protects those.
+#
+# Stopped apps are already in their terminal state and are not listed as
+# deployed; `app stop` is the whole action available here, there being no delete.
+# ⛔ KEY LOOKUP IS CASE- AND SPACE-INSENSITIVE, because it has already broken.
+#
+# Modal 1.2.6 emitted `Description`, `State`, `Created at`; 1.6.2 emits
+# `description`, `state`, `created_at`. Against the newer CLI the old parser
+# read every field as empty — so it iterated the rows, matched no name, swept
+# nothing, and REPORTED SUCCESS. Measured 2026-10-21 with two deployed apps
+# present, one of them a genuine orphan.
+#
+# ⚠️ The anti-vacuity counter did not catch it and could not: it counts rows
+# EXAMINED, and the rows were examined. What was missing was a check that a row
+# PARSED. A renamed upstream key is invisible to a count of lines.
+#
+# ⚠️ Nor could the stubbed suite catch it — the stub emitted the old spelling,
+# so it encoded the contract rather than testing it. This is the thing only a
+# run against the real CLI could find, which is the argument for that run.
+modal_rows="$(printf '%s' "$modal_json" | python3 -c "
+import datetime, json, sys
+
+def field(app, *names):
+    norm = {k.lower().replace(' ', '_'): v for k, v in app.items()}
+    for n in names:
+        v = norm.get(n.lower().replace(' ', '_'))
+        if v:
+            return v
+    return ''
+
+unparsed = 0
+for app in json.load(sys.stdin):
+    name = field(app, 'Description', 'name')
+    state = field(app, 'State').lower()
+    created = field(app, 'Created at', 'created_at')
+
+    if not name:
+        unparsed += 1
+        continue
+
+    try:
+        epoch = int(datetime.datetime.fromisoformat(created).timestamp())
+    except ValueError:
+        # An unparseable date is NOT treated as old. Guessing here would stop a
+        # live app on the strength of a format change.
+        epoch = 0
+    print(f'{name}\t{state}\t{epoch}')
+
+if unparsed:
+    # ⛔ A row we could not name is a refusal, not a skip. It means the listing
+    # shape changed, and every decision below would be made on empty strings.
+    print(f'UNPARSED\t{unparsed}\t0')
+")" || { echo "FAIL sweep: could not parse the Modal app listing" >&2; exit 1; }
+
+if grep -q "^UNPARSED" <<< "$modal_rows"; then
+    count="$(grep "^UNPARSED" <<< "$modal_rows" | cut -f2)"
+    echo "FAIL sweep: ${count} Modal app(s) in the listing have no readable name." >&2
+    echo "       The CLI's JSON keys have changed shape. Every decision below would be" >&2
+    echo "       made on empty strings — matching no app, sweeping nothing, and reporting" >&2
+    echo "       success. Refusing instead." >&2
+    exit 1
 fi
 
+modal_examined=0
+while IFS=$'\t' read -r mname mstate mepoch; do
+    [[ -z "$mname" ]] && continue
+    modal_examined=$(( modal_examined + 1 ))
+
+    # The production app is `thestacks-vision` exactly; a preview carries the
+    # branch component after it. Matching the bare name would stop production.
+    [[ "$mname" == thestacks-vision-* ]] || continue
+    [[ "$mstate" == "deployed" ]] || continue
+
+    if allowed "$mname"; then
+        echo "    KEEP modal:${mname} (open PR)"
+        kept=$(( kept + 1 ))
+        continue
+    fi
+    if grep -qxF "${mname#thestacks-vision-}" "$LIVE_FILE" 2>/dev/null; then
+        echo "    KEEP modal:${mname} (its Fly stack is live)"
+        kept=$(( kept + 1 ))
+        continue
+    fi
+    if [[ "$mepoch" == "0" ]] || (( now_epoch - mepoch < grace_seconds )); then
+        echo "    KEEP modal:${mname} (younger than ${GRACE_HOURS}h, or undated)"
+        kept=$(( kept + 1 ))
+        continue
+    fi
+    if (( DRY_RUN )); then
+        echo "    WOULD STOP modal:${mname}"
+        swept=$(( swept + 1 ))
+    else
+        # ⛔ `--yes` is not optional, and its absence meant this leg had NEVER
+        # stopped anything. Modal 1.6.2's `app stop` PROMPTS for confirmation
+        # and aborts non-interactively with "Rerun with --yes (-y) to skip
+        # confirmation" — so in CI, and in every unattended weekly run, the stop
+        # failed. Measured 2026-10-21 against a real orphan.
+        #
+        # ⚠️ Through `attempt`, which captures the CLI's stderr instead of
+        # discarding it behind a WARN, counts a failed stop as a FAILURE rather
+        # than a removal, and uses the `if err="$(cmd 2>&1 >/dev/null)"` form so a
+        # bare failing assignment cannot exit the script silently under set -e.
+        # The first attempt at this fix got that last part wrong.
+        if attempt "STOPPED modal:${mname}" "FAILED to stop modal:${mname}" -- "${MODAL[@]}" app stop --yes "$mname"; then
+            swept=$(( swept + 1 ))
+        else
+            failed=$(( failed + 1 ))
+        fi
+    fi
+done <<< "$modal_rows"
+
+# ⛔ ANTI-VACUITY. Every verdict above is a set difference, which is empty when
+# everything is tidy AND when nothing was listed. The account holds the
+# production app at minimum, so examining zero apps means the listing or the
+# parse returned nothing and the Modal leg just reported a clean sweep over an
+# empty set.
+if (( modal_examined == 0 )); then
+    echo "FAIL sweep: examined 0 Modal apps. The production app alone guarantees at least" >&2
+    echo "       one, so this is a broken listing or parse reporting itself as tidy." >&2
+    exit 1
+fi
+echo "    Modal apps examined: ${modal_examined}"
+
 echo ""
-echo "Sweep complete: ${swept} orphan(s) $( (( DRY_RUN )) && echo 'found' || echo 'removed'), ${kept} kept."
+echo "Sweep complete: ${swept} orphan(s) $( (( DRY_RUN )) && echo 'found' || echo 'removed'), ${kept} kept, ${failed} failed."
+
+# ⛔ A sweep that could not collect something has not succeeded, and must not
+# exit 0. The whole point of this script is that "nothing to do" and "could not
+# do it" are different answers; an exit code that conflated them is how the
+# teardown it replaces failed open for months.
+if (( failed )); then
+    echo "FAIL sweep: ${failed} resource(s) could not be collected — see the errors above." >&2
+    exit 1
+fi

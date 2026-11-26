@@ -15,6 +15,7 @@ can pass on a coincidence.
 
 -}
 
+import Api
 import Effect
 import Expect
 import Html.Attributes as Attr
@@ -87,7 +88,7 @@ serverJson =
 
 start : ProgramTest.ProgramTest Profile.Model Profile.Msg (SimulatedEffect Profile.Msg)
 start =
-    ProgramTest.start () (program (Just "test-token"))
+    ProgramTest.start () (program (Just (TestHelpers.creds "test-token")))
 
 
 {-| The page's own `initWithEffect`, run in the simulated runtime — so a
@@ -100,7 +101,7 @@ would silently observe no request at all. Give the page an `updateWithEffect`
 before adding one.
 
 -}
-program : Maybe String -> ProgramDefinition () Profile.Model Profile.Msg (SimulatedEffect Profile.Msg)
+program : Maybe Api.Credentials -> ProgramDefinition () Profile.Model Profile.Msg (SimulatedEffect Profile.Msg)
 program maybeToken =
     ProgramTest.createElement
         { init =
@@ -244,7 +245,7 @@ failureSaysSoRatherThanLying =
             start
                 |> ProgramTest.simulateHttpResponse "GET" "/api/auth/me" Http.NetworkError_
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We could not read your saved profile from the library, so these fields may be out of date. Reload the page to try again." ]
+                    [ Selector.exactText "We could not read your saved profile from the library, so these fields may be out of date. Reload the page to try again." ]
 
 
 {-| The form posts every field, and the placeholder has no website and no

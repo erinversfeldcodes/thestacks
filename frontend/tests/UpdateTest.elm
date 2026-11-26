@@ -22,12 +22,13 @@ libraryInit =
     , rssLink = { showUrl = False }
     , viewMode = SpineView
     , sortState = { column = BookList.Title, direction = BookList.Asc }
-    , token = Nothing
+    , isAuthenticated = False
     , organiser = { dragging = Nothing }
     , organiserBusy = False
     , organiserError = Nothing
     , undoToast = Bookshelf.ToastHidden
     , focusedSpine = Nothing
+    , arrivedId = Nothing
     }
 
 
@@ -68,6 +69,7 @@ bookDetailInit =
     , finishedReadPrompt = False
     , coverFailed = False
     , undoableRemoval = Nothing
+    , myWriting = []
     }
 
 
@@ -91,6 +93,7 @@ sampleBook =
     , editionCount = 0
     , subjects = []
     , visibilityTier = Public
+    , communityReadCount = 0
     }
 
 
@@ -105,6 +108,7 @@ suite =
                             Bookshelf.update
                                 (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Err (Http.BadStatus 403)))
                                 libraryInit
+                                Nothing
                     in
                     Expect.all
                         [ \m -> Expect.equal True m.showAgeGate
@@ -118,6 +122,7 @@ suite =
                             Bookshelf.update
                                 (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Err Http.NetworkError))
                                 libraryInit
+                                Nothing
                     in
                     Expect.all
                         [ \m -> Expect.equal False m.showAgeGate
@@ -131,6 +136,7 @@ suite =
                             Bookshelf.update
                                 (Bookshelf.ShelvesLoaded (Bookshelf.requestKey Bookshelf.libraryConfig) (Ok { shelves = [], visibility = "owner" }))
                                 libraryInit
+                                Nothing
                     in
                     Expect.all
                         [ \m -> Expect.equal False m.showAgeGate
@@ -144,7 +150,7 @@ suite =
                             { libraryInit | showAgeGate = True }
 
                         ( model, _, _ ) =
-                            Bookshelf.update Bookshelf.DismissAgeGate modelWithGate
+                            Bookshelf.update Bookshelf.DismissAgeGate modelWithGate Nothing
                     in
                     Expect.equal False model.showAgeGate
             ]
@@ -182,7 +188,7 @@ suite =
                     let
                         ( model, _, _ ) =
                             BookDetail.update
-                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }))
+                                (BookDetail.BookLoaded (Ok { book = sampleBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [], myWriting = [] }))
                                 bookDetailInit
                                 Nothing
                     in

@@ -76,10 +76,10 @@ saveFailure subject err =
             "The library is briefly overloaded. Please try again in a few seconds."
 
         Http.NetworkError ->
-            "The library is unreachable, so " ++ subject ++ " were not saved. Check your connection, then try again."
+            "The library is unreachable, so we could not save " ++ subject ++ ". Check your connection, then try again."
 
         Http.Timeout ->
-            "The library took too long to answer, so we cannot say whether " ++ subject ++ " were saved. Reload the page to see."
+            "The library took too long to answer, so we cannot say whether " ++ subject ++ " went through. Reload the page to see."
 
         _ ->
             "We could not save " ++ subject ++ ", and we cannot say why. Please try again."

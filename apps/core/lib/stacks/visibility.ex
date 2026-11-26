@@ -7,6 +7,7 @@ defmodule Stacks.Visibility do
 
   alias Core.Repo
   alias Stacks.Accounts
+  alias Stacks.Scope
   alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Social
 
@@ -123,11 +124,13 @@ defmodule Stacks.Visibility do
     end
   end
 
-  defp load_profile_visibility(%{user_id: _} = resource, _owner_id) do
-    owner = load_user(resource)
-    if owner, do: owner.profile_visibility, else: "owner"
-  end
-
+  # ⛔ The %Placement{} clause must precede the generic `%{user_id: _}` one. A
+  # placement now carries a user_id column (the denormalised owner, there for the
+  # row-level policy), so the generic clause would otherwise capture it and read
+  # the owner's profile from `load_user/1`, which a placement has no `user`
+  # association for — so every placement's ceiling collapsed to "owner". The
+  # profile comes from the bookshelf's user, which resolve_placement preloaded.
+  # The same ordering fix is why get_owner_id below leads with its placement clause.
   defp load_profile_visibility(%Placement{} = placement, _owner_id) do
     case placement.bookshelf do
       %{user: %{profile_visibility: pv}} when is_binary(pv) ->
@@ -140,6 +143,11 @@ defmodule Stacks.Visibility do
       _ ->
         "owner"
     end
+  end
+
+  defp load_profile_visibility(%{user_id: _} = resource, _owner_id) do
+    owner = load_user(resource)
+    if owner, do: owner.profile_visibility, else: "owner"
   end
 
   defp load_profile_visibility(_resource, _owner_id), do: nil
@@ -270,14 +278,19 @@ defmodule Stacks.Visibility do
 
   defp marketplace_exception?(_), do: false
 
-  defp get_owner_id(%{user_id: user_id}), do: user_id
-
+  # ⛔ The %Placement{} clause must precede the generic `%{user_id: _}` one (see
+  # the ordering note on load_profile_visibility): a placement now carries a
+  # user_id column, so the generic clause would otherwise capture it — nil on a
+  # built struct — making the profile ceiling treat an owned placement as
+  # ownerless. The owner comes from the bookshelf, already preloaded.
   defp get_owner_id(%Placement{} = placement) do
     case placement.bookshelf do
       %{user_id: user_id} -> user_id
       _ -> nil
     end
   end
+
+  defp get_owner_id(%{user_id: user_id}), do: user_id
 
   defp get_owner_id(_), do: nil
 
@@ -331,25 +344,43 @@ defmodule Stacks.Visibility do
 
   @doc """
       Returns all bookshelves for the given user_id that are visible to the viewer.
+
+      ⛔ Scoped to the **VIEWER**, not to `user_id`. The subject of the question
+      and the principal asking it are different people here, and that is the
+      whole shape of this function — scoping to the subject would hand a reader
+      the subject's own view of their shelves.
+
+      ⚠️ The row-level policies decide only whether a row may be FETCHED; the
+      `can_view?/2` filter below remains the authority on whether the viewer may
+      see it. That division is deliberate. Expressing the whole visibility
+      ladder — tier, profile ceiling, blocks, group membership, explicit grants,
+      age gate — as SQL would be a second implementation of a rule this module
+      already owns, and a drifting SQL copy is permissive everywhere row-level
+      security is bypassed, which includes every test and every superuser. So
+      over-fetching here is safe and under-fetching is not.
+
+      ⚠️ `:unauthenticated` is a real caller, not a defensive branch: this runs
+      under the optional-auth pipeline. It needs the anonymous scope rather than
+      no scope — an unscoped read is refused outright, which is why this path
+      returned a 500 on a public profile for every signed-out visitor.
   """
   @spec viewable_shelves(String.t(), term()) :: [Bookshelf.t()]
   def viewable_shelves(user_id, viewer) do
-    Bookshelf
-    |> where([b], b.user_id == ^user_id)
-    |> Repo.all()
+    Scope.for_viewer(viewer_id(viewer), fn ->
+      Bookshelf
+      |> where([b], b.user_id == ^user_id)
+      |> Repo.all()
+    end)
     |> Enum.filter(&can_view?(&1, viewer))
   end
 
-  @doc """
-      Returns all placements for the given bookshelf_id that are visible to the viewer.
-  """
-  @spec viewable_placements(String.t(), term()) :: [Placement.t()]
-  def viewable_placements(shelf_id, viewer) do
-    Placement
-    |> where([p], p.bookshelf_id == ^shelf_id)
-    |> Repo.all()
-    |> Enum.filter(&can_view?(&1, viewer))
-  end
+  # The viewer shapes this module already speaks, reduced to "is there a
+  # principal, and who". Anything that is not an identified platform user reads
+  # as nobody, which is the conservative direction: it narrows the fetch to
+  # publicly-readable rows.
+  defp viewer_id({:platform_user, id}) when is_binary(id), do: id
+  defp viewer_id(%{id: id}) when is_binary(id), do: id
+  defp viewer_id(_), do: nil
 
   @doc """
       Batch-resolves placement visibility for placements sharing ONE viewer
@@ -362,7 +393,13 @@ defmodule Stacks.Visibility do
   """
   @spec filter_visible_placements([Placement.t()], term()) :: [Placement.t()]
   def filter_visible_placements(placements, viewer) when is_list(placements) do
-    placements = Enum.map(placements, &maybe_preload_bookshelf/1)
+    # ⛔ Batch, not `Enum.map(&maybe_preload_bookshelf/1)`: preloading per
+    # placement issues one query EACH, which is exactly the per-placement cost
+    # this shared gate exists to avoid — a 20-book shelf paid 20 bookshelf
+    # lookups. `Repo.preload/2` on the whole list is one query, and it skips any
+    # placement whose bookshelf is already loaded, so callers that preloaded
+    # upstream pay nothing.
+    placements = Repo.preload(placements, :bookshelf)
     ctx = build_batch_context(placements, viewer)
     Enum.filter(placements, &(resolve_placement(&1, viewer, ctx) == :visible))
   end

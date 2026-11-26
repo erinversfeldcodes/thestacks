@@ -59,6 +59,13 @@ type alias Book =
     , editionCount : Int
     , subjects : List String
     , visibilityTier : VisibilityTier
+
+    -- How many readers across the platform have read this book, from
+    -- `marts.mart_community_read_count`. A proto3 int32 with implicit presence,
+    -- so an omitted field (the mart was unreadable) and a real 0 both arrive as
+    -- 0 — the view shows the figure only when it is > 0 rather than assert a
+    -- zero the wire cannot distinguish from "unknown".
+    , communityReadCount : Int
     }
 
 
@@ -125,6 +132,7 @@ fromProtoBook pb =
     , editionCount = pb.editionCount
     , subjects = pb.subjects
     , visibilityTier = fromProtoVisibility pb.visibilityTier
+    , communityReadCount = pb.communityReadCount
     }
 
 

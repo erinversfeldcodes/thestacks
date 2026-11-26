@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import {
   suiteAuthFile,
@@ -8,6 +8,8 @@ import {
   injectSession,
   fetchSentEmails,
   extractLink,
+  goAnonymous,
+  assertEmailBudgetOrSkip,
 } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("settings") });
@@ -50,8 +52,29 @@ test.describe("Settings — Privacy & Consent", () => {
     await expect(page.getByTestId("analytics-consent-toggle")).toBeVisible();
   });
 
-  test("analytics toggle switches between on and off", async ({ page }) => {
+  // ⛔ ITS OWN USER, because this test's subject is a TRANSITION. It reads the
+  // toggle, clicks, and asserts the text changed — which is only meaningful
+  // from a known starting state. On the shared suite user it passed once and
+  // failed on the next identical run, because the previous run had left a
+  // consent decision recorded and the control no longer flips the same way.
+  //
+  // ⚖️ Minted rather than restored: restoring the field in an `afterEach` is a
+  // second thing to keep correct, and it fails silently when it drifts. A fresh
+  // user has no recorded consent, which is the precondition this asserts from.
+  test("analytics toggle switches between on and off", async ({
+    page,
+    request,
+  }) => {
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-consent-analytics"),
+    });
+    await injectSession(page, session);
+
     await page.goto("/settings/consent");
+    // ⚠️ A freshly minted user still has onboarding, whose overlay covers the
+    // toggle — the click times out rather than failing an assertion, which
+    // reads like a broken control instead of an obscured one.
+    await dismissOnboarding(page);
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     const toggle = page.getByTestId("analytics-consent-toggle");
@@ -63,27 +86,40 @@ test.describe("Settings — Privacy & Consent", () => {
     expect(newText).not.toEqual(initialText);
   });
 
-  test("saving consent shows the 'Saved!' success state", async ({ page }) => {
+  test("toggling analytics consent saves immediately (no Save button)", async ({
+    page,
+  }) => {
     await page.goto("/settings/consent");
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
     const consent = page.locator(".settings-consent");
-    const saveBtn = consent.locator(".settings-actions button");
-    await expect(saveBtn).toBeVisible();
+    // There is no draft "Save Preferences" button any more: each toggle writes
+    // on click. The click alone fires POST /api/gdpr/consent.
+    await expect(consent.locator(".settings-actions")).toHaveCount(0);
 
-    await page.getByTestId("analytics-consent-toggle").click();
-    await saveBtn.click();
+    const toggle = page.getByTestId("analytics-consent-toggle");
+    await expect(toggle).toBeEnabled();
 
-    await expect(
-      consent.getByRole("button", { name: "Saved!" })
-    ).toBeVisible({ timeout: 5000 });
+    const saved = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/gdpr/consent") && r.request().method() === "POST"
+    );
+    await toggle.click();
+    expect((await saved).status(), "POST /api/gdpr/consent").toBe(200);
 
     await expect(consent.locator(".error")).toHaveCount(0);
   });
 
-  test("save failure surfaces the error message", async ({ page }) => {
+  test("a failed analytics save surfaces the inline error beside the toggle", async ({
+    page,
+  }) => {
     await page.goto("/settings/consent");
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
+
+    const toggle = page.getByTestId("analytics-consent-toggle");
+    // Wait for hydration (the control is disabled until the stored consent
+    // loads) before intercepting the save, so the 500 lands on the click.
+    await expect(toggle).toBeEnabled();
 
     await page.route("**/api/gdpr/consent", (route) =>
       route.fulfill({
@@ -93,26 +129,41 @@ test.describe("Settings — Privacy & Consent", () => {
       })
     );
 
-    const consent = page.locator(".settings-consent");
-    const saveBtn = consent.locator(".settings-actions button");
-    await expect(saveBtn).toBeVisible();
+    await toggle.click();
 
-    await page.getByTestId("analytics-consent-toggle").click();
-    await saveBtn.click();
-
-    await expect(consent.locator(".error")).toContainText(
-      "We could not save your consent preferences, and we cannot say why."
+    await expect(page.getByTestId("analytics-consent-error")).toContainText(
+      "We could not save your analytics preference, and we cannot say why."
     );
   });
 
+  // ⛔ ITS OWN USER, for the same reason and with one extra wrinkle: this test
+  // already TRIES to be order-independent — it clicks the toggle Off first when
+  // it reads "On" — and that was not enough. It still failed on the second of
+  // two identical runs. An attempted normalisation that does not actually
+  // normalise is worse than none, because it looks like the problem is handled.
   test("book-linking consent grants, flips the off-copy, and persists server-side", async ({
     page,
+    request,
   }) => {
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-consent-booklinking"),
+    });
+    await injectSession(page, session);
+
     await page.goto("/settings/consent");
+    await dismissOnboarding(page);
     await page.getByTestId("settings-hub").waitFor({ timeout: 5000 });
 
     const toggle = page.getByTestId("writing-assistant-consent-toggle");
     await expect(toggle).toBeVisible();
+
+    // The control is held DISABLED until the stored consent has hydrated from the
+    // server (Privacy page: `controlsLocked` is true while settings are Loading,
+    // then the settings response re-seeds the toggle from the saved value). Its
+    // text only reflects reality once it is enabled; `textContent()` does not wait
+    // for actionability, so reading and branching on the toggle before then races
+    // the hydration, which flips it under the test. Wait for enabled first.
+    await expect(toggle).toBeEnabled();
 
     const offCopy = page.getByText(
       "Your published posts are not sent to an AI model, so books you mention won't be linked automatically."
@@ -214,11 +265,9 @@ test.describe("Settings — Profile & Account API", () => {
         path: string;
         body: Record<string, unknown>;
       }) => {
-        const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
         const resp = await fetch(path, {
           method,
           headers: {
-            Authorization: `Bearer ${auth.token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(body),
@@ -344,6 +393,12 @@ test.describe("Settings — Profile & Account API", () => {
     page,
   }) => {
     await page.goto("/");
+
+    // ⛔ Explicitly credential-free. Sending no `Authorization` header below
+    // proves nothing: the suite's storage state carries the session cookie,
+    // which the server prefers over any header, so these requests would be
+    // authenticated and every assertion would read 200.
+    await goAnonymous(page);
 
     const unauthResults = await page.evaluate(async () => {
       const endpoints = [
@@ -588,8 +643,22 @@ test.describe("Settings — Profile UI flow", () => {
     ).toBeVisible();
     await expect(field(page, "Email")).toHaveValue(newEmail);
 
+    // ⛔ The stack's email-send budget decides whether this half can run at all.
+    // An email change is refused with 429 `email_rate_limited` (retry-after
+    // 3600) when its two letters cannot be sent, and the budget is NOT per-user
+    // — a brand-new minted user is refused on its first attempt once the suite's
+    // own repeated runs have exhausted it. Without this gate the journey below
+    // fails deterministically for an hour and reads as a broken feature.
+    const saved = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/settings/profile") &&
+        r.request().method() === "PUT",
+    );
     await field(page, "Current Password").fill(E2E_PASSWORD);
     await page.getByRole("button", { name: "Save Profile" }).click();
+    const savedResp = await saved;
+    await assertEmailBudgetOrSkip(savedResp);
+
     await expect(page.getByText("Profile saved.")).toBeVisible();
 
     // The typed address does NOT land: it parks as pending, and the account
@@ -846,30 +915,30 @@ test.describe("Settings — Analytics consent persistence", () => {
     await dismissOnboarding(page);
 
     const analytics = page.getByTestId("analytics-consent-toggle");
+    // Hydrated from GET /api/settings/privacy (a fresh user is off); until it
+    // answers the toggle shows "—", so this also waits out the pre-fetch state.
     await expect(analytics).toHaveText("Off");
 
-    const consent = page.locator(".settings-consent");
+    // Save-on-click: the toggle click alone persists the decision — there is no
+    // separate Save button to press.
     const saved = page.waitForResponse(
       (r) =>
         r.url().includes("/api/gdpr/consent") && r.request().method() === "POST",
       { timeout: 15000 }
     );
     await analytics.click();
-    await consent.locator(".settings-actions button").click();
     expect((await saved).status(), "POST /api/gdpr/consent").toBe(200);
-    await expect(
-      consent.getByRole("button", { name: "Saved!" })
-    ).toBeVisible({ timeout: 10000 });
+    await expect(analytics).toHaveText("On");
 
     await page.reload();
+    // After the reload the toggle is NOT seeded from any login blob — it opens
+    // "not yet known" and is hydrated solely by GET /api/settings/privacy. So a
+    // persisted "On" here means the SERVER stored it; the /api/auth/me check
+    // below confirms the same against the account record.
     await expect(page.getByTestId("analytics-consent-toggle")).toHaveText("On", {
       timeout: 10000,
     });
 
-    // The reloaded toggle is seeded from the session blob the app keeps in
-    // localStorage, which the app itself wrote — so the account has to be read
-    // back too, or a consent the server never stored would still show as "On"
-    // to the only reader who checks.
     const stored = await request.get("/api/auth/me", {
       headers: { Authorization: `Bearer ${session.token}` },
     });

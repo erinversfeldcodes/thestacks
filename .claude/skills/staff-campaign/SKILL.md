@@ -150,6 +150,14 @@ hygiene check would see the others' probes. Serialise probing, or give probing a
 worktrees (noting worktrees lack the gitignored `notes/`, so goal-checked work stays in the main
 tree).
 
+⚠️ **And the scratchpad is shared, so probe scripts collide there under guessable names.** A
+reviewer once appended to a `probe2.sh` another agent had already created, and the existing prefix
+ran first — a repo-mutating script under a name the second agent thought it had just made. Name
+every scratchpad file for its author and subject (`platform-reviewer-ports-probe.sh`, never
+`probe2.sh`), write with `>` rather than `>>`, and open any repo-mutating script with a banner
+saying what it changes and how it reverts. Full reasoning in
+`docs/agents/staff-engineer-agent.md` → *Parallelism constraints*.
+
 If the codebase is too large for one pass, scope the campaign to the subsystems the frame depends
 on and **say so in the coverage section** — a partial campaign that declares its edges is far more
 useful than one that implies completeness it doesn't have. Decide that yourself from the frame; do

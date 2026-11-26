@@ -7,6 +7,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.AI.MockClient
   alias Stacks.Books.MockHttpClient
   alias Stacks.Books.UploadedImage
   alias Stacks.Workers.IdentifyBookJob
@@ -48,6 +49,117 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       })
 
       assert event_count("image.resolved") == before_count + 1
+    end
+  end
+
+  describe "perform/1 — the warm/cold fact on the identify_book phase" do
+    # ⬛ The ruled warm p95 ≤ 10s threshold filters on this label; a phase stop
+    # that never carried it would silently empty the warm population and the
+    # SLO gate's min-samples guard would stop gating — a vacuous green. These
+    # listen on the REAL span around the REAL job.
+    test "a resolved answer carries cold=false when no GPU dispatch was cold", %{
+      user: user,
+      image: image
+    } do
+      ref = make_ref()
+      parent = self()
+
+      :telemetry.attach(
+        {__MODULE__, ref},
+        [:stacks, :upload, :phase, :stop],
+        fn _e, _m, meta, _c -> send(parent, {:phase_stop, ref, meta[:phase], meta[:cold]}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach({__MODULE__, ref}) end)
+
+      assert :ok =
+               perform_job(IdentifyBookJob, %{
+                 "user_id" => user.id,
+                 "image_id" => image.id,
+                 "image_b64" => @image_b64
+               })
+
+      # The mock's analyze response carries no gpu_dispatches — no GPU physics
+      # in the answer, warm by definition.
+      assert_receive {:phase_stop, ^ref, :identify_book, false}
+    end
+
+    test "a cold GPU dispatch on the answer's path marks the phase cold=true", %{
+      user: user,
+      image: image
+    } do
+      MockClient.put_response("analyze", fn _payload ->
+        {:ok,
+         %{
+           "classification" => "CLASSIFICATION_RESULT_BOOK",
+           "confidence" => 0.9,
+           "books" => [
+             %{
+               "title" => nil,
+               "author" => nil,
+               "potential_isbns" => ["9780743273565"],
+               "raw_text" => nil,
+               "confidence" => 0.9
+             }
+           ],
+           "model_used" => "mock",
+           "gpu_dispatches" => [
+             %{"container_id" => "c-1", "cold" => true, "container_age_s" => 0.0}
+           ]
+         }}
+      end)
+
+      ref = make_ref()
+      parent = self()
+
+      :telemetry.attach(
+        {__MODULE__, ref},
+        [:stacks, :upload, :phase, :stop],
+        fn _e, _m, meta, _c -> send(parent, {:phase_stop, ref, meta[:phase], meta[:cold]}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach({__MODULE__, ref}) end)
+
+      assert :ok =
+               perform_job(IdentifyBookJob, %{
+                 "user_id" => user.id,
+                 "image_id" => image.id,
+                 "image_b64" => @image_b64
+               })
+
+      assert_receive {:phase_stop, ^ref, :identify_book, true}
+    end
+
+    test "an answerless outcome carries cold=\"na\", not a fabricated warmth", %{
+      user: user,
+      image: image
+    } do
+      MockClient.put_response(
+        "analyze",
+        {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK", "confidence" => 0.9}}
+      )
+
+      ref = make_ref()
+      parent = self()
+
+      :telemetry.attach(
+        {__MODULE__, ref},
+        [:stacks, :upload, :phase, :stop],
+        fn _e, _m, meta, _c -> send(parent, {:phase_stop, ref, meta[:phase], meta[:cold]}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach({__MODULE__, ref}) end)
+
+      perform_job(IdentifyBookJob, %{
+        "user_id" => user.id,
+        "image_id" => image.id,
+        "image_b64" => @image_b64
+      })
+
+      assert_receive {:phase_stop, ^ref, :identify_book, "na"}
     end
   end
 

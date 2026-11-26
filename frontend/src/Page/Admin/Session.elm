@@ -10,17 +10,26 @@ module Page.Admin.Session exposing
     )
 
 {-| The admin sign-in gate — the module whose absence made every
-admin page dead: `/api/admin/*` demands an MFA-verified `admin_session`
-token (IP- and boot\_id-bound, 30-min MFA window), and the pages were
-sending the ordinary token, 401ing every action. Two steps: password →
-challenge, TOTP → admin token, held in memory only.
+admin page dead: `/api/admin/*` demands an MFA-verified admin session
+(IP- and boot\_id-bound, 30-min MFA window), and the pages were sending
+the ordinary token with no elevation recorded, 401ing every action. Two
+steps: password → challenge, TOTP → the server marks the session verified.
+
+⛔ The second step no longer yields a credential. It used to return an
+admin token this page handed upward to be held in memory, which a reload
+dropped — so an operator was re-prompted for a code the server had
+already accepted. The elevation now lives only on the server's session,
+and `/api/admin/*` is reached with the ordinary session cookie.
+
 -}
 
 import Api exposing (AdminAuthError(..), AdminMfaEnrolment)
+import Effect
 import Html exposing (Html, button, div, form, h1, h2, input, label, li, ol, p, span, text)
 import Html.Attributes exposing (attribute, autocomplete, class, disabled, for, id, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
+import Json.Decode as Decode
 import Url
 import Util.TestId exposing (testId)
 
@@ -36,7 +45,11 @@ type Step
 
 
 type alias Model =
-    { step : Step
+    { -- ⚠️ The same-origin proof. This page performs a state-changing request
+      -- with NO session behind it, so the proof cannot come from a credential —
+      -- it comes from the document, via the boot config.
+      proof : Maybe String
+    , step : Step
     , email : String
     , password : String
     , code : String
@@ -48,12 +61,13 @@ type alias Model =
 
 type Msg
     = SetEmail String
+    | EnrolmentSessionGone
     | SetPassword String
     | SetCode String
     | SubmitCredentials
     | LoggedIn (Result AdminAuthError Api.AdminSession)
     | SubmitCode
-    | Verified (Result AdminAuthError String)
+    | Verified (Result AdminAuthError ())
     | StartEnrolment
     | EnrolmentStarted (Result Http.Error AdminMfaEnrolment)
     | ConfirmEnrolment
@@ -62,12 +76,19 @@ type Msg
 
 type OutMsg
     = NoOut
-    | Authenticated String
+      -- ⛔ CARRIES NOTHING, and the absence is the change. This used to be
+      -- `Authenticated String` — the admin token the server minted at the end
+      -- of the MFA step, which the app held in memory and lost on reload,
+      -- re-prompting for a code the server had already accepted. Elevation is
+      -- now a fact about the session the server holds, so the only thing worth
+      -- telling the parent is that it happened.
+    | Elevated
 
 
-init : Model
-init =
-    { step = Credentials
+init : Maybe String -> Model
+init proof =
+    { proof = proof
+    , step = Credentials
     , email = ""
     , password = ""
     , code = ""
@@ -81,9 +102,13 @@ init =
 purpose (they ended their session) rather than by being turned away, and a form
 with no explanation would read as the sign-in having failed.
 -}
-initWithNotice : String -> Model
-initWithNotice notice =
-    { init | notice = Just notice }
+initWithNotice : Maybe String -> String -> Model
+initWithNotice proof notice =
+    let
+        base =
+            init proof
+    in
+    { base | notice = Just notice }
 
 
 {-| The `secret=` parameter from an `otpauth://` provisioning URI, **base32, unmodified**.
@@ -112,9 +137,31 @@ enrolmentSecret enrolment =
         |> List.head
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
+update : Msg -> Model -> Maybe Api.Credentials -> ( Model, Cmd Msg, OutMsg )
 update msg model ownerToken =
     case msg of
+        -- ⚠️ THE ONE EXPIRY THIS PAGE CAN HAVE, and it is not the one the page is
+        -- about. Signing in and verifying a code are `public` plans: a 401 there
+        -- IS the answer, which is why this page is exempt from
+        -- `check-session-expiry-coverage.sh`. But MFA enrolment is done by an
+        -- owner who is already signed in to The Stacks, so its two requests are
+        -- `authed` and a 401 on them means that reader's session died — a
+        -- different thing from "those credentials are wrong".
+        --
+        -- ⚖️ Shown rather than routed out, because this page's `OutMsg` is
+        -- `NoOut | Elevated`: it has no expiry outcome to report and inventing
+        -- one would make `Main` bounce an operator off the admin gate onto the
+        -- reader login, which is the exact behaviour the exemption exists to
+        -- prevent.
+        EnrolmentSessionGone ->
+            ( { model
+                | busy = False
+                , error = Just "Your session ended. Sign in to The Stacks again, then return here."
+              }
+            , Cmd.none
+            , NoOut
+            )
+
         SetEmail value ->
             ( { model | email = value }, Cmd.none, NoOut )
 
@@ -130,7 +177,20 @@ update msg model ownerToken =
 
             else
                 ( { model | busy = True, error = Nothing }
-                , Api.adminLogin { email = model.email, password = model.password } LoggedIn
+                , Effect.perform
+                    (Effect.public
+                        (Api.adminLoginRequest
+                            { email = model.email, password = model.password }
+                        )
+                        Nothing
+                        model.proof
+                        (Api.resolveAdminJson
+                            (Decode.map Api.AdminSession
+                                (Decode.field "session_id" Decode.string)
+                            )
+                            >> LoggedIn
+                        )
+                    )
                 , NoOut
                 )
 
@@ -158,17 +218,28 @@ update msg model ownerToken =
 
                     else
                         ( { model | busy = True, error = Nothing }
-                        , Api.adminVerifyMfa
-                            { sessionId = sessionId, code = String.trim model.code }
-                            Verified
+                        , Effect.perform
+                            (Effect.public
+                                (Api.adminVerifyMfaRequest
+                                    { sessionId = sessionId, code = String.trim model.code }
+                                )
+                                Nothing
+                                model.proof
+                                (Api.resolveAdminJson (Decode.succeed ()) >> Verified)
+                            )
                         , NoOut
                         )
 
                 _ ->
                     ( model, Cmd.none, NoOut )
 
-        Verified (Ok token) ->
-            ( { model | busy = False, code = "" }, Cmd.none, Authenticated token )
+        -- ⚠️ The BEARER only. This page has no business knowing about the
+        -- same-origin proof — that is a property of the document, held by
+        -- `Main`, which pairs the two when it stores the admin session. A page
+        -- that built the whole credential would need the proof threaded into
+        -- it for no reason other than to hand it straight back.
+        Verified (Ok ()) ->
+            ( { model | busy = False, code = "" }, Cmd.none, Elevated )
 
         Verified (Err err) ->
             ( { model | busy = False, code = "", error = Just (authErrorMessage err) }
@@ -195,12 +266,19 @@ update msg model ownerToken =
                     case enrolmentSecret enrolment of
                         Just secret ->
                             ( { model | busy = True, error = Nothing }
-                            , Api.adminMfaConfirm token
-                                { code = String.trim model.code
-                                , secret = secret
-                                , recoveryCodes = enrolment.recoveryCodes
-                                }
-                                EnrolmentConfirmed
+                            , Effect.perform
+                                (Effect.authed
+                                    (Api.adminMfaConfirmRequest
+                                        { code = String.trim model.code
+                                        , secret = secret
+                                        , recoveryCodes = enrolment.recoveryCodes
+                                        }
+                                    )
+                                    token
+                                    { onExpired = EnrolmentSessionGone
+                                    , onResponse = Api.resolveWhatever >> EnrolmentConfirmed
+                                    }
+                                )
                             , NoOut
                             )
 
@@ -237,13 +315,22 @@ update msg model ownerToken =
 
 
 startEnrolmentIfPossible :
-    Maybe String
+    Maybe Api.Credentials
     -> ( Model, Cmd Msg, OutMsg )
     -> ( Model, Cmd Msg, OutMsg )
 startEnrolmentIfPossible ownerToken ( model, cmd, out ) =
     case ownerToken of
         Just token ->
-            ( { model | busy = True }, Api.adminMfaSetup token EnrolmentStarted, out )
+            ( { model | busy = True }
+            , Effect.perform
+                (Effect.authed Api.adminMfaSetupRequest
+                    token
+                    { onExpired = EnrolmentSessionGone
+                    , onResponse = Api.resolveJson Api.adminMfaEnrolmentDecoder >> EnrolmentStarted
+                    }
+                )
+            , out
+            )
 
         Nothing ->
             ( { model

@@ -2,10 +2,11 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
   @moduledoc """
       — consent-revocation purge for the writing assistant.
 
-      Proves the worker deletes the four personal AI data sets (sessions +
-      cascaded turn_feedback/retrieval_log, embeddings, content-access), PRESERVES
-      the shared book_content_chunks corpus and the user row, is idempotent (safe to
-      perform twice), and only touches the target user's data.
+      Proves the worker deletes the user's personal AI data sets (corpus
+      annotations, imported works, sessions + cascaded turn_feedback/retrieval_log,
+      embeddings, content-access), PRESERVES the shared book_content_chunks corpus
+      and the user row, is idempotent (safe to perform twice), and only touches the
+      target user's data.
   """
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
@@ -17,7 +18,9 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
 
   alias Stacks.WritingAssistant.{
     BookContentChunk,
+    CorpusAnnotation,
     Embedding,
+    ImportedWork,
     RetrievalLog,
     Session,
     TurnFeedback,
@@ -29,14 +32,30 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
   defp seed_graph(user, book) do
     session = Repo.insert!(%Session{user_id: user.id, status: "active"})
 
+    work =
+      Repo.insert!(%ImportedWork{
+        user_id: user.id,
+        title: "Manuscript",
+        source_format: "txt",
+        imported_at: DateTime.utc_now()
+      })
+
     %{
       session: session,
+      work: work,
+      annotation:
+        Repo.insert!(%CorpusAnnotation{
+          user_id: user.id,
+          work_id: work.id,
+          tags: ["exemplar"],
+          note: "a private note"
+        }),
       embedding:
         Repo.insert!(%Embedding{
           user_id: user.id,
           source_type: "shelf",
           title: "My Shelf",
-          embedding: Pgvector.new(@vec)
+          embedding: @vec
         }),
       feedback: Repo.insert!(%TurnFeedback{session_id: session.id, turn_index: 0, rating: "up"}),
       retrieval: Repo.insert!(%RetrievalLog{session_id: session.id, query: "cottage core"}),
@@ -56,13 +75,15 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
     }
   end
 
-  test "purges the four personal AI data sets, preserves the shared corpus + user row" do
+  test "purges the personal AI data sets, preserves the shared corpus + user row" do
     user = insert(:user)
     book = insert(:book)
     g = seed_graph(user, book)
 
     assert :ok = perform_job(WritingAssistantDataPurgeWorker, %{"user_id" => user.id})
 
+    refute Repo.get(CorpusAnnotation, g.annotation.id)
+    refute Repo.get(ImportedWork, g.work.id)
     refute Repo.get(Session, g.session.id)
     refute Repo.get(TurnFeedback, g.feedback.id)
     refute Repo.get(RetrievalLog, g.retrieval.id)
@@ -81,6 +102,8 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
     assert :ok = perform_job(WritingAssistantDataPurgeWorker, %{"user_id" => user.id})
     assert :ok = perform_job(WritingAssistantDataPurgeWorker, %{"user_id" => user.id})
 
+    refute Repo.get(CorpusAnnotation, g.annotation.id)
+    refute Repo.get(ImportedWork, g.work.id)
     refute Repo.get(Session, g.session.id)
     refute Repo.get(Embedding, g.embedding.id)
     refute Repo.get(UserBookContentAccess, g.access.id)
@@ -97,6 +120,8 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
 
     assert :ok = perform_job(WritingAssistantDataPurgeWorker, %{"user_id" => victim.id})
 
+    assert Repo.get(CorpusAnnotation, b.annotation.id)
+    assert Repo.get(ImportedWork, b.work.id)
     assert Repo.get(Session, b.session.id)
     assert Repo.get(TurnFeedback, b.feedback.id)
     assert Repo.get(RetrievalLog, b.retrieval.id)

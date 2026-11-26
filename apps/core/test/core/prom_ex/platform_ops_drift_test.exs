@@ -10,6 +10,7 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
 
   use ExUnit.Case, async: true
 
+  alias Core.PromEx.ExternalFamilies
   alias Core.PromEx.Plugins.Stacks, as: StacksPlugin
 
   @dashboard_relative_path "grafana/platform_ops.json"
@@ -21,11 +22,25 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
   defp dashboard_path,
     do: Application.app_dir(:core, Path.join("priv", @dashboard_relative_path))
 
+  # ⛔ THE PLUGIN IS NOT THE WHOLE STORE, and treating it as such made this gate
+  # FORBID a panel for any externally-pushed series. The billing families are
+  # written by `scripts/push_billing_metrics.py` on a daily cron, so they are in
+  # the store and not in the plugin — and this gate rejected a panel for them
+  # while `DashboardCompletenessTest` passed vacuously over them. Between the
+  # two, the only invoice-derived figures in the system could not be displayed
+  # and were not required to be.
+  #
+  # ⚖️ Declared, not wildcarded: `Core.PromEx.ExternalFamilies` enumerates them
+  # with their pusher. A pattern match would have unblocked the panel and left
+  # completeness unenforceable, because a set you cannot enumerate cannot be
+  # required to have panels.
   defp registered_families do
-    StacksPlugin.event_metrics([])
-    |> Enum.flat_map(& &1.metrics)
-    |> Enum.map(fn metric -> metric.name |> Enum.join("_") end)
-    |> MapSet.new()
+    plugin =
+      StacksPlugin.event_metrics([])
+      |> Enum.flat_map(& &1.metrics)
+      |> Enum.map(fn metric -> metric.name |> Enum.join("_") end)
+
+    MapSet.new(plugin ++ ExternalFamilies.families())
   end
 
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
@@ -105,7 +120,7 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
                "registered: " <> inspect(Enum.sort(MapSet.to_list(registered)))
 
       assert MapSet.member?(referenced, @new_family),
-             "expected the new #240 metric #{inspect(@new_family)} to be queried by a panel; " <>
+             "expected the platform-ops metric #{inspect(@new_family)} to be queried by a panel; " <>
                "referenced: " <> inspect(Enum.sort(MapSet.to_list(referenced)))
     end
   end

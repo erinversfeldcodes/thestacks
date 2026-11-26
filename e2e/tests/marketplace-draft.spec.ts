@@ -1,8 +1,9 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import {
   DEV_EMAIL,
   DEV_PASSWORD,
   ensureBookOnLibrary,
+  expireSession,
   signInViaForm,
 } from "./helpers";
 
@@ -11,10 +12,10 @@ const LISTING_DRAFT_KEY = "stacks-listing-draft";
 const DRAFT_PRICE = "247";
 const DRAFT_CONTACT = "e2e-182-draft@thestacks.test";
 const DRAFT_DESCRIPTION =
-  "DRAFT-RESTORE-MARKER — Plath first edition, mid-compose expiry #182";
+  "DRAFT-RESTORE-MARKER — Plath first edition, mid-compose expiry";
 
-test.describe("Marketplace listing draft []", () => {
-  test("CreateListing draft survives a mid-compose session expiry and is restored after re-login []", async ({
+test.describe("Marketplace listing draft", () => {
+  test("CreateListing draft survives a mid-compose session expiry and is restored after re-login", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
@@ -40,14 +41,13 @@ test.describe("Marketplace listing draft []", () => {
     await page.fill("#contact-input", DRAFT_CONTACT);
     await page.fill("#description-input", DRAFT_DESCRIPTION);
 
-    const liveToken = await page.evaluate(
-      () => JSON.parse(localStorage.getItem("stacks-auth") || "{}").token
-    );
-    expect(liveToken).toBeTruthy();
-    const revokeResp = await page.request.delete("/api/auth/logout", {
-      headers: { Authorization: `Bearer ${liveToken}` },
-    });
-    expect(revokeResp.status()).toBe(204);
+    // ⛔ Expire the session the way a real TTL expiry does — corrupt the session
+    // cookie, leaving the CSRF cookie intact. `logout` would clear the CSRF
+    // cookie too, so the mid-compose write would fail the stateless
+    // double-submit check (403) before auth (401) is ever reached — and the
+    // draft-save path keys on 401 (`Api.isUnauthorized`), so a logout-based
+    // revoke never exercises the expiry branch this spec exists to prove.
+    await expireSession(page);
 
     await page
       .getByRole("button", { name: "Create Listing", exact: true })
@@ -63,10 +63,10 @@ test.describe("Marketplace listing draft []", () => {
 
     await expect(page.getByTestId("login-error")).toHaveCount(0);
 
-    const clearedAuth = await page.evaluate(() =>
-      localStorage.getItem("stacks-auth")
-    );
-    expect(clearedAuth).toBeFalsy();
+    // An expiry leaves a present-but-invalid session cookie (unlike a logout,
+    // which clears it), so the credential's absence is the wrong thing to
+    // assert here. The refusal is proven by the session-expired notice and the
+    // redirect to /login above — the expiry path actually ran.
 
     const persistedDraft = await page.evaluate(
       (key) => localStorage.getItem(key),

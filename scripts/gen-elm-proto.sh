@@ -67,7 +67,12 @@ if [[ "${1:-}" == "--check" ]]; then
 fi
 
 if [[ -d "$OUTPUT_DIR" ]] && [[ -n "$(ls -A "$OUTPUT_DIR" 2>/dev/null)" ]]; then
-    OLDEST_GEN="$(find "$OUTPUT_DIR" -type f -name '*.elm' | head -1)"
+    # ⛔ `-print -quit` rather than `| head -1`: under `set -e` the assignment
+    # takes the pipeline's status, and `head` always closes early, so a
+    # directory large enough that find is still writing gives 141 and aborts
+    # the codegen — with no output and no explanation. `-quit` makes find stop
+    # after the first match itself, so there is no second process to signal.
+    OLDEST_GEN="$(find "$OUTPUT_DIR" -type f -name '*.elm' -print -quit 2>/dev/null)"
     if [[ -n "$OLDEST_GEN" ]]; then
         STALE=false
         while IFS= read -r -d '' proto_file; do

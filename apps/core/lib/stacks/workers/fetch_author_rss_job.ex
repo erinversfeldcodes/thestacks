@@ -8,7 +8,7 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
       On feed parse failure: logs a warning and skips the author (does not crash).
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
+  use Stacks.Worker, scope: :system, queue: :default, max_attempts: 3
 
   require Logger
 

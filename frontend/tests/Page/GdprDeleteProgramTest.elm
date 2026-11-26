@@ -39,9 +39,9 @@ suite =
         ]
 
 
-token : String
+token : Api.Credentials
 token =
-    "test-token"
+    TestHelpers.creds "test-token"
 
 
 {-| Test model: wraps Privacy's model and accumulates the OutMsgs it emits so
@@ -119,7 +119,7 @@ enabled/disabled steady state), used to assert its enabled/disabled state.
 deleteSubmit : List Selector.Selector
 deleteSubmit =
     [ Selector.tag "button"
-    , Selector.containing [ Selector.text "Delete My Data" ]
+    , Selector.containing [ Selector.exactText "Delete My Data" ]
     ]
 
 
@@ -144,7 +144,7 @@ showsDeleteEntryPoint =
         \() ->
             start
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Delete My Data" ]
+                    [ Selector.exactText "Delete My Data" ]
 
 
 revealsConfirmationOnClick : Test
@@ -163,10 +163,10 @@ showsDisabledCueBeforeConfirm =
                 |> ProgramTest.ensureViewHas
                     [ Selector.tag "button"
                     , Selector.class "btn--disabled"
-                    , Selector.containing [ Selector.text "Delete My Data" ]
+                    , Selector.containing [ Selector.exactText "Delete My Data" ]
                     ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Enter DELETE above to enable this button." ]
+                    [ Selector.exactText "Enter DELETE above to enable this button." ]
 
 
 guardDisabledForLowercase : Test
@@ -211,7 +211,7 @@ showsLoadingOnSubmit =
         \() ->
             submitted
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Queuing account deletion…" ]
+                    [ Selector.exactText "Queuing account deletion…" ]
 
 
 locksInputWhileLoading : Test
@@ -276,7 +276,7 @@ showsErrorOnFailure =
                     "/api/gdpr/account"
                     Http.NetworkError_
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "We couldn't queue your account deletion. Please try again." ]
+                    [ Selector.exactText "We couldn't queue your account deletion. Please try again." ]
 
 
 cancelResetsTheFlow : Test
@@ -289,4 +289,4 @@ cancelResetsTheFlow =
                 |> ProgramTest.ensureViewHasNot
                     [ Selector.text "Type DELETE to confirm" ]
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Delete My Data" ]
+                    [ Selector.exactText "Delete My Data" ]

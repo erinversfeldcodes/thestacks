@@ -1,10 +1,11 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import {
   uniqueEmail,
   mintSession,
   injectSession,
   ensureBookOnLibrary,
+  hasSessionCookie,
   type MintedSession,
 } from "./helpers";
 
@@ -89,10 +90,10 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
 
     await landAuthenticated(page, session);
 
-    const authToken = await page.evaluate(
-      () => JSON.parse(localStorage.getItem("stacks-auth") || "{}").token
-    );
-    expect(authToken).toBeTruthy();
+    expect(
+      await hasSessionCookie(page),
+      "the minted session must be in this context's cookie jar"
+    ).toBe(true);
 
     await page.goto("/settings/privacy");
     await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
@@ -121,14 +122,20 @@ test.describe("GDPR — Export & Delete (live browser journeys)", () => {
     await page.waitForURL("**/login", { timeout: 15000 });
 
     // End-to-end erasure proof: the deletion job runs async, so the session
-    // invalidation is eventual — poll the captured token against an
+    // invalidation is eventual — poll the reader's OWN session against an
     // authenticated endpoint until it is rejected with 401.
+    //
+    // ⛔ `page.request`, which carries the session cookie this browser still
+    // holds. That is deliberate and it is the honest measurement: the deletion
+    // endpoint does NOT revoke the session or clear the cookie, so the
+    // credential keeps working until the job removes the user. This poll is
+    // what makes that window visible rather than assumed — and it is the
+    // assertion that would tighten to "refused immediately" if the endpoint
+    // started revoking on the 202.
     await expect
       .poll(
         async () => {
-          const resp = await request.get("/api/settings/audit-log?page=1", {
-            headers: { Authorization: `Bearer ${authToken}` },
-          });
+          const resp = await page.request.get("/api/settings/audit-log?page=1");
           return resp.status();
         },
         {

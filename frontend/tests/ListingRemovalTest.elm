@@ -23,7 +23,8 @@ import Types.RemoteData exposing (RemoteData(..))
 
 filled : ListingRemoval.Model
 filled =
-    { url = "https://yourshop.example"
+    { proof = Nothing
+    , url = "https://yourshop.example"
     , email = "owner@yourshop.example"
     , reason = ""
     , submitting = NotAsked
@@ -42,7 +43,7 @@ suite =
             [ test "a verified removal says the listing is gone" <|
                 \_ ->
                     render { filled | submitting = Success Removed }
-                        |> Query.has [ Selector.text "Your listing has been removed." ]
+                        |> Query.has [ Selector.exactText "Your listing has been removed." ]
             , test "a pending request does NOT say the listing is gone" <|
                 \_ ->
                     render { filled | submitting = Success PendingReview }

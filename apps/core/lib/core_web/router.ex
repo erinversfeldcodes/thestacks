@@ -4,10 +4,32 @@ defmodule CoreWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug StacksWeb.Plugs.SecurityHeaders
+
+    # ⚠️ COUNTS, and cannot reject. Shipped before any enforcement so the
+    # decision to enforce is a reading of present/absent/mismatched over real
+    # traffic rather than a judgement — the recorded failure behind this work is
+    # an enforcement switched on before the client side was converted.
+    #
+    # On `:api` rather than on each authenticated pipeline, so the pre-auth
+    # writes (login, password reset, registration) are counted too: they are
+    # state-changing and they are exactly the routes a token issued at login
+    # would have missed.
+    plug StacksWeb.Plugs.CsrfCounter
+
+    # ⛔ REFUSES, and it runs AFTER the counter so a rejected request is counted
+    # before it is turned away — otherwise enforcement would hide the very
+    # signal that says whether enforcement is correct.
+    plug StacksWeb.Plugs.CsrfEnforce
   end
 
   pipeline :spa do
     plug StacksWeb.Plugs.SecurityHeaders
+
+    # ⚠️ The CSRF cookie is issued HERE, on the SPA's own HTML response, rather
+    # than at login. A browser cannot send any XHR — the login POST included —
+    # before it has loaded this page, so every later request carries a token
+    # with no exemption and no assumption about what the client does at boot.
+    plug StacksWeb.Plugs.CsrfCookie
   end
 
   pipeline :authenticated do
@@ -42,10 +64,24 @@ defmodule CoreWeb.Router do
     plug StacksWeb.Plugs.RateLimiter, bucket: :public
   end
 
-  pipeline :sse_auth do
-    plug StacksWeb.Plugs.SSEAuthPipeline
-  end
-
+  # ⚠️ Not `:api`, and the reason is the COUNTER rather than the scope gate.
+  #
+  # ⛔ The first version of this comment said keeping the stream out "leaves the
+  # counter's declared scope exactly the set of state-changing routes it says it
+  # covers" — which is not a reason, because `scripts/check-csrf-scope.sh`
+  # parses only `post|put|patch|delete`. A GET was never in its population, so
+  # joining `:api` could not have moved its numbers either way.
+  #
+  # ⚖️ The real reason: `CsrfCounter` counts safe methods as `:safe` rather than
+  # skipping them (`@safe_methods ~w(GET HEAD OPTIONS)`). Putting the upload
+  # stream on `:api` would pour every one of its requests into that series —
+  # and the series is how the rollout decides whether the CSRF proof is
+  # arriving. A long-lived SSE connection is structurally incapable of needing a
+  # proof, so counting it is noise in the one reading that has to stay clean.
+  #
+  # ⚠️ Stated at this length because the wrong version was ACTIONABLE: a reader
+  # could "fix the inconsistency" by joining `:api`, see the scope gate
+  # unchanged exactly as the old comment promised, and conclude it was safe.
   pipeline :sse_api do
     plug StacksWeb.Plugs.SecurityHeaders
   end
@@ -55,11 +91,38 @@ defmodule CoreWeb.Router do
   end
 
   pipeline :require_owner do
-    plug StacksWeb.Plugs.RequireRole, role: "owner"
+    plug StacksWeb.Plugs.RequireRole, role: "owner", on_denied: :not_found
   end
 
   pipeline :admin do
+    # ⛔ THE ORDINARY SESSION FIRST, and this line is the whole point of the
+    # change that introduced it. `AdminAuthPipeline` used to authenticate from a
+    # SECOND Guardian token the SPA held in memory, so a reload dropped the
+    # elevation and re-prompted for MFA that the server had already recorded.
+    # Now the operator is identified exactly as on every other authenticated
+    # route — the HttpOnly cookie — and their admin session is looked up from
+    # that user.
+    #
+    # ⚠️ Here rather than added to each route's `pipe_through`, so the pipeline
+    # states its own prerequisite: an admin route that reached
+    # `AdminAuthPipeline` without an authenticated reader would 401 on every
+    # request, which is a confusing way to learn about a missing plug.
+    plug StacksWeb.Plugs.AuthPipeline
     plug StacksWeb.Plugs.AdminAuthPipeline
+    plug StacksWeb.Plugs.RequireMFA
+    plug StacksWeb.Plugs.AuditAdminCall
+  end
+
+  # The owner-only admin surface. Authorisation (is this the owner?) is settled
+  # BEFORE authentication-strength (has this session cleared the second factor?):
+  # a non-owner is turned away as a 404 — the same answer a route that does not
+  # exist gives — and so is never shown the MFA prompt for a surface it can never
+  # reach. The owner check sits after AdminAuthPipeline so the user is loaded, and
+  # before RequireMFA; audit runs last, on the authorised, second-factor call.
+  pipeline :admin_owner do
+    plug StacksWeb.Plugs.AuthPipeline
+    plug StacksWeb.Plugs.AdminAuthPipeline
+    plug StacksWeb.Plugs.RequireRole, role: "owner", on_denied: :not_found
     plug StacksWeb.Plugs.RequireMFA
     plug StacksWeb.Plugs.AuditAdminCall
   end
@@ -159,13 +222,43 @@ defmodule CoreWeb.Router do
          :reject_identification
   end
 
+  # Writing-assistant corpus: import the author's own unpublished writing and
+  # annotate it. Consent-gated (writing_assistant) inside the controller.
   scope "/api", StacksWeb do
-    pipe_through :api
+    pipe_through [:api, :authenticated, :rate_limit_upload]
+    post "/writing/import", WritingController, :import
+    post "/writing/works/:work_id/annotations", WritingController, :annotate_work
+    post "/writing/chunks/:embedding_id/annotations", WritingController, :annotate_chunk
+    post "/blog/posts/:id/chat", BlogAssistantController, :chat
+  end
+
+  scope "/api", StacksWeb do
+    # ⛔ AUTHENTICATED AND RATE-LIMITED, like the two endpoints that bracket it.
+    #
+    # This scope carried `:api` alone, so the one route that accepts 20 MB of
+    # bytes was the only part of the upload flow with neither. MEASURED on a
+    # deployed stack: a `PUT` with no `Authorization` header, an `image_id` that
+    # is not a UUID and was never reserved, and 20,361 bytes of JPEG returned
+    # **200**.
+    #
+    # ⚠️ The CSRF proof in front of it was never the missing control. It
+    # establishes that a request came from a document on our origin, which any
+    # browser and any scripted client can arrange; it says nothing about WHO is
+    # asking or WHAT they may write to.
+    pipe_through [:api, :authenticated, :rate_limit_upload]
     put "/upload/:image_id/data", UploadController, :upload_data
   end
 
   scope "/api", StacksWeb do
-    pipe_through [:sse_api, :sse_auth]
+    # ⛔ `:authenticated`, the same pipeline every other authenticated route
+    # uses. There used to be a bespoke `:sse_auth` here reading the token from
+    # `?token=`, because `EventSource` cannot set an `Authorization` header —
+    # which put a live credential in request logs, in `Referer` and in browser
+    # history. `EventSource` DOES send cookies on a same-origin request, and
+    # every request this SPA makes is same-origin (`Api.baseUrl` is `""`), so
+    # the session travels the way it does everywhere else and the second
+    # authentication path is gone.
+    pipe_through [:sse_api, :authenticated]
     get "/upload/:image_id/stream", UploadController, :stream
   end
 
@@ -248,6 +341,7 @@ defmodule CoreWeb.Router do
     delete "/blog/posts/:id", BlogController, :delete
     post "/blog/posts/:id/publish", BlogController, :publish
     get "/blog/posts/:id/syndication", BlogController, :syndication
+    get "/blog/posts/:id/syndications", BlogController, :list_syndications
     post "/blog/posts/:id/syndications", BlogController, :create_syndication
     put "/blog/posts/:id/syndications/:sid", BlogController, :update_syndication
     put "/blog/posts/:post_id/associations/:id/confirm", BlogController, :confirm_association
@@ -319,11 +413,11 @@ defmodule CoreWeb.Router do
 
   scope "/api/auth", StacksWeb do
     pipe_through [:api, :rate_limit_auth]
-    get "/invite/:code", InviteController, :show
+    post "/invite/check", InviteController, :check
   end
 
   scope "/api/admin", StacksWeb do
-    pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
+    pipe_through [:api, :admin_owner, :rate_limit_admin]
     get "/invites", InviteAdminController, :index
     post "/invites", InviteAdminController, :create
     delete "/invites/:id", InviteAdminController, :delete
@@ -353,7 +447,7 @@ defmodule CoreWeb.Router do
   end
 
   scope "/api/admin", StacksWeb do
-    pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
+    pipe_through [:api, :admin_owner, :rate_limit_admin]
     get "/data_corrections", DataCorrectionController, :index
     post "/data_corrections/:name/apply", DataCorrectionController, :apply
     post "/data_corrections/:name/target", DataCorrectionController, :target
@@ -361,7 +455,6 @@ defmodule CoreWeb.Router do
 
   scope "/api/internal", StacksWeb do
     pipe_through :api
-    post "/vision/associate", InternalController, :vision_associate
     post "/smoke/circuit_breakers", InternalController, :smoke_circuit_breakers
   end
 
@@ -369,10 +462,25 @@ defmodule CoreWeb.Router do
     pipe_through [:api, StacksWeb.Plugs.E2ETestHelper, :rate_limit_e2e_helper]
     get "/confirmation-token", TestHelperController, :confirmation_token
     get "/sent-emails", TestHelperController, :sent_emails
+    get "/email-budget", TestHelperController, :email_budget
     put "/age-verification", TestHelperController, :set_age_verification
+    delete "/admin-sessions", TestHelperController, :revoke_admin_sessions
     post "/session", TestHelperController, :mint_session
     post "/book-writing", TestHelperController, :seed_book_writing
     post "/book-description", TestHelperController, :seed_book_description
+    post "/association-outcome", TestHelperController, :seed_association_outcome
+  end
+
+  # ⛔ Must stay ABOVE the SPA catch-all. Everything under `/api` that no route
+  # above matched is an API request that does not exist, and it has to say so in
+  # the API's own vocabulary. Falling through to the catch-all made every such
+  # request answer `200 text/html` with the app shell, which meant a removed or
+  # mistyped endpoint was indistinguishable from a working one by status, and
+  # `Api.isNotFound` could never fire for it.
+  scope "/api", CoreWeb do
+    pipe_through :api
+
+    match :*, "/*path", PageController, :api_not_found
   end
 
   scope "/", CoreWeb do

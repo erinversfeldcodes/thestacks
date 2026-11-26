@@ -40,7 +40,7 @@ Partners (bookshops, reading groups, cafes) push data via JSON API validated aga
 `.proto` files in `proto/` are the single source of truth for structured data. `buf lint` and `buf breaking` run in CI. JSON on the wire. Elm decoders are gitignored and regenerated at build time via `scripts/gen-elm-proto.sh`.
 
 ### GDPR by Default
-4-tier data classification (public, personal, sensitive, external personal). Right to erasure, right to export. 30-day image retention. Consent with timestamps.
+4-tier data classification (public, personal, sensitive, external personal). Right to erasure, right to export. Consent with timestamps. **Image retention is two deadlines, not one:** the photograph is deleted ~24h after identification finishes (the reader's retry window), the `uploaded_images` record at 30 days.
 
 **Any change touching migrations, Ecto schemas, event emitters, user-data endpoints/routes, workers, or dbt models MUST pass the `gdpr-review` skill** (`.claude/skills/gdpr-review/`) — a per-diff lens proving each new piece of personal data is reachable by erasure (`GDPR.Deletion.delete_user_data/1` + the schema-guard — free-text must be deleted/anonymised, not just author-nulled), included in export (`GDPR.Export.export_user_data/2`), gated where required (`ConsentCheck`), and kept out of event_log/audit/warehouse. Run it as a lens during code-review for data-touching PRs.
 

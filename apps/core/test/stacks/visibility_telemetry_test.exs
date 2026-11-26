@@ -77,7 +77,10 @@ defmodule Stacks.VisibilityTelemetryTest do
     test "emits recap with :capped outcome and cap counts" do
       attach_telemetry([[:stacks, :visibility, :recap]])
       user = insert(:user, profile_visibility: "owner")
-      bookshelf = insert(:bookshelf, user: user, visibility: "platform")
+
+      bookshelf =
+        insert(:bookshelf, user: user, visibility: "platform", allow_over_ceiling: true)
+
       _placement = insert(:placement, bookshelf: bookshelf, visibility: "platform")
 
       assert :ok =
@@ -207,7 +210,9 @@ defmodule Stacks.VisibilityTelemetryTest do
     } do
       attach_telemetry([[:stacks, :rate_limit, :rejected]])
       user = insert(:user)
-      conn = assign(conn, :guardian_default_resource, user)
+      # Guardian keeps its pipeline state in `conn.private`; setting the same name
+      # in `conn.assigns` left the limiter keying on the IP instead of the reader.
+      conn = Guardian.Plug.put_current_resource(conn, user)
 
       Enum.each(1..21, fn _ -> RateLimiter.call(conn, bucket: :social) end)
 

@@ -1,11 +1,4 @@
-module Types.User exposing
-    ( AuthToken
-    , User
-    )
-
-
-type alias AuthToken =
-    String
+module Types.User exposing (User)
 
 
 type alias User =

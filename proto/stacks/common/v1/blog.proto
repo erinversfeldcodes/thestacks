@@ -47,7 +47,11 @@ message BookAssociation {
   string book_id = 2 [json_name = "book_id"];
 
   // Confidence score of the association (0.0 to 1.0).
-  double confidence = 3 [json_name = "confidence"];
+  // ⚖️ `optional` gives this presence: an association the model returned
+  // WITHOUT rating it is left unset (nil on the wire), distinct from a
+  // scored 0.0. A plain proto3 double cannot tell "unscored" from "zero",
+  // which rendered an unscored match as a confident "0%".
+  optional double confidence = 3 [json_name = "confidence"];
 
   // How the association was discovered (e.g. "nlp", "manual").
   string source = 4 [json_name = "source"];

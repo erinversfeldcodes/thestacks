@@ -313,6 +313,27 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
   end
 
+  describe "search_by_title/4 — bag-of-words (nil title, raw_text only)" do
+    test "a raw-text read with no title line still searches and resolves" do
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc()]}}
+      )
+
+      assert {:ok, "9780743273565", meta} =
+               ISBNResolver.search_by_title(nil, nil, "the great gatsby f scott fitzgerald")
+
+      assert meta.source == :open_library
+    end
+
+    test "nothing read means nothing searched — no fabricated query" do
+      # No HTTP fixture on purpose: a query issued here would surface as the
+      # mock's unexpected-call failure, so :not_found proves no lookup ran.
+      assert {:error, :not_found} = ISBNResolver.search_by_title(nil, nil, nil)
+      assert {:error, :not_found} = ISBNResolver.search_by_title(nil, "An Author", "")
+    end
+  end
+
   describe "search_by_title/3 — Open Library" do
     test "returns {:ok, isbn, metadata} when OL search finds a match" do
       MockHttpClient.put_response(

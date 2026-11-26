@@ -23,6 +23,8 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.BookEdition
   alias Stacks.DataCorrection.Column
+  alias Stacks.Scope
+  alias Stacks.Shelving.Bookshelf
   alias Stacks.Shelving.Placement
 
   @work {"op.book_editions", "book_id"}
@@ -39,7 +41,7 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     do:
       "the single op.book_editions row #{edition_id} — its book_id and is_primary, " <>
         "plus one new op.books row to hold it. Placements that NAME this edition " <>
-        "follow it to the new work (#396); every other placement is untouched."
+        "follow it to the new work; every other placement is untouched."
 
   @impl true
   def reversibility,
@@ -78,16 +80,108 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     with {:ok, work} <- mint_work(to),
          :ok <- Column.swap(@work, edition_id, uuid(work_id), uuid(work.id)),
          :ok <- Column.swap(@primary, edition_id, false, true) do
-      {moved, _} =
-        Repo.update_all(
-          from(p in Placement, where: p.book_edition_id == ^edition_id),
-          set: [book_id: work.id, updated_at: DateTime.utc_now()]
-        )
+      moved = repoint_placements(edition_id, work.id)
 
       BookDetailCache.invalidate(work_id)
       BookDetailCache.invalidate(work.id)
 
       {:ok, %{new_work_id: work.id, placements_moved: moved}}
+    end
+  end
+
+  # ⛔ Once per owner, inside that owner's scope — not one `update_all` across
+  # everybody.
+  #
+  # These placements belong to whichever users hold the split edition, and the
+  # row-level policies show a scoped connection only its own user's rows. A
+  # single update would therefore re-point one user's placements and silently
+  # leave every other user's naming an edition that no longer means what it
+  # did — a correction that reports a count and half-does the job.
+  #
+  # ⛔ The `where` clause narrows to the owner AND the scope is set. Both, and
+  # the first draft had only the second — it relied on the policy to confine
+  # each pass, which makes the code correct ONLY where the policy is enforced.
+  # A test caught it immediately: under the superuser the suite runs as, row-level
+  # security is bypassed, so every pass updated every matching row and a
+  # two-owner fixture reported four placements moved instead of two.
+  #
+  # ⚠️ The general lesson is worth more than the fix. Code whose correctness
+  # depends on row-level security being active is wrong in development, wrong
+  # in the test suite, and wrong for any superuser — and it fails there by
+  # over-reaching, which is the direction that does damage. The policy is the
+  # backstop; the query still has to be right on its own.
+  defp repoint_placements(edition_id, new_book_id) do
+    edition_id
+    |> placement_owners()
+    |> Enum.reduce(0, fn owner_id, moved ->
+      Scope.with_user(owner_id, fn ->
+        owned =
+          from(bs in Bookshelf, where: bs.user_id == ^owner_id, select: bs.id)
+
+        {count, _} =
+          Repo.update_all(
+            from(p in Placement,
+              where: p.book_edition_id == ^edition_id,
+              where: p.bookshelf_id in subquery(owned)
+            ),
+            set: [book_id: new_book_id, updated_at: DateTime.utc_now()]
+          )
+
+        moved + count
+      end)
+    end)
+  end
+
+  defp split_counts(edition_id, work_id) do
+    case Repo.query(
+           "SELECT movers, retained FROM op.unmerge_placement_counts($1::uuid, $2::uuid)",
+           [
+             Ecto.UUID.dump!(edition_id),
+             Ecto.UUID.dump!(work_id)
+           ]
+         ) do
+      {:ok, %{rows: [[movers, retained]]}} ->
+        {movers, retained}
+
+      other ->
+        # ⚠️ Raised, never defaulted. These two numbers are the entire blast
+        # radius an operator is shown before approving an irreversible change,
+        # so a zero that means "could not count" is indistinguishable on screen
+        # from a zero that means "nothing will move".
+        raise "the unmerge preview could not count the placements on either side of " <>
+                "edition #{inspect(edition_id)}: #{inspect(other)}"
+    end
+  end
+
+  # The one fact the correction cannot learn for itself: whose rows these are.
+  # Answered by a `SECURITY DEFINER` read owned by a role that cannot log in,
+  # rather than by exempting this path from the policies.
+  #
+  # ⛔ There is NO fallback for a missing function, and removing the one that was
+  # here closed a way to wedge a deploy unrecoverably. The old fallback read the
+  # two secured tables directly, justified by "before the migration the policies
+  # are still the permissive ones". That sentence stopped being true two
+  # migrations before this function was created — the policies tighten first. So
+  # on any database rolled back past this function but not past the policies,
+  # the fallback fired and raised `42501` instead of returning rows;
+  # `run_corrections/1` re-raised; and because `deploy/0` runs corrections
+  # BEFORE migrate, the deploy aborted before it could migrate forward out of
+  # the state. An unavailable function must therefore say so plainly.
+  defp placement_owners(edition_id) do
+    case Repo.query("SELECT user_id FROM op.placement_owners_for_edition($1::uuid)", [edition_id]) do
+      {:ok, %{rows: rows}} ->
+        Enum.map(rows, fn [raw] -> Ecto.UUID.cast!(raw) end)
+
+      {:error, %Postgrex.Error{postgres: %{code: code}} = error} ->
+        # ⚠️ `insufficient_privilege` is named alongside `undefined_function`
+        # because the two are one operational fact — the correction cannot ask
+        # whose rows these are — and the second is reachable whenever the
+        # function-owner role exists without the membership the grant assumed.
+        # Matching only the first left that case unhandled.
+        raise "the unmerge correction cannot determine which users hold edition " <>
+                "#{inspect(edition_id)}: op.placement_owners_for_edition is unavailable " <>
+                "(#{inspect(code)}). Apply the migrations before running corrections. " <>
+                "#{inspect(error)}"
     end
   end
 
@@ -115,17 +209,19 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   end
 
   defp change(edition, work, title) do
-    movers =
-      Repo.aggregate(from(p in Placement, where: p.book_edition_id == ^edition.id), :count)
-
-    retained =
-      Repo.aggregate(
-        from(p in Placement,
-          where: p.book_id == ^work.id,
-          where: p.book_edition_id != ^edition.id or is_nil(p.book_edition_id)
-        ),
-        :count
-      )
+    # ⚠️ Both counts come from one definer function. Unscoped aggregates over
+    # `op.bookshelf_placements` are refused, so `plan/1` raised and the
+    # correction could not be previewed or approved at all on a deployed stack.
+    #
+    # ⛔ The obvious fix — mirror `repoint_placements/2` and count per owner
+    # inside each owner's scope — is correct for `movers` and WRONG for
+    # `retained`, which is why it is not what this does. `retained` counts
+    # placements on the work that do not name the split edition, and those
+    # belong to holders of the work's OTHER editions: a different, possibly
+    # disjoint set of users. Iterating the edition's owners reported 0 for every
+    # such placement, putting a false "0 placements stay" in front of an
+    # operator about to approve an irreversible split.
+    {movers, retained} = split_counts(edition.id, work.id)
 
     %{
       id: edition.id,
@@ -133,7 +229,7 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
       to: %{work_title: title, visibility_tier: work.visibility_tier},
       because:
         "ISBN #{edition.isbn} is not an edition of #{inspect(work.title)}; splitting it onto " <>
-          "its own work. #{movers} placement(s) name this edition and follow it (#396 — the " <>
+          "its own work. #{movers} placement(s) name this edition and follow it (the " <>
           "recorded scan is the evidence); #{retained} placement(s) stay on " <>
           "#{inspect(work.title)}, whose readers' acquisitions are not recorded and may not " <>
           "be guessed."

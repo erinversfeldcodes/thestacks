@@ -12,7 +12,20 @@ defmodule Core.Repo.Migrations.CreateHandleLowerUniqueIndex do
   @disable_ddl_transaction true
   @disable_migration_lock true
 
+  # Added 2026-10-16, after the migration gate stopped excluding squawk's
+  # `require-timeout-settings`. The migration is long applied, so this changes
+  # nothing about the existing databases — it is a fresh-bootstrap path and an
+  # exemplar, and this suite asserts the real file clears the real gate rather
+  # than a laxer one.
+  #
+  # Plain `SET` because `@disable_ddl_transaction true` leaves no transaction
+  # for a LOCAL setting. `statement_timeout = 0` because a timeout firing inside
+  # a CONCURRENTLY build leaves an INVALID index; `lock_timeout` is the one that
+  # matters on the auth hot path this builds against.
   def up do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     create unique_index(:users, ["lower(handle)"],
              prefix: "op",
              name: :users_lower_handle_index,
@@ -21,6 +34,9 @@ defmodule Core.Repo.Migrations.CreateHandleLowerUniqueIndex do
   end
 
   def down do
+    execute("SET lock_timeout = '5s'")
+    execute("SET statement_timeout = 0")
+
     drop_if_exists index(:users, ["lower(handle)"],
                      prefix: "op",
                      name: :users_lower_handle_index,

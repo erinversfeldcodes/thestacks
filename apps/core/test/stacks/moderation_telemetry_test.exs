@@ -1,6 +1,6 @@
 defmodule Stacks.ModerationTelemetryTest do
   @moduledoc """
-      Firing tests for the 228 moderation-funnel counters: classification
+      Firing tests for the moderation-funnel counters: classification
       outcome (:book/:not_a_book/:ambiguous), ISBN resolution
       (:resolved/:isbn_not_found), age-gate tiering (:public/:age_gated),
       and compound-title expansion. Metadata tags are whitelisted atoms —
@@ -17,6 +17,20 @@ defmodule Stacks.ModerationTelemetryTest do
   alias Stacks.Moderation
 
   @test_image_b64 Base.encode64("fake image bytes")
+
+  setup do
+    # The ISBN resolver's circuit breakers are GLOBAL named processes, and the
+    # moderation pipeline runs through them. Any earlier test in the run that
+    # blows one leaves it open, and then every call here returns
+    # `:resolver_unavailable` — so this file passed alone and failed under the
+    # seeds that happened to order a fuse-blowing test first. It was the only
+    # file exercising this pipeline without the reset its four siblings
+    # (`moderation_test.exs`, `upload_pipeline_test.exs`,
+    # `isbn_resolver_test.exs`, `enrichment_diagnostics_test.exs`) all have.
+    :fuse.reset(:open_library_fuse)
+    :fuse.reset(:google_books_fuse)
+    :ok
+  end
 
   defp attach_telemetry(events) do
     test_pid = self()

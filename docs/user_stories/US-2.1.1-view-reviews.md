@@ -4,7 +4,18 @@
 >
 > **This story is a SPEC, not a description of a working surface.** The scraping-based implementation it used to describe was **deleted** in Wave 9 (#323) under **owner ruling D6, 2026-07-30: *the story survives, re-scoped***. What was removed: `Stacks.Workers.FetchReviewsJob`, the `Stacks.Enrichment.Reviews` context, `Stacks.Enrichment.MockReviewFetcher`, and the `Components.ReviewSummary` Elm component. Nothing writes `op.review_snapshots` and nothing reads it.
 >
-> **What survives** (verified 2026-08-06): the `op.review_snapshots` table, the proto message `ReviewSnapshot` (`proto/stacks/common/v1/enrichment.proto:146-177`) and its generated Ecto schema `Stacks.Enrichment.ReviewSnapshot`, the `Stacks.Enrichment.review_snapshot_changeset/2` validator, and three dbt models — `stg_review_snapshots`, `int_review_sentiment`, `mart_book_reviews`. The contract and the storage are intact; the acquisition and display layers are gone.
+> **What survives** (verified 2026-08-06; **narrowed 2026-10-15**): the `op.review_snapshots`
+> table, the proto message `ReviewSnapshot` and its generated Ecto schema
+> `Stacks.Enrichment.ReviewSnapshot`, the `Stacks.Enrichment.review_snapshot_changeset/2` validator,
+> and the `enrichment.reviews_scraped` payload contract and registry wiring. **The contract and the
+> storage are intact; the acquisition and display layers are gone.**
+>
+> ⚠️ **The three dbt models no longer survive.** `stg_review_snapshots`, `int_review_sentiment` and
+> `mart_book_reviews` were deleted on 2026-10-15: they modelled a table holding zero rows, one was
+> a graph orphan even among themselves, and `mart_book_reviews` claimed a consumer
+> (`BookController.show`) that never read it. They are rebuilt when there are rows to model — which
+> is §17 step 2, not step 1. Deleting them does not touch this story's foundation, because the
+> foundation is the table and the contract, and both were deliberately kept by the same ruling.
 >
 > **What ruling D6 changed about the spec**: reviews may come **only from sanctioned sources**. Open scraping of review platforms is out. §4 is the new source policy and is the substance of this revision; everything downstream of it follows.
 >
@@ -155,7 +166,7 @@ The old `Reviews.stale_books/1` is gone along with its context. Whatever replace
 - **Emission**: `Events.emit_safe/1`
 
 ### Event Handlers (to build)
-- **`Stacks.Workers.DbtRefreshHandler`** → `["int_review_sentiment", "mart_book_reviews"]`
+- **`Stacks.Workers.DbtRefreshHandler`** → ⚠️ currently refreshes **nothing** for this event: both models were deleted 2026-10-15. The subscription is deliberately kept (owner ruling) and the model list is restored when §17 step 2 produces rows worth modelling.
 
 **Registry status**: the subscription is **still in place and deliberately so** — `Stacks.Events.Registry:121-129` keeps `enrichment.reviews_scraped => [DbtRefreshHandler]` behind an explicit note:
 
@@ -225,22 +236,34 @@ N/A — snapshots live in the database. And no review text is stored anywhere (�
 
 ## 12. dbt Model Dependencies
 
-All three models exist and are currently fed by nothing.
+⚠️ **All three models were DELETED on 2026-10-15 and none of them exists.** This section is kept as
+the **specification** a rebuild would start from — the materialisations, the join shapes and the
+consumers below describe what the review vertical *should* build, not what runs today. Every
+"Consumer" line below is therefore a historical intent: the in-app metrics dashboard that named most
+of them was removed, and the Grafana surface some of them cite **does not read any mart** (there is
+no Postgres datasource in `deploy/grafana/provisioning/datasources/`, and all six dashboards in
+`apps/core/priv/grafana/` are Prometheus-only). Read nothing here as a live dependency.
 
-### `int_review_sentiment`
+### `int_review_sentiment` — DELETED 2026-10-15, kept here as the rebuild's specification
 - **Trigger**: the refresh event via `DbtRefreshHandler`
 - **Materialisation**: intermediate
-- **Consumer**: `mart_book_reviews`, `mart_enrichment_gaps`
+- **Consumer**: ~~`mart_book_reviews`, `mart_enrichment_gaps`~~ — both deleted 2026-10-15, as was this model.
 
-### `mart_book_reviews`
+### `mart_book_reviews` — DELETED 2026-10-15, kept here as the rebuild's specification
 - **Materialisation**: view — `SELECT book_id, avg_rating, avg_sentiment_score, review_count FROM int_review_sentiment`
-- **Consumer**: the Grafana observability surface
+- **Consumer**: ~~the Grafana observability surface~~ — **it had none.** Verified 2026-10-15: no
+  dashboard reads any mart. This claimed consumer is what kept the model alive unread.
 
-### `mart_enrichment_gaps`
+### `mart_enrichment_gaps` — DELETED 2026-10-15, kept here as the rebuild's specification
 - **Materialisation**: view — joins `int_book_detail_view` with `int_review_sentiment` to flag `missing_reviews`
-- **Consumer**: the `/api/metrics/enrichment-gaps` endpoint was removed in #267 (the in-app metrics dashboard was superseded by Grafana, ADR-021); the mart is retained for Grafana
+- **Consumer**: ~~the `/api/metrics/enrichment-gaps` endpoint was removed in #267 (the in-app metrics dashboard was superseded by Grafana, ADR-021); the mart is retained for Grafana~~ — **the
+  retention reason was false and is overturned.** The endpoint's removal is accurate; "retained for
+  Grafana" was not, because no Grafana dashboard reads a mart. It held 169 rows — more than any
+  other mart — and no reader, which is why a row count is not a liveness signal.
 
-⚠️ **Every row in all three is currently empty**, and `mart_enrichment_gaps.missing_reviews` therefore reports 100% — which is correct, and is the cleanest available proof that this story is unbuilt.
+⚠️ **All three held zero review rows while they existed**, which is the cleanest available proof
+that this story is unbuilt — and `mart_enrichment_gaps.missing_reviews` reported 100% for the same
+reason. Those numbers are historical; the models are gone.
 
 ---
 
@@ -273,12 +296,12 @@ N/A — pure view function.
 | **`op.review_snapshots` row count** | SQL | Gauge | Total rows | **The acceptance instrument.** 0 → N on a preview stack via the real job, not a seed. Everything below is meaningless until this moves |
 | **Unsanctioned-source rows** | SQL | Gauge | `WHERE source NOT IN (sanctioned list)` | **0, always.** The check that ruling D6 is enforced rather than documented |
 | **`source_url` host ≠ source's host** | SQL | Gauge | — | **0.** Catches a snapshot claiming a sanctioned source while linking elsewhere |
-| Oban outcome for the refresh worker | `oban_jobs` / `mart_job_stats` | Counter | completed / failed / retried | **A run must exist.** The deleted job's defect was never running, and no per-source metric would have shown that |
+| Oban outcome for the refresh worker | `oban_jobs` (the `mart_job_stats` rollup was deleted 2026-10-15 — read the table) | Counter | completed / failed / retried | **A run must exist.** The deleted job's defect was never running, and no per-source metric would have shown that |
 | Per-source success rate | `op.source_health_checks` | Gauge (%) | `Monitoring.record_success/failure` per source | Per source, never aggregated — an aggregate hides one dead source behind two live ones |
 | Fuse state per source | `:fuse` / `op.source_health_checks` | Gauge | Open/closed transitions | **Each source its own fuse** (§9). A shared fuse melting is itself the incident |
 | Summary validation rejections | Logger | Counter | Summaries altered by the URL-stripping / truncation validator | > 0 is expected; a sudden rise means the model or the prompt changed |
 | LLM spend | `mart_cost_tracking` | Gauge | Per-summary token cost | Against the §9 cap |
-| `mart_enrichment_gaps.missing_reviews` | dbt | Gauge (%) | Books with no snapshot | 100% today. Falling is the only progress signal |
+| `mart_enrichment_gaps.missing_reviews` | ⚠️ dbt — **mart deleted 2026-10-15 (§12)**; the rebuild must recreate it before this gauge can exist | Gauge (%) | Books with no snapshot | Was 100%. Falling is the only progress signal |
 
 ---
 
@@ -287,7 +310,7 @@ N/A — pure view function.
 | Metric | Source | Type | How Measured | Target / SLA |
 |--------|--------|------|-------------|-------------|
 | Data freshness per book | Derived | Histogram (days) | `scraped_at` vs `NOW()` | **Must differ by bookshelf.** Reading Pile fresher than Library, or the cadence promise in §1 is unmet — which is exactly what the deleted flat-30-day rule failed |
-| Review coverage | `mart_enrichment_gaps` | Gauge (%) | Books with ≥ 1 snapshot | Rising |
+| Review coverage | ⚠️ `mart_enrichment_gaps` — **deleted 2026-10-15 (§12)**, to be recreated by the rebuild | Gauge (%) | Books with ≥ 1 snapshot | Rising |
 | Sources per book | SQL | Histogram | `count(DISTINCT source) GROUP BY book_id` | **> 1 is the point.** One source is a rating, not a balanced sense of reception |
 | Card click-through | Elm event tracking | Gauge (%) | Link follows / section renders | Tests whether "link, don't host" serves the reader or just protects us |
 | Batch throughput | Oban telemetry | Gauge | Books per batch run | Informational |

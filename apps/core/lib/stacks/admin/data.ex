@@ -12,7 +12,8 @@ defmodule Stacks.Admin.Data do
   alias Stacks.Accounts.User
   alias Stacks.Books.Book
   alias Stacks.Marketplace.Listing
-  alias Stacks.Shelving.{Bookshelf, Placement}
+
+  require Logger
 
   @safe_user_fields [
     :id,
@@ -93,15 +94,42 @@ defmodule Stacks.Admin.Data do
   """
   @spec platform_stats() :: {:ok, map()}
   def platform_stats do
+    # ⛔ `bookshelves` and `placements` come from `op.platform_row_counts()`, not
+    # from `Repo.aggregate/2`. Both tables are row-level secured, so a direct
+    # count is refused for the runtime role and the dashboard 500s; under the
+    # anonymous scope it would instead return the publicly-visible subset, which
+    # is a wrong number rather than an error. `users`, `books` and `listings`
+    # carry no policy and are counted directly.
+    #
+    # ⚠️ This was allowlisted in the scope gate on the stated grounds that "the
+    # admin pipeline scopes per request". No such pipeline exists — there is no
+    # request-scoping plug anywhere, deliberately, because one would pin a
+    # transaction open for the duration of an upload's progress stream.
+    {shelves, placements} = secured_counts()
+
     stats = %{
       users: Repo.aggregate(User, :count),
       books: Repo.aggregate(Book, :count),
-      bookshelves: Repo.aggregate(Bookshelf, :count),
-      placements: Repo.aggregate(Placement, :count),
+      bookshelves: shelves,
+      placements: placements,
       listings: Repo.aggregate(Listing, :count)
     }
 
     {:ok, stats}
+  end
+
+  defp secured_counts do
+    case Repo.query("SELECT bookshelves, placements FROM op.platform_row_counts()") do
+      {:ok, %{rows: [[shelves, placements]]}} ->
+        {shelves, placements}
+
+      other ->
+        # ⚠️ `nil`, not 0. An operator dashboard showing zero bookshelves reads
+        # as a catastrophe; one showing a blank reads as what it is — the count
+        # could not be taken. An absent value beats a false one.
+        Logger.warning("Admin.Data.platform_stats could not read totals: #{inspect(other)}")
+        {nil, nil}
+    end
   end
 
   defp decode_audit_row(columns, row) do

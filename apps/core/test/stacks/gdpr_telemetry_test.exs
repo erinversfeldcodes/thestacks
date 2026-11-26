@@ -176,14 +176,55 @@ defmodule Stacks.GDPRTelemetryTest do
   end
 
   describe "audit write telemetry" do
-    test "Audit.log/3 emits [:stacks, :gdpr, :audit, :write] on a successful insert" do
+    test "a KNOWN action reaches the metric labels unchanged" do
+      # The pass-through half. Without it the bounding assertion below is
+      # satisfied by a function that collapses everything to "other", which
+      # would make the metric useless while looking correct.
       attach_telemetry([[:stacks, :gdpr, :audit, :write]])
       user = insert(:user)
 
-      assert {:ok, _} = Audit.log(user.id, "test.telemetry_action", resource_type: "test")
+      known_action = Audit.telemetry_actions() |> List.first()
+      known_type = Audit.telemetry_resource_types() |> List.first()
+
+      assert {:ok, _} = Audit.log(user.id, known_action, resource_type: known_type)
 
       assert_receive {:telemetry_event, [:stacks, :gdpr, :audit, :write], %{count: 1},
-                      %{action: "test.telemetry_action", resource_type: "test"}}
+                      %{action: ^known_action, resource_type: ^known_type}}
+    end
+
+    test "an UNKNOWN action is bounded to \"other\" in the label and kept exactly in the row" do
+      # Both halves of the contract, in one test because they are one decision.
+      #
+      # The audit ROW is the record and must be faithful, so it keeps whatever
+      # string the caller passed. The LABEL is a Prometheus dimension — one
+      # series per distinct value, forever, in a store with no erasure path — so
+      # it is bounded to a known vocabulary with everything else collapsing to
+      # "other".
+      #
+      # This test previously asserted the raw action reached the label, which was
+      # true and was the defect: `Audit.log/3` accepts any string, so a caller
+      # interpolating a resource name, an email or an id — the obvious thing to
+      # do when debugging — minted a series per value.
+      attach_telemetry([[:stacks, :gdpr, :audit, :write]])
+      user = insert(:user)
+
+      unknown_action = "test.telemetry_action"
+
+      refute unknown_action in Audit.telemetry_actions(),
+             "precondition: #{unknown_action} is now a known action, so this test no longer " <>
+               "exercises the bounding path — pick one that is not in the vocabulary"
+
+      assert {:ok, entry} = Audit.log(user.id, unknown_action, resource_type: "test")
+
+      assert_receive {:telemetry_event, [:stacks, :gdpr, :audit, :write], %{count: 1},
+                      %{action: "other", resource_type: "other"}}
+
+      assert entry.action == unknown_action,
+             "the audit ROW was bounded too. The row is the record of what happened and must " <>
+               "keep the caller's exact string; only the metric label is a dimension."
+
+      assert entry.resource_type == "test",
+             "the audit row's resource_type was bounded too"
     end
   end
 

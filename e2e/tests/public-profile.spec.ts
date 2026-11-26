@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, newProvenContext} from "./fixtures";
 import type { APIRequestContext, APIResponse, Page } from "@playwright/test";
 import {
   uniqueEmail,
@@ -151,15 +151,11 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     const anonGated = await expectOk(request.get(gatedShelfPath), "anon gated shelf");
     expect((await anonGated.json()).count, "anon must not see the age-gated spine").toBe(0);
 
-    const viewerAuth = (
-      await page.evaluate(() =>
-        JSON.parse(localStorage.getItem("stacks-auth") || "{}")
-      )
-    ).token as string;
+    // ⛔ `page.request`, not the `request` fixture: the fixture strips the
+    // session cookie so that "anonymous" means anonymous, and this read must be
+    // made AS the signed-in viewer.
     const unverifiedGated = await expectOk(
-      request.get(gatedShelfPath, {
-        headers: { Authorization: `Bearer ${viewerAuth}` },
-      }),
+      page.request.get(gatedShelfPath),
       "unverified gated shelf"
     );
     expect(
@@ -174,9 +170,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       "viewer age-verify"
     );
     const verifiedGated = await expectOk(
-      request.get(gatedShelfPath, {
-        headers: { Authorization: `Bearer ${viewerAuth}` },
-      }),
+      page.request.get(gatedShelfPath),
       "verified gated shelf"
     );
     expect(
@@ -275,7 +269,7 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await setProfileVisibility(request, platAuth, "platform");
     const platHandle = await claimHandle(request, platAuth, "e2e_platform");
 
-    const anonCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const anonCtx = await newProvenContext(browser, { storageState: { cookies: [], origins: [] } });
     const page = await anonCtx.newPage();
     try {
       await page.goto(`/u/${pubHandle}`);

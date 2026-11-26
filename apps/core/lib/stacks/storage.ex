@@ -5,7 +5,12 @@ defmodule Stacks.Storage do
 
       Storage keys follow these conventions:
       - User uploads: `uploads/{image_id}`
-      - Book covers:  `covers/{isbn}-cover.jpg`
+      - Book covers:  `covers/{isbn}-cover.jpg` — ⚠️ NO LONGER WRITTEN. `store_cover/3`
+        was the only writer of this prefix and its only caller was the
+        cover-verification loop, which nothing ever triggered, so no object with
+        this key was ever created. Both were deleted 2026-10-15. The prefix is
+        documented here so a rebuild reuses it rather than inventing a second
+        layout, not because anything is stored under it.
       - GDPR exports: `exports/{user_id}/{unix_expiry}-{token}.json`
         (owned by `Stacks.GDPR.ExportDelivery`, which builds the key)
 
@@ -54,12 +59,27 @@ defmodule Stacks.Storage do
   end
 
   @doc """
-      Generate a presigned PUT URL the client can upload an image to
-      directly. Used by the init/commit upload flow to keep the Phoenix
-      handler pool out of the R2 upload path.
+      Generate a presigned PUT URL the client could upload an image to
+      directly.
 
-      `content_type` hint is propagated to the PUT signature so R2 records
-      the object with the correct MIME type.
+      ⛔ **NOTHING CALLS THIS, AND THE PREVIOUS DOCSTRING ASSERTED OTHERWISE.**
+      It said "Used by the init/commit upload flow to keep the Phoenix handler
+      pool out of the R2 upload path". That stopped being true in July:
+      `Uploads.init_upload/2` returns `/api/upload/:id/data`, a route on our own
+      origin, and the bytes travel through this app — which is what lets the
+      request carry CSRF proof, since a cross-origin PUT sends no header and
+      every upload was refused once enforcement went on.
+
+      ⚠️ A docstring describing a live design for dead code is not a tidiness
+      problem. An E2E mock was written from the sibling claim in
+      `UploadController`, mocked a presigned URL the client never requests, and
+      most of that suite failed blaming the client for the mock's error. This is
+      the same claim in a second place, which is why it is corrected rather than
+      left for the next reader to believe.
+
+      Kept rather than deleted because the backend behaviour it names is real
+      and a direct-to-storage upload may be wanted again; `content_type` is
+      propagated to the signature so the object records the correct MIME type.
   """
   @spec presigned_put_url(String.t(), pos_integer(), keyword()) ::
           {:ok, String.t()} | {:error, term()}
@@ -115,19 +135,6 @@ defmodule Stacks.Storage do
   @spec delete_image(String.t()) :: :ok | {:error, term()}
   def delete_image(storage_key) do
     delete_object(storage_key)
-  end
-
-  @doc """
-      Store a book cover image.
-
-      Returns `{:ok, storage_key}` on success.
-  """
-  @spec store_cover(String.t(), binary(), keyword()) ::
-          {:ok, String.t()} | {:error, term()}
-  def store_cover(isbn, data, opts \\ []) do
-    key = "covers/#{isbn}-cover.jpg"
-    content_type = Keyword.get(opts, :content_type, "image/jpeg")
-    backend().put(key, data, content_type: content_type)
   end
 
   defp backend do

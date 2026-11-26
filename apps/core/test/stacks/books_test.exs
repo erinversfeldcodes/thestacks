@@ -23,6 +23,25 @@ defmodule Stacks.BooksTest do
       assert edition.is_primary == true
     end
 
+    test "accepts a valid ISBN-10 ending in X and stores it as ISBN-13" do
+      # ⚠️ 1 in ~11 valid ISBN-10s end in X, the ISBN module supports them
+      # everywhere, and the changeset's shape regex rejected them anyway —
+      # watched live: Google Books served 043941184X and the reader's
+      # identification died at the store under a message claiming ISBN-10
+      # support. 043941184X's checksum holds (weighted sum 198 ≡ 0 mod 11).
+      attrs = %{"isbn" => "043941184X", "title" => "Alice in Wonderland"}
+      assert {:ok, book} = Books.create(attrs)
+      assert [edition] = book.editions
+      # Normalised to the 13-digit form the storage constraint demands.
+      assert edition.isbn == "9780439411844"
+    end
+
+    test "still rejects an X-tailed string whose ISBN-10 checksum fails" do
+      attrs = %{"isbn" => "043941185X", "title" => "Not A Book"}
+      assert {:error, changeset} = Books.create(attrs)
+      assert %{isbn: [_]} = errors_on(changeset)
+    end
+
     test "returns error on missing isbn" do
       attrs = %{"title" => "No ISBN Book"}
       assert {:error, changeset} = Books.create(attrs)
@@ -516,69 +535,6 @@ defmodule Stacks.BooksTest do
       assert "The Amazing Spider-Man Chronicles" in titles
       refute "Rust Atomics and Locks" in titles
       assert total == 1
-    end
-  end
-
-  describe "confirm_cover_association/2" do
-    test "updates cover_image_url on a known edition" do
-      edition = insert(:book_edition)
-      cover_url = "https://example.com/cover.jpg"
-
-      assert {:ok, updated} = Books.confirm_cover_association(edition.id, cover_url)
-      assert updated.cover_image_url == cover_url
-    end
-
-    test "the cover fetch is seamed — routed through the client, never a live request" do
-      edition = insert(:book_edition)
-      cover_url = "https://covers.example.test/#{edition.isbn}.jpg"
-
-      MockHttpClient.capture_requests()
-
-      assert {:ok, updated} = Books.confirm_cover_association(edition.id, cover_url)
-
-      assert_receive {MockHttpClient, :request, ^cover_url}, 1_000
-      assert updated.cover_image_url == cover_url
-    end
-
-    test "returns {:error, :not_found} for an unknown edition_id" do
-      assert {:error, :not_found} =
-               Books.confirm_cover_association(Ecto.UUID.generate(), "https://example.com/x.jpg")
-    end
-
-    test "emits book.cover_confirmed event with edition_id and cover_url" do
-      edition = insert(:book_edition)
-      cover_url = "https://example.com/cover.jpg"
-      before_count = event_count("book.cover_confirmed")
-
-      Books.confirm_cover_association(edition.id, cover_url)
-
-      assert event_count("book.cover_confirmed") == before_count + 1
-    end
-
-    test "does not emit event when edition_id is not found" do
-      before_count = event_count("book.cover_confirmed")
-
-      Books.confirm_cover_association(Ecto.UUID.generate(), "https://example.com/x.jpg")
-
-      assert event_count("book.cover_confirmed") == before_count
-    end
-
-    test "the emitted event names the WORK, which is what the cache is keyed by" do
-      edition = insert(:book_edition)
-
-      Books.confirm_cover_association(edition.id, "https://example.com/cover.jpg")
-
-      payload =
-        Core.Repo.one!(
-          from(e in "event_log",
-            prefix: "op",
-            where: e.event_type == "book.cover_confirmed",
-            where: e.aggregate_id == type(^edition.id, Ecto.UUID),
-            select: e.payload
-          )
-        )
-
-      assert payload["book_id"] == edition.book_id
     end
   end
 
@@ -1323,5 +1279,131 @@ defmodule Stacks.BooksTest do
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
       :count
     )
+  end
+
+  describe "merge_duplicate/2" do
+    test "re-parents references, consolidates a shared-bookshelf collision, and deletes the duplicate" do
+      author = insert(:author)
+      survivor = insert(:book, author: author, title: "The Name of the Rose")
+      dup = insert(:book, author: author, title: "The Name of the Rose")
+
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user)
+
+      # Both works on the SAME bookshelf — the unique-key collision the merge
+      # must consolidate rather than violate.
+      surv_placement = insert(:placement, book: survivor, bookshelf: bookshelf)
+      dup_placement = insert(:placement, book: dup, bookshelf: bookshelf)
+
+      # A listing on the duplicate — a plainly re-parented reference.
+      listing = insert(:listing, book: dup)
+
+      assert {:ok, survivor_id} = Books.merge_duplicate(survivor.id, dup.id)
+      assert survivor_id == survivor.id
+
+      # The duplicate work is gone.
+      refute Repo.get(Book, dup.id)
+
+      # Its edition joined the survivor as a non-primary; exactly one primary
+      # survives.
+      assert Repo.aggregate(from(e in BookEdition, where: e.book_id == ^survivor.id), :count) == 2
+
+      assert Repo.aggregate(
+               from(e in BookEdition, where: e.book_id == ^survivor.id and e.is_primary == true),
+               :count
+             ) == 1
+
+      # The shared-bookshelf placement is consolidated: the duplicate's row is
+      # dropped, the survivor's kept — one placement, not two.
+      refute Repo.get(Stacks.Shelving.Placement, dup_placement.id)
+      assert Repo.get(Stacks.Shelving.Placement, surv_placement.id)
+
+      # The listing follows the work to the survivor.
+      assert Repo.get(Stacks.Marketplace.Listing, listing.id).book_id == survivor.id
+    end
+
+    test "keeps the duplicate's ACTIVE placement when the survivor's placement on that shelf is soft-removed" do
+      author = insert(:author)
+      survivor = insert(:book, author: author, title: "The Name of the Rose")
+      dup = insert(:book, author: author, title: "The Name of the Rose")
+
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user)
+
+      # The survivor's placement on this shelf is soft-REMOVED — a history row,
+      # outside the `(book_id, bookshelf_id) WHERE removed_at IS NULL` partial
+      # unique, so it cannot actually collide with anything.
+      insert(:placement, book: survivor, bookshelf: bookshelf, removed_at: DateTime.utc_now())
+
+      # The duplicate's placement on the SAME shelf is ACTIVE and carries the
+      # reader's free-text notes + rating — the data a removed_at-blind
+      # consolidation silently destroys.
+      dup_active =
+        insert(:placement,
+          book: dup,
+          bookshelf: bookshelf,
+          removed_at: nil,
+          notes: "keep me",
+          personal_rating: 5
+        )
+
+      assert {:ok, _} = Books.merge_duplicate(survivor.id, dup.id)
+
+      # The active placement survived and re-parented to the survivor — notes and
+      # rating intact. Consolidating on bookshelf_id alone would have deleted it,
+      # because the survivor had a (removed) row on the same shelf.
+      kept = Repo.get(Stacks.Shelving.Placement, dup_active.id)
+      assert kept
+      assert kept.book_id == survivor.id
+      assert kept.removed_at == nil
+      assert kept.notes == "keep me"
+      assert kept.personal_rating == 5
+
+      # Exactly one ACTIVE placement remains on the shelf (the survivor's own was removed).
+      active_count =
+        Repo.aggregate(
+          from(p in Stacks.Shelving.Placement,
+            where:
+              p.book_id == ^survivor.id and p.bookshelf_id == ^bookshelf.id and
+                is_nil(p.removed_at)
+          ),
+          :count
+        )
+
+      assert active_count == 1
+    end
+
+    test "dedup_works collapses same-title-same-author rows, and leaves the rest alone" do
+      author = insert(:author)
+      insert(:book, author: author, title: "Invisible Cities")
+      insert(:book, author: author, title: "invisible cities")
+      insert(:book, author: author, title: "Invisible Cities ")
+      # A different work by the same author — must NOT merge.
+      other = insert(:book, author: author, title: "If on a Winter's Night a Traveler")
+      # A same-title book with NO author — too weak a signal; left alone.
+      authorless = insert(:book, author: nil, title: "Invisible Cities")
+
+      assert Books.dedup_works() == 2
+
+      # The author's four rows (three variants + one distinct work) collapse to two.
+      assert Repo.aggregate(from(bk in Book, where: bk.author_id == ^author.id), :count) == 2
+      assert Repo.get(Book, other.id)
+      assert Repo.get(Book, authorless.id)
+    end
+
+    test "merge carries the duplicate's description onto a survivor that has none" do
+      author = insert(:author)
+      survivor = insert(:book, author: author, title: "Mason & Dixon", description: nil)
+
+      dup =
+        insert(:book,
+          author: author,
+          title: "Mason & Dixon",
+          description: "A sprawling historical novel."
+        )
+
+      assert {:ok, _} = Books.merge_duplicate(survivor.id, dup.id)
+      assert Repo.get(Book, survivor.id).description == "A sprawling historical novel."
+    end
   end
 end

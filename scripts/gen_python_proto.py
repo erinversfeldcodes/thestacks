@@ -150,15 +150,15 @@ PY_ZERO_VALUES: dict[str, str] = {
     "TYPE_DOUBLE": "0.0",
 }
 
-_SEMANTIC_EXCLUSIONS: dict[str, list[dict[str, str]]] = {
-    "ExtractRequest": [
-        {
-            "method": "_validate_images_or_image_url",
-            "check": "self.images and self.image_url is not None",
-            "error": "Provide either 'images' or 'image_url', not both",
-        },
-    ],
-}
+# Per-message validators that cannot be derived from the proto schema alone —
+# a mutual exclusion between two fields that protobuf itself does not express.
+#
+# Currently empty, and the binding is kept rather than removed because the
+# generator reads it unconditionally. Its only entry was for ExtractRequest
+# ("provide either 'images' or 'image_url', not both"), which went with that
+# message on 2026-10-15. Note that a real `oneof` needs no entry here: the
+# generator emits a validator for those from the schema.
+_SEMANTIC_EXCLUSIONS: dict[str, list[dict[str, str]]] = {}
 
 EX_ZERO_VALUES: dict[str, str] = {
     "TYPE_STRING": '""',

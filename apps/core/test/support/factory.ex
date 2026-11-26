@@ -34,7 +34,9 @@ defmodule Stacks.Factory do
 
   alias Stacks.WritingAssistant.{
     BookContentChunk,
+    CorpusAnnotation,
     Embedding,
+    ImportedWork,
     RetrievalLog,
     Session,
     TurnFeedback,
@@ -254,6 +256,7 @@ defmodule Stacks.Factory do
   """
   def bookshelf_factory(attrs) do
     {user, attrs} = Map.pop_lazy(attrs, :user, fn -> build(:user) end)
+    {allow_over_ceiling, attrs} = Map.pop(attrs, :allow_over_ceiling, false)
 
     %Bookshelf{
       id: Ecto.UUID.generate(),
@@ -262,6 +265,7 @@ defmodule Stacks.Factory do
     }
     |> merge_attributes(attrs)
     |> assert_shelvable(user)
+    |> assert_within_profile_ceiling(user, allow_over_ceiling)
     |> Map.put(:user, user)
   end
 
@@ -285,6 +289,31 @@ defmodule Stacks.Factory do
       raise ArgumentError,
             "no write path can create this bookshelf: " <>
               inspect(changeset.errors) <> " — see Shelving.bookshelf_changeset/2"
+    end
+  end
+
+  # Mirror the EXACT production rule (`Shelving.validate_bookshelf_profile_ceiling`,
+  # shelving.ex:848): the write path refuses a bookshelf ONLY when its owner's
+  # profile is "owner" (fully private) and the shelf is more exposed than owner. A
+  # platform or public profile places NO ceiling on its shelves. `assert_shelvable`
+  # validates the enum and name but not this pairing (`Shelving.bookshelf_changeset/2`
+  # never sees the owner's profile). The full exposure ladder would be STRICTER than
+  # production — it would forbid, e.g., a platform profile's public shelf, which the
+  # write path creates — so a legitimate fixture would be forced to misuse the escape.
+  # Pass `allow_over_ceiling: true` ONLY when a test deliberately builds the refused
+  # owner-profile pairing to prove it is hidden or clamped (e.g. the recap worker's
+  # transient owner-profile + exposed-shelf input, a real post-downgrade leftover).
+  defp assert_within_profile_ceiling(bookshelf, _user, true), do: bookshelf
+
+  defp assert_within_profile_ceiling(%Bookshelf{} = bookshelf, user, false) do
+    if user.profile_visibility == "owner" and bookshelf.visibility != "owner" do
+      raise ArgumentError,
+            "bookshelf '#{bookshelf.visibility}' on an 'owner' (fully private) profile is " <>
+              "refused by the write path (set_bookshelf_visibility/3). Raise the owner's " <>
+              "profile_visibility off 'owner', or pass allow_over_ceiling: true if the test " <>
+              "builds this pairing on purpose to prove it is refused or hidden."
+    else
+      bookshelf
     end
   end
 
@@ -531,6 +560,15 @@ defmodule Stacks.Factory do
     }
   end
 
+  def llm_call_log_factory do
+    %Stacks.AI.CallLog{
+      model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      outcome: "associated",
+      prompt_sha256: :crypto.hash(:sha256, "a prompt") |> Base.encode16(case: :lower),
+      raw_response: ~s([{"book_id": "abc", "confidence": 0.9, "reasoning": "named"}])
+    }
+  end
+
   def post_syndication_factory do
     %Stacks.Blog.PostSyndication{
       post: build(:post),
@@ -628,7 +666,7 @@ defmodule Stacks.Factory do
     now = DateTime.utc_now()
 
     %PlatformCost{
-      category: "infrastructure",
+      category: "hosting",
       service: sequence(:service_name, &"service-#{&1}"),
       description: "Monthly hosting cost.",
       amount_cents: 1500,
@@ -810,7 +848,13 @@ defmodule Stacks.Factory do
       title: sequence(:embedding_title, &"Embedded item #{&1}"),
       shelf: "library",
       content_date: DateTime.utc_now(),
-      embedding: Pgvector.new(List.duplicate(0.1, 1024))
+      embedding: List.duplicate(0.1, 1024),
+      chunk_text: "A chunk of the reader's own writing.",
+      chunk_index: 0,
+      char_start: 0,
+      char_end: 36,
+      model: "bge-m3",
+      embedding_version: 1
     }
   end
 

@@ -38,7 +38,7 @@ suite =
                     |> ProgramTest.simulateHttpOk "POST" "/api/auth/forgot-password" "{}"
                     |> ProgramTest.expectViewHas
                         [ Selector.attribute (Html.Attributes.attribute "role" "status")
-                        , Selector.text "If that email is registered, a reset link is on its way. Check your inbox."
+                        , Selector.exactText "If that email is registered, a reset link is on its way. Check your inbox."
                         ]
         , test "the acknowledgement is a notice, not helper text" <|
             \() ->
@@ -46,7 +46,7 @@ suite =
                     |> ProgramTest.simulateHttpOk "POST" "/api/auth/forgot-password" "{}"
                     |> ProgramTest.ensureViewHas
                         [ Selector.class "login-card__notice"
-                        , Selector.text "If that email is registered, a reset link is on its way. Check your inbox."
+                        , Selector.exactText "If that email is registered, a reset link is on its way. Check your inbox."
                         ]
                     |> ProgramTest.expectViewHasNot
                         [ Selector.text "If that email is registered, a reset link is on its way. Check your inbox."
@@ -124,7 +124,7 @@ doubleSendIsImpossible =
         \() ->
             askingForALink
                 |> ProgramTest.simulateHttpOk "POST" "/api/auth/forgot-password" "{}"
-                |> ProgramTest.ensureViewHas [ Selector.text "Reset link sent" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Reset link sent" ]
                 |> ProgramTest.update Login.ForgotSubmitted
                 |> ProgramTest.expectHttpRequests "POST"
                     "/api/auth/forgot-password"
@@ -146,7 +146,7 @@ forgotFailureReopensTheButton =
             askingForALink
                 |> ProgramTest.simulateHttpResponse "POST" "/api/auth/forgot-password" Http.NetworkError_
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "The library is unreachable. Check your connection, then try again." ]
+                    [ Selector.exactText "The library is unreachable. Check your connection, then try again." ]
                 |> ProgramTest.update Login.ForgotSubmitted
                 |> ProgramTest.expectHttpRequests "POST"
                     "/api/auth/forgot-password"
@@ -186,7 +186,7 @@ controlStateAfterSend : String -> ( Bool, RemoteData RequestError () )
 controlStateAfterSend email =
     let
         ( withMode, _, _ ) =
-            Login.update (Login.ModeSwitched Login.ForgotPasswordMode) (Login.init Login.Fresh)
+            Login.update (Login.ModeSwitched Login.ForgotPasswordMode) (Login.init Nothing Login.Fresh)
 
         ( withEmail, _, _ ) =
             Login.update (Login.EmailChanged email) withMode

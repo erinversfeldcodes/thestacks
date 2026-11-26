@@ -18,17 +18,13 @@ import Page.Settings.Privacy as Privacy
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers
 import Types.RemoteData exposing (RemoteData(..))
-
-
-seed : { analytics : Bool, writingAssistant : Bool }
-seed =
-    { analytics = False, writingAssistant = False }
 
 
 loadingModel : Privacy.Model
 loadingModel =
-    Privacy.initWithToken (Just "token") seed |> Tuple.first
+    Privacy.initWithToken (Just (TestHelpers.creds "token")) |> Tuple.first
 
 
 hydrated : Api.PrivacySettings
@@ -37,12 +33,13 @@ hydrated =
     , shelves = []
     , consentAnalytics = False
     , consentWritingAssistant = False
+    , consentSearchIndexing = False
     }
 
 
 hydratedModel : Privacy.Model
 hydratedModel =
-    Privacy.update (Privacy.GotPrivacySettings (Ok hydrated)) loadingModel (Just "token")
+    Privacy.update (Privacy.GotPrivacySettings (Ok hydrated)) loadingModel (Just (TestHelpers.creds "token"))
         |> (\( m, _, _ ) -> m)
 
 
@@ -71,12 +68,32 @@ suite =
                     |> Query.fromHtml
                     |> profileSelect
                     |> Query.has [ Selector.disabled True ]
-        , test "while the fetch is in flight both consent toggles are disabled" <|
+        , test "while the fetch is in flight the consent toggles are disabled" <|
             \_ ->
                 Privacy.view loadingModel
                     |> Query.fromHtml
                     |> consentToggles
                     |> Query.each (Query.has [ Selector.disabled True ])
+        , test "⛔ while the fetch is in flight the toggles show 'not yet known', not a definite On/Off" <|
+            -- ⛔ Planted red for the manufactured-value defect. Before the stored
+            -- consent has loaded, the controls must NOT present a recorded
+            -- decision — "off" is a definite value and showing it before the
+            -- fetch answers is the same defect in a new place, made worse by
+            -- save-on-click where the displayed state IS the record. They render
+            -- "—". Revert the view's unknown branch (so a locked toggle shows
+            -- its default On/Off) and this goes red.
+            \_ ->
+                Privacy.view loadingModel
+                    |> Query.fromHtml
+                    |> consentToggles
+                    |> Query.each
+                        (Expect.all
+                            [ Query.has [ Selector.class "toggle--unknown" ]
+                            , Query.has [ Selector.exactText "—" ]
+                            , Query.hasNot [ Selector.class "toggle--on" ]
+                            , Query.hasNot [ Selector.class "toggle--off" ]
+                            ]
+                        )
         , test "once the settings have answered the select is live" <|
             \_ ->
                 Privacy.view hydratedModel
@@ -89,6 +106,14 @@ suite =
                     |> Query.fromHtml
                     |> consentToggles
                     |> Query.each (Query.has [ Selector.disabled False ])
+        , test "once the settings have answered the toggles present a definite state, not '—'" <|
+            -- The positive control for the unknown-state test above: '—' is a
+            -- pre-fetch-only rendering, so a hydrated toggle must never show it.
+            \_ ->
+                Privacy.view hydratedModel
+                    |> Query.fromHtml
+                    |> consentToggles
+                    |> Query.each (Query.hasNot [ Selector.class "toggle--unknown" ])
         , test "a failed fetch keeps the controls inert rather than editing defaults" <|
             \_ ->
                 let
@@ -96,7 +121,7 @@ suite =
                         Privacy.update
                             (Privacy.GotPrivacySettings (Err (Http.BadStatus 500)))
                             loadingModel
-                            (Just "token")
+                            (Just (TestHelpers.creds "token"))
                             |> (\( m, _, _ ) -> m)
                 in
                 Privacy.view failed

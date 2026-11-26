@@ -76,7 +76,7 @@ suite =
                                                 hub
                                                     |> Query.has
                                                         [ Selector.class "settings-hub__group-heading"
-                                                        , Selector.text heading
+                                                        , Selector.exactText heading
                                                         ]
                                         )
                                         expectedGroups
@@ -102,7 +102,7 @@ suite =
                                 Expect.all
                                     (List.map
                                         (\( label, _ ) ->
-                                            \_ -> hub |> Query.has [ Selector.text label ]
+                                            \_ -> hub |> Query.has [ Selector.exactText label ]
                                         )
                                         expectedItems
                                     )
@@ -137,7 +137,7 @@ suite =
                 \_ ->
                     viewFor SettingsNotifications
                         |> Query.find [ ariaCurrentPage ]
-                        |> Query.has [ Selector.text "Notifications" ]
+                        |> Query.has [ Selector.exactText "Notifications" ]
             , test "the current-page marker follows the current route" <|
                 \_ ->
                     viewFor SettingsPrivacy
@@ -147,6 +147,6 @@ suite =
                 \_ ->
                     viewFor SettingsPrivacy
                         |> Query.find [ ariaCurrentPage ]
-                        |> Query.has [ Selector.text "Privacy & consent" ]
+                        |> Query.has [ Selector.exactText "Privacy & consent" ]
             ]
         ]

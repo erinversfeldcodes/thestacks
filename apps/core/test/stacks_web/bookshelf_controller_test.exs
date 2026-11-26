@@ -131,7 +131,7 @@ defmodule StacksWeb.BookshelfControllerTest do
     test "filters out owner-visibility placements from platform-visibility bookshelf", %{
       conn: conn
     } do
-      user = insert(:user)
+      user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       shelf = insert(:shelf, bookshelf: bookshelf)
       book_visible = insert(:book)
@@ -337,7 +337,7 @@ defmodule StacksWeb.BookshelfControllerTest do
 
       for name <- ~w(antilibrary library wishlist reading_pile looking_for_home) do
         conn =
-          build_conn()
+          CoreWeb.ConnCase.proven_conn()
           |> auth_conn(user)
           |> get("/api/bookshelves/#{name}")
 
@@ -595,7 +595,7 @@ defmodule StacksWeb.BookshelfControllerTest do
       assert baseline["count"] == 2
 
       filtered =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(user)
         |> get("/api/bookshelves/library?view_as=unauthenticated")
         |> json_response(200)

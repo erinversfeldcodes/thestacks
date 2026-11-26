@@ -27,9 +27,9 @@ import Test.Html.Selector as Selector
 import TestHelpers
 
 
-token : String
+token : Api.Credentials
 token =
-    "test-token"
+    TestHelpers.creds "test-token"
 
 
 suite : Test
@@ -163,7 +163,7 @@ showsLoadingState =
         \() ->
             start
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Working out what your data reveals..." ]
+                    [ Selector.exactText "Working out what your data reveals..." ]
 
 
 loadAndDisplay : Test
@@ -172,8 +172,8 @@ loadAndDisplay =
         \() ->
             start
                 |> ProgramTest.simulateHttpOk "GET" "/api/me/inferences" defaultPayload
-                |> ProgramTest.ensureViewHas [ Selector.text "No other reader here shares all 5 of your rarest books." ]
-                |> ProgramTest.ensureViewHas [ Selector.text "philosophy, history" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "No other reader here shares all 5 of your rarest books." ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "philosophy, history" ]
                 |> ProgramTest.expectViewHas [ Selector.text "you are a fingerprint" ]
 
 
@@ -183,7 +183,7 @@ riskHiddenUntilRevealed =
         \() ->
             start
                 |> ProgramTest.simulateHttpOk "GET" "/api/me/inferences" defaultPayload
-                |> ProgramTest.ensureViewHas [ Selector.text "Show me what could be inferred" ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "Show me what could be inferred" ]
                 -- ⚠️ Was `Selector.text "A data broker could infer an interest in philosophy from
                 -- your subject clusters."` — a sentence that appears NOWHERE in `frontend/src/`, so
                 -- the assertion could never fail. A **privacy** guarantee (risk illustrations stay
@@ -204,7 +204,7 @@ revealFetchesAndShowsRisk =
                 |> ProgramTest.simulateHttpOk "GET" "/api/me/inferences" defaultPayload
                 |> ProgramTest.clickButton "Show me what could be inferred"
                 |> ProgramTest.simulateHttpOk "GET" "/api/me/inferences?reveal_risk=true" revealPayload
-                |> ProgramTest.ensureViewHas [ Selector.text "A data broker could infer an interest in philosophy from your subject clusters." ]
+                |> ProgramTest.ensureViewHas [ Selector.exactText "A data broker could infer an interest in philosophy from your subject clusters." ]
                 |> ProgramTest.expectViewHas [ Selector.text "not something we assert about you or store anywhere." ]
 
 
@@ -214,7 +214,7 @@ insufficientDataState =
         \() ->
             start
                 |> ProgramTest.simulateHttpOk "GET" "/api/me/inferences" insufficientPayload
-                |> ProgramTest.expectViewHas [ Selector.text "Shelve more books to see how identifiable you are." ]
+                |> ProgramTest.expectViewHas [ Selector.exactText "Shelve more books to see how identifiable you are." ]
 
 
 showsErrorState : Test
@@ -224,4 +224,4 @@ showsErrorState =
             start
                 |> ProgramTest.simulateHttpResponse "GET" "/api/me/inferences" Http.NetworkError_
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "This could not be loaded right now. Please try again." ]
+                    [ Selector.exactText "This could not be loaded right now. Please try again." ]

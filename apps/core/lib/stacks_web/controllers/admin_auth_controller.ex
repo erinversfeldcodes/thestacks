@@ -67,15 +67,20 @@ defmodule StacksWeb.AdminAuthController do
         operator_session_id: session.id
       )
 
-      {:ok, token, _claims} =
-        Guardian.encode_and_sign(user, %{},
-          token_type: "admin",
-          session_id: session.id,
-          boot_id: Core.Application.boot_id(),
-          ttl: {30, :minute}
-        )
-
-      json(conn, %{token: token})
+      # ⛔ NO TOKEN IN THE RESPONSE. `mark_mfa_verified/1` above is the whole
+      # record of the elevation: `AdminAuthPipeline` finds this session from the
+      # authenticated reader, so there is nothing for the client to carry.
+      #
+      # It used to mint a second Guardian token here with a 30-minute TTL, which
+      # the SPA held in memory and nothing persisted — so a reload dropped it
+      # and re-prompted for a code the server had already accepted. A credential
+      # the client cannot keep is worse than no credential: it makes the
+      # server's own record unreachable.
+      #
+      # ⚠️ `verified: true` rather than `%{}`, so the client has something
+      # affirmative to branch on. An empty success body reads the same as a
+      # response whose field the client forgot to decode.
+      json(conn, %{verified: true})
     else
       :already_verified ->
         conn |> put_status(409) |> json(%{error: "already_verified"})

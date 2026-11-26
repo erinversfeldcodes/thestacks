@@ -8,14 +8,25 @@ defmodule Core.PromEx.MetricAudienceTest do
   """
   use ExUnit.Case, async: true
 
+  alias Core.PromEx.ExternalFamilies
   alias Core.PromEx.MetricAudience
   alias Core.PromEx.Plugins.Stacks, as: StacksPlugin
 
+  # ⛔ THE THIRD LAYER THAT HAD TO AGREE. Classifying the billing families as
+  # `:public` made this gate call them STALE, because its universe was also
+  # plugin-only — so the same blind spot appeared in three places: this test,
+  # the drift test, and the completeness test. Each looked like a different
+  # gate and each computed "what exists" the same wrong way.
+  #
+  # ⚖️ One declaration (`Core.PromEx.ExternalFamilies`) now feeds all three,
+  # which is why it is a module and not a literal repeated three times.
   defp registered_families do
-    StacksPlugin.event_metrics([])
-    |> Enum.flat_map(& &1.metrics)
-    |> Enum.map(&Enum.join(&1.name, "_"))
-    |> Enum.uniq()
+    plugin =
+      StacksPlugin.event_metrics([])
+      |> Enum.flat_map(& &1.metrics)
+      |> Enum.map(&Enum.join(&1.name, "_"))
+
+    Enum.uniq(plugin ++ ExternalFamilies.families())
   end
 
   test "every registered family is consciously classified (adding a metric without a classification fails the build)" do

@@ -31,6 +31,73 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
     %{work: work, primary: primary, merged: merged, readers: readers}
   end
 
+  describe "⛔ placements belonging to DIFFERENT users" do
+    test "every affected owner is found, not just the first" do
+      # ⛔ The assertion that distinguishes a per-owner correction from a single
+      # cross-user `update_all`.
+      #
+      # ⚠️ And it is the ONLY half this suite can prove. The test role is a
+      # superuser, so row-level security is bypassed here and a single
+      # un-scoped update would move both users' rows and pass. What this pins
+      # is the fact the correction needs in order to scope at all: that
+      # `op.placement_owners_for_edition/1` reports BOTH owners. If it reported
+      # one, the correction would re-point that user's placements and leave
+      # every other user's naming an edition that no longer means what it did —
+      # reporting a count all the while. The enforced half is driven against
+      # the non-superuser role and recorded in the issue.
+      %{merged: merged} = wrongly_merged()
+
+      first = insert(:placement, book_edition_id: merged.id)
+      second = insert(:placement, book_edition_id: merged.id)
+
+      owner_of = fn placement ->
+        Repo.one(
+          from(bs in Stacks.Shelving.Bookshelf,
+            where: bs.id == ^placement.bookshelf_id,
+            select: bs.user_id
+          )
+        )
+      end
+
+      owners = Enum.map([first, second], owner_of)
+
+      assert length(Enum.uniq(owners)) == 2,
+             "the fixture put both placements under one user, so this test cannot tell a " <>
+               "per-owner correction from a single cross-user update"
+
+      %{rows: rows} =
+        Repo.query!("SELECT user_id FROM op.placement_owners_for_edition($1::uuid)", [merged.id])
+
+      found = Enum.map(rows, fn [raw] -> Ecto.UUID.cast!(raw) end)
+
+      assert Enum.sort(found) == Enum.sort(owners),
+             "the owner lookup reported #{inspect(found)} for an edition held by " <>
+               "#{inspect(owners)} — the correction would scope to a subset of the users it " <>
+               "must touch"
+    end
+
+    test "the correction re-points placements held by both users" do
+      %{merged: merged, work: work} = wrongly_merged()
+
+      first = insert(:placement, book_edition_id: merged.id)
+      second = insert(:placement, book_edition_id: merged.id)
+
+      assert {:ok, %{placements_moved: moved, new_work_id: new_work_id}} =
+               UnmergeEdition.apply_change(%{
+                 id: merged.id,
+                 from: %{work_id: work.id},
+                 to: %{work_title: @new_title, visibility_tier: "public"}
+               })
+
+      assert moved == 2, "expected both owners' placements to move, got #{moved}"
+
+      for placement <- [first, second] do
+        assert Repo.get!(Placement, placement.id).book_id == new_work_id,
+               "a placement was left naming the old work"
+      end
+    end
+  end
+
   defp argument(edition_id, title \\ @new_title),
     do: %{edition_id: edition_id, title: title}
 

@@ -141,4 +141,68 @@ defmodule Stacks.SocialFeedTest do
       refute Enum.any?(items_after, &(&1.user_id == former.id))
     end
   end
+
+  describe "⛔ op.group_feed_placements' own membership guard" do
+    @moduledoc """
+        The second layer, called DIRECTLY — because nothing else reaches it.
+    """
+
+    # ⛔ `feed_for_group/3` refuses a non-member in Elixir and returns 404
+    # before `build_feed/3` runs, so neither the tests above nor a drive
+    # through the controller can execute the definer's own guard. It is the
+    # layer that holds if the Elixir check is ever refactored away, and
+    # without this its first real execution would be its first test.
+    #
+    # ⚠️ Testable here despite the test role being a superuser, and the reason
+    # is worth stating: this guard is plain plpgsql reading a session
+    # variable, NOT a row-level policy. Superusers bypass policies; they do
+    # not bypass a `RAISE` in a function body. So the usual "this suite
+    # cannot observe enforcement" caveat does not apply to this one assertion.
+    test "a scoped NON-member is refused by the function itself", %{group: group} do
+      outsider = insert(:user)
+
+      assert_raise Postgrex.Error, ~r/not a member of this group/, fn ->
+        Core.Repo.transaction(fn ->
+          Core.Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [outsider.id])
+
+          Core.Repo.query!(
+            "SELECT * FROM op.group_feed_placements($1::uuid, ARRAY[]::uuid[], NULL, 20)",
+            [Ecto.UUID.dump!(group.id)]
+          )
+        end)
+      end
+    end
+
+    test "an unscoped caller is refused by the function itself", %{group: group} do
+      # The companion half: no viewer at all. Unlike `op.blocked_pair/2`,
+      # which must fall through for public profile reads, a group feed has no
+      # public surface — so NULL is refused rather than permitted.
+      assert_raise Postgrex.Error, ~r/requires a scoped viewer/, fn ->
+        Core.Repo.transaction(fn ->
+          Core.Repo.query!("SELECT set_config('app.current_user_id', $1, true)", ["anonymous"])
+
+          Core.Repo.query!(
+            "SELECT * FROM op.group_feed_placements($1::uuid, ARRAY[]::uuid[], NULL, 20)",
+            [Ecto.UUID.dump!(group.id)]
+          )
+        end)
+      end
+    end
+
+    test "a scoped MEMBER is served", %{group: group, viewer: viewer} do
+      # The anti-vacuity half: a guard that refused everyone would pass both
+      # cases above while making the feature unusable.
+      assert {:ok, _} =
+               Core.Repo.transaction(fn ->
+                 Core.Repo.query!("SELECT set_config('app.current_user_id', $1, true)", [
+                   viewer.id
+                 ])
+
+                 Core.Repo.query!(
+                   "SELECT * FROM op.group_feed_placements($1::uuid, ARRAY[]::uuid[], NULL, 20)",
+                   [Ecto.UUID.dump!(group.id)]
+                 )
+               end)
+    end
+  end
 end

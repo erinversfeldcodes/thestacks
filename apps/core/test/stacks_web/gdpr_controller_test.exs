@@ -15,8 +15,11 @@ defmodule StacksWeb.GDPRControllerTest do
   import Ecto.Query
   import Stacks.Factory
 
+  alias Core.Repo
+  alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.Guardian
   alias Stacks.Workers.{AccountDeletionJob, DataExportJob, WritingAssistantDataPurgeWorker}
+  alias StacksWeb.Plugs.SessionCookie
 
   defp auth_conn(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
@@ -53,6 +56,108 @@ defmodule StacksWeb.GDPRControllerTest do
 
       assert %{"status" => "accepted"} = json_response(conn, 202)
       assert_enqueued(worker: AccountDeletionJob, args: %{"user_id" => user.id})
+    end
+
+    # ⛔ THE SESSION MUST END ON THE 202, not when the Oban job happens to run.
+    # Before this, `delete_account/2` queued the erasure and returned 202 while the
+    # caller's browser kept a working credential for the account it had just asked
+    # to erase — for as long as the queue took.
+    #
+    # ⚖️ These three assert the three halves separately, because each can be got
+    # right while another is missed: the cookie the browser carries, the token it
+    # presents, and the FAMILY that token belongs to. Revoking only the presented
+    # token leaves every refresh sibling live.
+    test "the 202 clears the session cookie", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> delete("/api/gdpr/account")
+
+      assert %{"status" => "accepted"} = json_response(conn, 202)
+
+      cookie_name = SessionCookie.cookie_name()
+      assert %{^cookie_name => cleared} = conn.resp_cookies
+
+      # ⚠️ MEASURED, NOT ASSUMED. This was first written as `cleared.value == ""`
+      # and failed: a Plug deletion carries NO `:value` key at all, only
+      # `max_age: 0` and a `universal_time` at the epoch. Asserting the shape Plug
+      # actually produces, rather than the serialised `Set-Cookie` text, which
+      # would couple this to Plug's formatting.
+      refute Map.has_key?(cleared, :value)
+      assert cleared.max_age == 0
+      assert cleared.universal_time == {{1970, 1, 1}, {0, 0, 0}}
+
+      # ⛔ And the attributes must survive the clearing: a Set-Cookie that drops
+      # `secure` or `http_only` is a different cookie to the browser, which may
+      # then keep the one it has.
+      assert cleared.http_only
+      assert cleared.secure
+    end
+
+    test "the presented token no longer authenticates", %{conn: conn} do
+      user = insert(:user, email_confirmed: true)
+      {:ok, token, _claims} = Guardian.encode_and_sign(user)
+
+      # ⛔ ANTI-VACUITY, and it is the half that makes the rest mean something: the
+      # token must WORK first. Without this the test below passes against a token
+      # that was never valid, which is indistinguishable from one that was revoked.
+      pre =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert json_response(pre, 200)
+
+      deletion =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> delete("/api/gdpr/account")
+
+      assert json_response(deletion, 202)
+
+      post =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> get("/api/auth/me")
+
+      assert json_response(post, 401)
+    end
+
+    test "the token family is revoked, so a refresh sibling is refused too", %{conn: conn} do
+      insert(:user,
+        email: "deleting-family@example.com",
+        password_hash: Argon2.hash_pwd_salt("secret123"),
+        email_confirmed: true
+      )
+
+      # ⚠️ Through a real LOGIN, because that is what mints the family row. A
+      # `Guardian.encode_and_sign/1` token carries no `family_id`, so a test built
+      # on one would assert the family branch while never entering it.
+      login =
+        post(conn, "/api/auth/login", %{
+          email: "deleting-family@example.com",
+          password: "secret123"
+        })
+
+      assert %{"token" => token} = json_response(login, 200)
+      assert {:ok, claims} = Guardian.decode_and_verify(token)
+      family_id = claims["family_id"]
+      assert is_binary(family_id)
+
+      family_before = Repo.get(AuthTokenFamily, family_id)
+      assert is_nil(family_before.revoked_at)
+
+      deletion =
+        conn
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> delete("/api/gdpr/account")
+
+      assert json_response(deletion, 202)
+
+      family_after = Repo.get(AuthTokenFamily, family_id)
+      refute is_nil(family_after.revoked_at)
     end
 
     test "writes a user.deletion_requested audit row for the acting user, independent of the job",

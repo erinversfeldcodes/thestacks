@@ -83,6 +83,34 @@ sources = [
     p for p in glob.glob(f"{SRC}/**/*.elm", recursive=True) if os.path.isfile(p)
 ]
 
+# ⚠️ ANTI-VACUITY, and this gate exited 0 without it.
+#
+# Both populations come from a glob, so a wrong root, a moved `frontend/src`, a
+# renamed `Components/` directory or a run from the wrong working directory
+# yields two empty sets — and the success path below then prints
+# "OK: all 0 drivable component(s) are dispatched." and exits 0. Measured: run
+# from an empty directory with `git rev-parse` failing so `REPO_ROOT` falls back
+# to `.`, this gate reported exactly that and passed.
+#
+# A count in the success message is not a guard. Nobody reads "all 0".
+#
+# Both halves are checked, because they fail for different reasons: an empty
+# `sources` means the Elm tree is not where this gate looks, while an empty
+# `drivable` means the `exposing`-line parse stopped matching the components it
+# is written for.
+if not sources:
+    print(f"FAIL: found no Elm sources under {SRC}.")
+    print("This gate derives both its populations from that tree, so it cannot")
+    print("report anything meaningful — it would otherwise pass over nothing.")
+    raise SystemExit(1)
+
+if not drivable:
+    print(f"FAIL: found no drivable components under {SRC}/Components.")
+    print("This SPA has components exposing `update`/`updateWithEffect`, so zero")
+    print("means the `exposing`-line parse stopped matching the source, not that")
+    print("the app stopped having components.")
+    raise SystemExit(1)
+
 def local_names_for(body, module):
     """Every name `module` can be called by INSIDE this file.
 

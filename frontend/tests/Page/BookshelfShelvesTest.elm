@@ -26,7 +26,7 @@ import TestHelpers exposing (libraryProgram, namedPlacement, simulateMultiShelfR
 -}
 startLibrary : ProgramTest.ProgramTest Bookshelf.Model Bookshelf.Msg (ProgramTest.SimulatedEffect Bookshelf.Msg)
 startLibrary =
-    ProgramTest.start () (libraryProgram (Just "test-token"))
+    ProgramTest.start () (libraryProgram (Just (TestHelpers.creds "test-token")))
 
 
 {-| Build a shelf API response JSON with the given shelves.

@@ -5,6 +5,8 @@ import Expect
 import Http
 import Page.Login as Login exposing (FieldValidation(..), Msg(..), SubmitError(..))
 import Test exposing (Test, describe, test)
+import Test.Html.Query as Query
+import Test.Html.Selector exposing (text)
 import Types.PasswordRule as PasswordRule
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -30,7 +32,7 @@ registerModelWith : String -> String -> Login.Model
 registerModelWith password confirm =
     let
         ( m1, _, _ ) =
-            Login.update (ModeSwitched Login.RegisterMode) (Login.init Login.Fresh)
+            Login.update (ModeSwitched Login.RegisterMode) (Login.init Nothing Login.Fresh)
 
         ( m2, _, _ ) =
             Login.update (EmailChanged "user@test.com") m1
@@ -54,7 +56,7 @@ validLoginModel : Login.Model
 validLoginModel =
     let
         ( m1, _, _ ) =
-            Login.update (EmailChanged "reader@stacks.dev") (Login.init Login.Fresh)
+            Login.update (EmailChanged "reader@stacks.dev") (Login.init Nothing Login.Fresh)
 
         ( m2, _, _ ) =
             Login.update (PasswordChanged "secret123") m1
@@ -68,17 +70,17 @@ suite =
         [ describe "init"
             [ test "starts in LoginMode" <|
                 \_ ->
-                    (Login.init Login.Fresh).mode |> Expect.equal Login.LoginMode
+                    (Login.init Nothing Login.Fresh).mode |> Expect.equal Login.LoginMode
             , test "starts with NotAsked submit state" <|
                 \_ ->
-                    (Login.init Login.Fresh).submitState |> Expect.equal NotAsked
+                    (Login.init Nothing Login.Fresh).submitState |> Expect.equal NotAsked
             ]
         , describe "field updates"
             [ test "EmailChanged updates email and resets submitState" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (EmailChanged "test@test.com") (Login.init Login.Fresh)
+                            Login.update (EmailChanged "test@test.com") (Login.init Nothing Login.Fresh)
                     in
                     Expect.all
                         [ \m -> m.email |> Expect.equal "test@test.com"
@@ -89,14 +91,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (PasswordChanged "secret") (Login.init Login.Fresh)
+                            Login.update (PasswordChanged "secret") (Login.init Nothing Login.Fresh)
                     in
                     model.password |> Expect.equal "secret"
             , test "DisplayNameChanged updates displayName" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (DisplayNameChanged "Reader") (Login.init Login.Fresh)
+                            Login.update (DisplayNameChanged "Reader") (Login.init Nothing Login.Fresh)
                     in
                     model.displayName |> Expect.equal "Reader"
             ]
@@ -105,14 +107,15 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (ModeSwitched Login.RegisterMode) (Login.init Login.Fresh)
+                            Login.update (ModeSwitched Login.RegisterMode) (Login.init Nothing Login.Fresh)
                     in
                     model.mode |> Expect.equal Login.RegisterMode
             , test "ModeSwitched resets submitState" <|
                 \_ ->
                     let
                         failing =
-                            { email = ""
+                            { proof = Nothing
+                            , email = ""
                             , password = ""
                             , displayName = ""
                             , mode = Login.LoginMode
@@ -135,19 +138,90 @@ suite =
                     in
                     model.submitState |> Expect.equal NotAsked
             ]
+        , describe "the invitation refusal tells the reader which refusal it was"
+            [ -- ⛔ Four server statuses, four messages, and the one that matters
+              -- most is 403. This function previously rendered revoked (403) as
+              -- expired (410) on the reasoning that a reader learns nothing from
+              -- the distinction. They learn the thing that decides what to do
+              -- next: an expired invitation is reissued by asking again and a
+              -- revoked one is not, so "ask for a fresh one" sends someone to ask
+              -- a question already answered and the sender gets to refuse twice.
+              --
+              -- ⚠️ The fix was in place and UNPINNED. Nothing failed if 403
+              -- collapsed back into the 410 branch, and the mapping lives in an
+              -- unexposed function, so this drives the VIEW — what a reader
+              -- actually sees — rather than the mapping in isolation.
+              test "a withdrawn invitation does not read as an expired one" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 403)
+                        |> Query.has [ text "withdrawn" ]
+            , test "an expired invitation says expired, and says a fresh one can be asked for" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 410)
+                        |> Query.has [ text "expired" ]
+            , test "an unrecognised code is not reported as either" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 404)
+                        |> Query.has [ text "don't recognise" ]
+            , test "an already-used invitation says so" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 409)
+                        |> Query.has [ text "already been used" ]
+            , -- The point is DISTINGUISHABILITY, so assert the pair directly:
+              -- a 403 that rendered the 410 copy would satisfy every
+              -- single-status test above except this one.
+              test "the withdrawn message is not the expired message" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 403)
+                        |> Query.hasNot [ text "Ask whoever sent it for a fresh one." ]
+            ]
+        , describe "the two places the invitation refusals are spelled agree"
+            [ -- ⛔ A STATED INVARIANT WITH NO MACHINE HOLDING IT. The second
+              -- mapping's own docstring says "Both mappings must agree", and it
+              -- says so because they once did not: `inviteErrorMessage` stopped
+              -- collapsing revoked onto expired and `inviteRefusalMessage` was
+              -- missed, so the sign-in card said "withdrawn" while the
+              -- registration path still said "expired" for the SAME invitation.
+              --
+              -- ⚠️ Asserting each copy separately would not catch that. Four
+              -- tests on one function and four on the other both pass while the
+              -- two disagree — it is the AGREEMENT that is the property, so that
+              -- is what is asserted: the text a reader sees on the invite card
+              -- must be the exact string the registration path produces for the
+              -- paired reason.
+              test "a withdrawn invitation reads the same on both paths" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 403)
+                        |> Query.has [ text (refusalCopyFor "invite_revoked") ]
+            , test "an expired invitation reads the same on both paths" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 410)
+                        |> Query.has [ text (refusalCopyFor "invite_expired") ]
+            , test "an exhausted invitation reads the same on both paths" <|
+                \_ ->
+                    inviteRefusalView (Http.BadStatus 409)
+                        |> Query.has [ text (refusalCopyFor "invite_exhausted") ]
+            , test "an unrecognised code reads the same on both paths" <|
+                \_ ->
+                    -- The reason-keyed mapping reaches this through its fallback,
+                    -- which is correct: an unknown reason and an unrecognised
+                    -- code are the same situation for the reader.
+                    inviteRefusalView (Http.BadStatus 404)
+                        |> Query.has [ text (refusalCopyFor "something_unmapped") ]
+            ]
         , describe "submit"
             [ test "FormSubmitted sets submitState to Loading" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update FormSubmitted (Login.init Login.Fresh)
+                            Login.update FormSubmitted (Login.init Nothing Login.Fresh)
                     in
                     model.submitState |> Expect.equal Loading
             , test "FormSubmitted produces NoOut" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Login.update FormSubmitted (Login.init Login.Fresh)
+                            Login.update FormSubmitted (Login.init Nothing Login.Fresh)
                     in
                     outMsg |> Expect.equal Login.NoOut
             ]
@@ -156,21 +230,21 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) (Login.init Login.Fresh)
+                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) (Login.init Nothing Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Success fakeAuthResponse)
             , test "persist_first: GotAuthResponse Ok hands the credential up on the SAME update" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) (Login.init Login.Fresh)
+                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) (Login.init Nothing Login.Fresh)
                     in
                     outMsg |> Expect.equal (Login.LoggedIn fakeAuthResponse)
             , test "GotAuthResponse Err sets Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (GotAuthResponse (Err (RequestFailed Http.NetworkError))) (Login.init Login.Fresh)
+                            Login.update (GotAuthResponse (Err (RequestFailed Http.NetworkError))) (Login.init Nothing Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Failure (SubmitHttpError Http.NetworkError))
             ]
@@ -204,7 +278,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (GotAuthResponse (Err (RequestFailed (Http.BadStatus 401)))) (Login.init Login.Fresh)
+                            Login.update (GotAuthResponse (Err (RequestFailed (Http.BadStatus 401)))) (Login.init Nothing Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Failure (SubmitHttpError (Http.BadStatus 401)))
             ]
@@ -243,24 +317,24 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (EmailChanged "nope") (Login.init Login.Fresh)
+                            Login.update (EmailChanged "nope") (Login.init Nothing Login.Fresh)
                     in
                     model.emailValidation |> Expect.equal (Invalid "Please enter a valid email address")
             , test "submit is disabled when email is Invalid" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (EmailChanged "nope") (Login.init Login.Fresh)
+                            Login.update (EmailChanged "nope") (Login.init Nothing Login.Fresh)
                     in
                     Login.isSubmitDisabled model |> Expect.equal True
             , test "submit is disabled when all fields are Pristine" <|
                 \_ ->
-                    Login.isSubmitDisabled (Login.init Login.Fresh) |> Expect.equal True
+                    Login.isSubmitDisabled (Login.init Nothing Login.Fresh) |> Expect.equal True
             , test "submit is enabled when email and password are Valid in LoginMode" <|
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (EmailChanged "user@test.com") (Login.init Login.Fresh)
+                            Login.update (EmailChanged "user@test.com") (Login.init Nothing Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update (PasswordChanged "longpassword") m1
@@ -270,7 +344,7 @@ suite =
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (ModeSwitched Login.RegisterMode) (Login.init Login.Fresh)
+                            Login.update (ModeSwitched Login.RegisterMode) (Login.init Nothing Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update (EmailChanged "user@test.com") m1
@@ -297,7 +371,7 @@ suite =
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (PasswordChanged "longpassword") (Login.init Login.Fresh)
+                            Login.update (PasswordChanged "longpassword") (Login.init Nothing Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update (PasswordConfirmChanged "longpassword") m1
@@ -474,7 +548,7 @@ throttledSignInSuite =
                     ( model, _, _ ) =
                         Login.update
                             (GotAuthResponse (Err (RateLimited (Just 90))))
-                            (Login.init Login.Fresh)
+                            (Login.init Nothing Login.Fresh)
                 in
                 model.submitState |> Expect.equal (Failure (SubmitRateLimited (Just 90)))
         ]
@@ -487,14 +561,14 @@ forgotPasswordModeSuite =
             \_ ->
                 let
                     ( m, _, _ ) =
-                        Login.update (ModeSwitched Login.ForgotPasswordMode) (Login.init Login.Fresh)
+                        Login.update (ModeSwitched Login.ForgotPasswordMode) (Login.init Nothing Login.Fresh)
                 in
                 m.mode |> Expect.equal Login.ForgotPasswordMode
         , test "ForgotSubmitted with an email moves forgotState to Loading" <|
             \_ ->
                 let
                     ( m1, _, _ ) =
-                        Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
+                        Login.update (EmailChanged "reader@test.com") (Login.init Nothing Login.Fresh)
 
                     ( m2, _, _ ) =
                         Login.update ForgotSubmitted m1
@@ -504,14 +578,14 @@ forgotPasswordModeSuite =
             \_ ->
                 let
                     ( m, _, _ ) =
-                        Login.update ForgotSubmitted (Login.init Login.Fresh)
+                        Login.update ForgotSubmitted (Login.init Nothing Login.Fresh)
                 in
                 m.forgotState |> Expect.equal NotAsked
         , test "a successful forgot response shows Success" <|
             \_ ->
                 let
                     ( m1, _, _ ) =
-                        Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
+                        Login.update (EmailChanged "reader@test.com") (Login.init Nothing Login.Fresh)
 
                     ( m2, _, _ ) =
                         Login.update ForgotSubmitted m1
@@ -524,7 +598,7 @@ forgotPasswordModeSuite =
             \_ ->
                 let
                     ( m1, _, _ ) =
-                        Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
+                        Login.update (EmailChanged "reader@test.com") (Login.init Nothing Login.Fresh)
 
                     ( m2, _, _ ) =
                         Login.update ForgotSubmitted m1
@@ -534,3 +608,24 @@ forgotPasswordModeSuite =
                 in
                 m3.forgotState |> Expect.equal (Failure (RequestFailed Http.NetworkError))
         ]
+
+
+{-| The login view with the invitation card holding a refusal, as a reader sees it.
+-}
+inviteRefusalView : Http.Error -> Query.Single Login.Msg
+inviteRefusalView err =
+    let
+        base =
+            Login.init Nothing Login.Fresh
+    in
+    { base | inviteOnly = True, inviteCheck = Failure err, mode = Login.RegisterMode }
+        |> Login.view
+        |> Query.fromHtml
+
+
+{-| The registration path's copy for a server refusal reason, reached through the
+exposed `errorMessage` rather than by exposing the mapping itself.
+-}
+refusalCopyFor : String -> String
+refusalCopyFor reason =
+    Login.errorMessage Login.RegisterMode (SubmitInviteRefused reason)

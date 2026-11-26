@@ -13,7 +13,10 @@ defmodule StacksWeb.VisibilityGrantControllerTest do
   end
 
   defp group_bookshelf(user) do
-    insert(:bookshelf, user: user, visibility: "group")
+    # A group-visibility bookshelf can only exist under an owner whose profile
+    # admits group exposure, so raise the owner to match before creating it.
+    owner = Core.Repo.update!(Ecto.Changeset.change(user, profile_visibility: "platform"))
+    insert(:bookshelf, user: owner, visibility: "group")
   end
 
   describe "POST /api/bookshelves/:bookshelf_id/grants" do
@@ -72,7 +75,7 @@ defmodule StacksWeb.VisibilityGrantControllerTest do
       assert json_response(first, 201)
 
       second =
-        build_conn()
+        CoreWeb.ConnCase.proven_conn()
         |> auth_conn(owner)
         |> post("/api/bookshelves/#{bookshelf.id}/grants", %{user_id: grantee.id})
 
