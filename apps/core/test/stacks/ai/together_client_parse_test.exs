@@ -182,6 +182,19 @@ defmodule Stacks.AI.TogetherClientParseTest do
       assert with_schema.temperature == 0.2
       assert [%{role: "user", content: "p"}] = with_schema.messages
     end
+
+    # Same anti-vacuity stance: the writing assistant runs on its own serverless
+    # model, so prove the `:model` option lands ON THE WIRE, not merely that the
+    # caller passed it. The default must stay the shared module model, or the
+    # association path would silently change model too.
+    test "a :model option overrides the model on the wire; default is the shared model" do
+      default = TogetherClient.completion_body("p", 256, 0.3)
+      overridden = TogetherClient.completion_body("p", 256, 0.3, model: "openai/gpt-oss-120b")
+
+      assert default.model == TogetherClient.model()
+      assert overridden.model == "openai/gpt-oss-120b"
+      refute overridden.model == default.model
+    end
   end
 
   describe "which failures melt the circuit breaker" do

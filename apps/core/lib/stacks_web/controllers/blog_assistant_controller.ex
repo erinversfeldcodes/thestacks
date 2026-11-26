@@ -15,7 +15,6 @@ defmodule StacksWeb.BlogAssistantController do
 
   alias Core.Repo
   alias Stacks.Accounts.Guardian
-  alias Stacks.AI.TogetherClient
   alias Stacks.WritingAssistant.{Assistant, Session}
 
   plug StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"
@@ -70,7 +69,7 @@ defmodule StacksWeb.BlogAssistantController do
           user_id: user_id,
           status: "active",
           topic: "post:#{post_id}",
-          model: TogetherClient.model(),
+          model: Assistant.dialogue_model(),
           started_at: DateTime.utc_now()
         })
 
@@ -80,5 +79,9 @@ defmodule StacksWeb.BlogAssistantController do
   end
 
   defp reason_string({:budget_exceeded, limit}), do: "budget_exceeded:#{limit}"
-  defp reason_string(reason), do: to_string(reason)
+  defp reason_string(reason) when is_binary(reason), do: reason
+  defp reason_string(reason) when is_atom(reason), do: Atom.to_string(reason)
+  # Any other shape (e.g. a parsed upstream error map) must not be rendered raw
+  # into the stream, and must never crash the handler as `to_string/1` did.
+  defp reason_string(_reason), do: "upstream_error"
 end

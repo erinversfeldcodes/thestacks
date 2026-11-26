@@ -5,8 +5,9 @@ defmodule StacksWeb.BlogAssistantControllerTest do
 
   alias Core.Repo
   alias Stacks.Accounts.Guardian
+  alias Stacks.AI.TogetherClient
   alias Stacks.GDPR.Consent
-  alias Stacks.WritingAssistant.Embedding
+  alias Stacks.WritingAssistant.{Assistant, Embedding, Session}
 
   defp authed(conn, user) do
     {:ok, token, _} = Guardian.encode_and_sign(user)
@@ -45,6 +46,20 @@ defmodule StacksWeb.BlogAssistantControllerTest do
       assert conn.resp_body =~ "event: ack"
       assert conn.resp_body =~ "event: message"
       assert conn.resp_body =~ "event: done"
+    end
+
+    test "stamps the session with the dialogue model, not the shared client model",
+         %{conn: conn} do
+      user = insert(:user)
+      Consent.grant_consent(user.id, "writing_assistant")
+
+      conn
+      |> authed(user)
+      |> post("/api/blog/posts/#{Ecto.UUID.generate()}/chat", %{prompt: "hello"})
+
+      session = Repo.get_by(Session, user_id: user.id, status: "active")
+      assert session.model == Assistant.dialogue_model()
+      refute session.model == TogetherClient.model()
     end
 
     test "WITHOUT writing_assistant consent: 403", %{conn: conn} do

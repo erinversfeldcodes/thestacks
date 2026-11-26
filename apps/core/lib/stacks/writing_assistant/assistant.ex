@@ -27,6 +27,12 @@ defmodule Stacks.WritingAssistant.Assistant do
   @model "bge-m3"
   @embedding_version 1
   @default_k 8
+  # The dialogue model runs on its OWN serverless model, set here and read by
+  # both the generation call and the controller's session stamp so the two never
+  # disagree. Deliberately NOT `TogetherClient`'s shared `@model`: that seam also
+  # serves the association worker's `response_format: json_schema` path, measured
+  # against a different model, and must not be repointed from here.
+  @dialogue_model "openai/gpt-oss-120b"
   @abstain "I can point you at the passages that bear on this, but I won't reproduce your prose back to you — tell me what you're trying to work out and I'll help you think it through."
 
   @preconditions [
@@ -53,6 +59,10 @@ defmodule Stacks.WritingAssistant.Assistant do
     end)
   end
 
+  @doc "The serverless chat model the dialogue turns run on (config-overridable)."
+  @spec dialogue_model() :: String.t()
+  def dialogue_model, do: Application.get_env(:core, :writing_assistant_model, @dialogue_model)
+
   @doc """
   Produce one assistant turn. Options: `:k` (retrieved spans, default #{@default_k}).
 
@@ -78,7 +88,7 @@ defmodule Stacks.WritingAssistant.Assistant do
   defp generate(user_id, prompt, opts) do
     spans = retrieve_spans(user_id, prompt, opts)
 
-    case TogetherClient.complete(assemble(prompt, spans)) do
+    case TogetherClient.complete(assemble(prompt, spans), model: dialogue_model()) do
       {:ok, response} -> gate(response, spans)
       {:error, reason} -> {:error, reason}
     end

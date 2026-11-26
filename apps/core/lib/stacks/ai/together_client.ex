@@ -218,7 +218,7 @@ defmodule Stacks.AI.TogetherClient do
   # truncation live in the shared success path unnoticed.
   def completion_body(prompt, max_tokens, temperature, opts \\ []) do
     %{
-      model: @model,
+      model: Keyword.get(opts, :model, @model),
       messages: [%{role: "user", content: prompt}],
       max_tokens: max_tokens,
       temperature: temperature
