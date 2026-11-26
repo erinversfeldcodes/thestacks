@@ -6,3 +6,11 @@ modal==1.5.5
 pytesseract>=0.3.13
 pyzbar==0.1.9
 Pillow==13.0.0
+# Document parsers for /extract-document (CPU-only, no torch). The tests drive
+# the real libs against the anthology fixtures, so CI needs them installed —
+# unlike sentence-transformers, which the /embed tests mock. pymupdf is pinned
+# to the lean 1.x line; the 2.x metapackage drags onnxruntime/numpy that text
+# extraction never uses.
+pymupdf==1.26.7
+python-docx==1.2.0
+ebooklib==0.21

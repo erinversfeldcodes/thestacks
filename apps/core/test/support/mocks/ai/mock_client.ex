@@ -139,6 +139,14 @@ defmodule Stacks.AI.MockClient do
     {:ok, %{"vectors" => vectors, "model" => "bge-m3", "dim" => dim}}
   end
 
+  # /extract-document — a deterministic extracted text so the ingestion pipeline
+  # is exercised without the real parsers (the real extraction is proven by the
+  # vision sidecar's own suite over the public-domain fixtures).
+  defp default_response("extract_document", _payload) do
+    text = "Shall I compare thee to a summer's day? Thou art more lovely and more temperate."
+    {:ok, %{"text" => text, "char_count" => String.length(text)}}
+  end
+
   defp default_response(_endpoint, _payload), do: {:ok, %{}}
 
   defp payload_isbn(payload) when is_map(payload) do

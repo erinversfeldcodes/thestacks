@@ -222,6 +222,15 @@ defmodule CoreWeb.Router do
          :reject_identification
   end
 
+  # Writing-assistant corpus: import the author's own unpublished writing and
+  # annotate it. Consent-gated (writing_assistant) inside the controller.
+  scope "/api", StacksWeb do
+    pipe_through [:api, :authenticated, :rate_limit_upload]
+    post "/writing/import", WritingController, :import
+    post "/writing/works/:work_id/annotations", WritingController, :annotate_work
+    post "/writing/chunks/:embedding_id/annotations", WritingController, :annotate_chunk
+  end
+
   scope "/api", StacksWeb do
     # ⛔ AUTHENTICATED AND RATE-LIMITED, like the two endpoints that bracket it.
     #

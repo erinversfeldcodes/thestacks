@@ -70,6 +70,9 @@ in-scope POST /api/upload/:image_id/commit
 in-scope POST /api/upload/:image_id/reject-identification
 in-scope POST /api/upload/init
 in-scope POST /api/users/:id/block
+in-scope POST /api/writing/chunks/:embedding_id/annotations
+in-scope POST /api/writing/import
+in-scope POST /api/writing/works/:work_id/annotations
 in-scope PUT /api/admin/books/:id/age-gate
 in-scope PUT /api/admin/partners/:id/approve
 in-scope PUT /api/admin/partners/:id/reject

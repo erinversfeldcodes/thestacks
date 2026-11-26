@@ -21,12 +21,16 @@ from app.proto.gen.vision import (
     EmbeddingVector,
     EmbedRequest,
     EmbedResponse,
+    ExtractDocumentRequest,
+    ExtractDocumentResponse,
     ExtractedBook,
     GpuDispatch,
     OcrAttempt,
     StageTimings,
 )
 from app.services.cover_text import CoverText, read_cover_text
+from app.services.document_extract import UnsupportedFormatError
+from app.services.document_extract import extract as extract_document
 from app.services.hmac_auth import verify_hmac
 from app.services.local_ocr import local_isbn_scan
 from app.services.text_embed import embed_texts
@@ -674,3 +678,57 @@ async def embed(body: EmbedRequest) -> EmbedResponse:
         model=model,
         dim=dim,
     )
+
+
+@app.post(
+    "/extract-document",
+    response_model=ExtractDocumentResponse,
+    status_code=200,
+    dependencies=[Depends(verify_hmac)],
+)
+async def extract_document_endpoint(body: ExtractDocumentRequest) -> ExtractDocumentResponse:
+    """Parse an uploaded document to plain text on the CPU front door — NO GPU
+    dispatch, ever, and the bytes are never persisted past this call.
+
+    Backs writing-assistant ingestion of the author's OWN unpublished writing
+    (PDF / ePub / DOCX / Markdown / plain text): base64-decode `content`, parse
+    it by `format`, return the text with its character count. HMAC-gated
+    identically to /analyze and /embed.
+
+    ⚖️ THREE DETERMINISTIC REJECTIONS, each MALFORMED_REQUEST — resending the
+    same request cannot make any of them valid: an empty `content`, a `content`
+    that is not valid base64, and a `format` outside the supported set. A known
+    format whose bytes carry no extractable text is NOT one of these — it
+    returns text="" / char_count=0, and the caller catches the zero count (per
+    the contract) as a parse failure, so it is a 200, not an error.
+
+    ⚖️ The parse runs in a worker thread (`asyncio.to_thread`), off the ASGI
+    event loop — PDF and epub parsing is CPU-bound, the same offload the
+    barcode / cover-text / embed paths take.
+    """
+    if not body.content:
+        raise _vision_error(_ERR_MALFORMED_REQUEST, "'content' must not be empty")
+
+    try:
+        content_bytes = base64.b64decode(body.content, validate=True)
+    except Exception as exc:
+        raise _vision_error(_ERR_MALFORMED_REQUEST, "'content' is not valid base64") from exc
+
+    if not content_bytes:
+        raise _vision_error(_ERR_MALFORMED_REQUEST, "'content' decoded to empty bytes")
+
+    log = logger.bind(endpoint="/extract-document", format=body.format, bytes=len(content_bytes))
+
+    extract_started = time.monotonic()
+    try:
+        text, char_count = await asyncio.to_thread(extract_document, content_bytes, body.format)
+    except UnsupportedFormatError as exc:
+        raise _vision_error(_ERR_MALFORMED_REQUEST, str(exc)) from exc
+
+    log.info(
+        "extract-document complete",
+        char_count=char_count,
+        extract_ms=_elapsed_ms(extract_started),
+    )
+
+    return ExtractDocumentResponse(text=text, char_count=char_count)

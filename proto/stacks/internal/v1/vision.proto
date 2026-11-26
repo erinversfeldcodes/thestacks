@@ -459,3 +459,29 @@ message EmbedResponse {
   // the column width before a write.
   int32 dim = 3 [json_name = "dim"];
 }
+
+// POST /extract-document — parse an uploaded document to plain text on the CPU
+// front door, NO GPU dispatch. Backs the writing-assistant ingestion of the
+// author's OWN unpublished writing (PDF / ePub / DOCX / Markdown / plain text).
+//
+// The bytes are decoded, parsed, and the text returned; the document itself is
+// never persisted past extraction — the caller chunks the text, embeds it, and
+// discards the original, keeping the retention surface to the encrypted chunks.
+message ExtractDocumentRequest {
+  // The document, base64-encoded (JSON on the wire) — the same shape
+  // AnalyzeRequest's `image` uses.
+  string content = 1 [json_name = "content"];
+
+  // The source format, lowercased: "pdf" | "epub" | "docx" | "md" | "txt".
+  string format = 2 [json_name = "format"];
+}
+
+// Response from POST /extract-document.
+message ExtractDocumentResponse {
+  // The extracted plain text, ready to chunk and embed.
+  string text = 1 [json_name = "text"];
+
+  // Character count of `text`, a cheap caller-side check before a write: a zero
+  // count on a non-empty document is a parse failure the caller must catch.
+  int32 char_count = 2 [json_name = "char_count"];
+}

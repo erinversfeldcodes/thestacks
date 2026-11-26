@@ -92,7 +92,14 @@ defmodule Stacks.WritingAssistant.Embedder do
     [title, body] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join("\n\n")
   end
 
-  defp embed_and_write(source_type, source_id, user_id, %{text: text} = source) do
+  @doc """
+      Chunk `source.text`, embed the chunks on the CPU `/embed` front door, and
+      write the encrypted rows for one source, replacing any it had before.
+      Shared by `embed_source/3` (shelf/post) and the imported-writing ingestion.
+      The caller must already have established the user scope
+      (`Stacks.Scope.with_user/2`).
+  """
+  def embed_and_write(source_type, source_id, user_id, %{text: text} = source) do
     chunks = chunk(text)
 
     case AIClient.call_vision("embed", %{texts: Enum.map(chunks, &elem(&1, 0)), model: @model}) do

@@ -107,6 +107,7 @@ defmodule Stacks.AI.Client do
   defp endpoint_path("is_book"), do: "analyze"
   defp endpoint_path("analyze"), do: "analyze"
   defp endpoint_path("embed"), do: "embed"
+  defp endpoint_path("extract_document"), do: "extract-document"
 
   defp endpoint_path(other) do
     raise ArgumentError, "unknown vision endpoint: #{inspect(other)}"

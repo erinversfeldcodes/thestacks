@@ -699,6 +699,17 @@ _fastapi_image = (
         # loop), so container start stays fast and a front door that never
         # embeds never pays for the model.
         "sentence-transformers==3.3.1",
+        # ⬛ DOCUMENT PARSERS FOR /extract-document, CPU-ONLY, NO TORCH. The
+        # writing-assistant ingests the author's own PDF/ePub/DOCX/Markdown on
+        # this warm front door, parsed to plain text with no GPU wake. Each is a
+        # self-contained parser: `pymupdf` is a ~22MB binary wheel (the lean 1.x
+        # line — the 2.x metapackage drags onnxruntime, which text extraction
+        # never needs), `python-docx` and `ebooklib` pull only `lxml`. They are
+        # imported lazily inside app/services/document_extract.py, so a front
+        # door that never extracts a document never pays to load them.
+        "pymupdf==1.26.7",
+        "python-docx==1.2.0",
+        "ebooklib==0.21",
     )
     .add_local_dir(str(_VISION_DIR / "app"), remote_path="/app/app")
 )
