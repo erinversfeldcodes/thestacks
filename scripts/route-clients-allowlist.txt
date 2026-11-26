@@ -71,3 +71,4 @@
 /api/writing/import                             server-route-not-SPA: the author's writing corpus is imported by a local tool that writes through the API; no in-app importer exists yet
 /api/writing/works/:work_id/annotations         server-route-not-SPA: corpus annotations are authored by the same local tool through the API; no in-app annotation surface exists yet
 /api/writing/chunks/:embedding_id/annotations   server-route-not-SPA: per-chunk annotations authored by the local tool through the API, as above
+/api/blog/posts/:id/chat                        deliberate-dark: the author chats with the writing assistant; its client is the Elm editor side panel, built behind this endpoint and not yet on the router

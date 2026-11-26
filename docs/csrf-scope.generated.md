@@ -38,6 +38,7 @@ in-scope POST /api/auth/register
 in-scope POST /api/auth/resend-confirmation
 in-scope POST /api/auth/reset-password
 in-scope POST /api/blog/posts
+in-scope POST /api/blog/posts/:id/chat
 in-scope POST /api/blog/posts/:id/publish
 in-scope POST /api/blog/posts/:id/syndications
 in-scope POST /api/books/:id/merge-format

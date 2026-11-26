@@ -229,6 +229,7 @@ defmodule CoreWeb.Router do
     post "/writing/import", WritingController, :import
     post "/writing/works/:work_id/annotations", WritingController, :annotate_work
     post "/writing/chunks/:embedding_id/annotations", WritingController, :annotate_chunk
+    post "/blog/posts/:id/chat", BlogAssistantController, :chat
   end
 
   scope "/api", StacksWeb do
