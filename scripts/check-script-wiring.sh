@@ -27,6 +27,13 @@ MODE = sys.argv[1].lstrip("-")
 # Manual tools with no automated caller. Every entry carries its reason; a
 # stale entry (the script gained a caller, or vanished) fails the gate.
 ALLOWLIST = {
+    "scripts/check-assistant-promoted.sh": (
+        "The Writing Assistant eval merge gate. Deliberately NOT wired into just verify/ci: it "
+        "stays RED while the golden set + baseline are the dummy placeholder that unblocks "
+        "development, and goes GREEN only once the owner's real golden set is authored and a real "
+        "baseline recorded. Wiring it into the dev gates would red the branch on data the owner "
+        "has not provided yet; it is run before merge to main (by finalize-pr or by hand)."
+    ),
     "scripts/characterise/drive-cost-burst.py": (
         "The direct-Modal cost-burst driver — the missing half of the cost loop's tooling "
         "(packed + spaced GPU bursts that price the scaledown window). Deliberately manual: it "
