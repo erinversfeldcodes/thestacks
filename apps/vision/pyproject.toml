@@ -38,7 +38,7 @@ ignore_missing_imports = true
 # is how two unused-ignore errors and an untested cold-start reading sat in the
 # file that holds the money measurement.
 [[tool.mypy.overrides]]
-module = ["transformers.*", "torch.*", "qwen_vl_utils.*"]
+module = ["transformers.*", "torch.*", "qwen_vl_utils.*", "peft.*", "datasets.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
