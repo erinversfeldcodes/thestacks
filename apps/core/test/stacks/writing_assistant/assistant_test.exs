@@ -1,3 +1,11 @@
+defmodule RaisingEmbedClient do
+  @moduledoc false
+  # Stands in for the vision client when the embed endpoint is unreachable: the
+  # real client raises (not returns) on a malformed/empty service URL.
+  def call_vision(_endpoint, _payload),
+    do: raise(ArgumentError, "scheme is required for url: /embed")
+end
+
 defmodule Stacks.WritingAssistant.AssistantTest do
   @moduledoc """
       The response pipeline wires every precondition: the ghost-writing refusal
@@ -50,5 +58,19 @@ defmodule Stacks.WritingAssistant.AssistantTest do
     assert "the moors were cold and misty at dawn" in result.spans
     assert is_binary(result.response)
     assert is_boolean(result.grounded)
+  end
+
+  test "an embed failure degrades to an ungrounded turn, never a crash after the ack" do
+    user = insert(:user)
+    seed_chunk(user.id, "the moors were cold and misty at dawn")
+    prev = Application.get_env(:core, :vision_client)
+    Application.put_env(:core, :vision_client, RaisingEmbedClient)
+    on_exit(fn -> Application.put_env(:core, :vision_client, prev) end)
+
+    {:ok, result} = Assistant.respond(user.id, "What were the moors like?")
+
+    assert is_binary(result.response)
+    assert result.spans == []
+    refute result.grounded
   end
 end

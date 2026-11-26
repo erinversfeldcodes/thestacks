@@ -24,6 +24,8 @@ defmodule Stacks.WritingAssistant.Assistant do
   alias Stacks.AI.{Budget, Client, TogetherClient}
   alias Stacks.WritingAssistant.{OutputGate, Retrieval, SafetyPass}
 
+  require Logger
+
   @model "bge-m3"
   @embedding_version 1
   @default_k 8
@@ -114,6 +116,17 @@ defmodule Stacks.WritingAssistant.Assistant do
       {:ok, %{"vectors" => [%{"values" => vector} | _]}} -> {:ok, vector}
       _ -> :error
     end
+  rescue
+    # A vision outage — or an unset service URL — must degrade to an ungrounded
+    # turn, never take the chat down after the ack. `retrieve_spans/3` already
+    # treats `:error` as "no spans"; this carries a RAISED failure there too,
+    # since the embed call raises (not returns) on a malformed/empty URL.
+    e ->
+      Logger.warning(
+        "writing-assistant embed failed, serving ungrounded: #{Exception.message(e)}"
+      )
+
+      :error
   end
 
   defp assemble(prompt, spans) do
